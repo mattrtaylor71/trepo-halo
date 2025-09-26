@@ -1,0 +1,185 @@
+/* General Styles */
+body {
+    margin: 0;
+    font-family: 'Montserrat', sans-serif;
+    background-color: #f8f2e9;
+    color: #333;
+}
+
+a {
+    text-decoration: none;
+    color: inherit;
+}
+
+/* Navigation Bar */
+.navbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: #fff;
+    padding: 10px 20px;
+    border-bottom: 1px solid #333;
+}
+
+.nav-left {
+    display: flex;
+    align-items: center;
+}
+
+.navbar .logo {
+    height: 40px;
+}
+
+.navbar .nav-links {
+    list-style: none;
+    display: flex;
+    gap: 15px;
+}
+
+.navbar .nav-links nav ul li a {
+    color: #ffffff;
+    text-decoration: none;
+    padding: 5px 10px;
+}
+
+.navbar .nav-links nav ul li a.active {
+    border-bottom: 2px solid #007AFF;
+}
+
+/* Hero Section */
+.hero {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    height: 100vh;
+    padding: 100px 80px;
+}
+
+/* Form Container */
+.form-container {
+    flex: 1;
+    max-width: 400px;
+    padding-right: 40px;
+}
+
+.form-container h2 {
+    font-size: 28px;
+    margin-bottom: 20px;
+    font-weight: 600;
+    color: #222;
+}
+
+.form-container form {
+    display: flex;
+    flex-direction: column;
+}
+
+.form-container label {
+    font-size: 16px;
+    margin-bottom: 5px;
+    color: #555;
+}
+
+.form-container input {
+    padding: 10px;
+    margin-bottom: 20px;
+    border-radius: 5px;
+    border: 1px solid #ccc;
+    font-size: 16px;
+}
+
+.form-actions {
+    display: flex;
+    gap: 10px;
+}
+
+.form-actions .btn {
+    padding: 10px 20px;
+    background-color: #00b5e2;
+    color: white;
+    border: none;
+    border-radius: 5px;
+    font-size: 16px;
+    cursor: pointer;
+}
+
+.form-actions .btn.secondary-btn {
+    background-color: #555;
+}
+
+.form-actions .btn:hover {
+    background-color: #005bb5;
+}
+
+.form-actions .secondary-btn:hover {
+    background-color: #333;
+}
+
+/* Hero Image */
+.hero-image {
+    flex: 1;
+    text-align: center;
+}
+
+.hero-image img {
+    width: 100%;
+    max-width: 400px;
+    height: auto;
+    object-fit: cover;
+}
+
+/* Logo Styling */
+.logo img {
+    height: 50px;
+    width: auto;
+}
+
+/* Additional styles for the login button inside the form container */
+#auth-button {
+    margin-top: 20px;
+    padding: 10px 20px;
+    background-color: #00b5e2;
+    color: white;
+    border: none;
+    border-radius: 5px;
+    font-size: 16px;
+    cursor: pointer;
+    display: inline-block;
+    text-align: center;
+}
+
+#auth-button:hover {
+    background-color: #005bb5;
+}
+/* Hide navigation links initially */
+#auth-links {
+    display: none;
+}
+
+/* Hide user profile section initially */
+.hidden {
+    display: none;
+}
+
+/* User profile section */
+# profile {
+    padding: 20px;
+    background-color: #f0f4f8;
+    border-radius: 8px;
+    margin: 20px;
+}
+
+#profile-data {
+    font-family: monospace;
+    font-size: 14px;
+    color: #333;
+}
+
+#desktop-message {
+    display: none;
+    text-align: center;
+    margin: 20%;
+    font-size: 1.5rem;
+    color: #333;
+}
+

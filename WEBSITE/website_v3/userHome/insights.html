@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <!-- Google tag (gtag.js) -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-Z6BZ81YYV5"></script>
+    <script>
+      window.dataLayer = window.dataLayer || [];
+      function gtag(){dataLayer.push(arguments);}
+      gtag('js', new Date());
+
+      gtag('config', 'G-Z6BZ81YYV5');
+    </script>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
+    <link rel="shortcut icon" type="image/png" href="https://animaproject.s3.amazonaws.com/home/favicon.png" />
+    <meta name="og:type" content="website" />
+    <meta name="twitter:card" content="photo" />
+    <link rel="stylesheet" type="text/css" href="css/insights.css?v=20250113.1980 " />
+    <link rel="stylesheet" type="text/css" href="css/styleguide.css?v=20250108.1014" />
+    <link rel="stylesheet" type="text/css" href="css/globals.css?v=20250108.1018" />
+    <link rel="stylesheet" type="text/css" href="css/overlays.css" />
+    <link rel="stylesheet" type="text/css" href="css/desktop.css?v=20250108.1200" />
+    <style>
+      @font-face {
+        font-family: 'Violet Sans-Regular';
+        src: url('fonts/VioletSans-Regular.otf') format('opentype');
+        font-weight: normal;
+        font-style: normal;
+      }
+    </style>
+    <title>Your Grocery Hub</title>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="js/insights.js?v=20250108.1016"></script>
+  </head>
+  <body style="margin: 0; background: #F8F7F2">
+    <input type="hidden" id="anPageName" name="page" value="insights" />
+    <div class="container-center-horizontal">
+      <div class="insights screen">
+        
+        <!-- Top Navigation Bar -->
+        <div class="top-nav">
+          <div class="nav-left">
+            <div class="hamburger-menu">☰</div>
+            <a href="index.html" class="trepo-link">
+              <div class="trepo">TREPO</div>
+            </a>
+            <a href="index.html" class="back-link">← All stores</a>
+          </div>
+          
+          <div class="nav-center">
+            <div class="search-container">
+              <div class="search-icon">🔍</div>
+              <input type="text" class="search-input" placeholder="Try 'what should I cook for dinner tonight?'" />
+            </div>
+          </div>
+          
+          <div class="nav-right">
+            <div class="delivery-toggle">
+              <button class="toggle-btn active">Delivery</button>
+              <button class="toggle-btn">Pickup</button>
+            </div>
+            <div class="location-info">
+              <span class="location-icon">📍</span>
+              <span class="location-text">Your Location</span>
+            </div>
+            <div class="delivery-time">
+              <span class="time-icon">⚡</span>
+              <span class="time-text">Ready in 30 min</span>
+            </div>
+            <div class="info-icon">ℹ️</div>
+            <div class="user-profile">👤</div>
+            <div class="cart-icon">
+              <span class="cart-count">0</span>
+              🛒
+            </div>
+          </div>
+        </div>
+
+        <!-- Main Layout Container -->
+        <div class="main-layout">
+          
+          <!-- Left Sidebar -->
+          <div class="sidebar">
+            <!-- Store Info -->
+            <div class="store-info">
+              <div class="store-logo">🛒</div>
+              <h2 class="store-name">Your Grocery Hub</h2>
+              <div class="store-details">
+                <p>Smart recommendations</p>
+                <p>Personalized insights</p>
+                <p>AI-powered suggestions</p>
+              </div>
+            </div>
+
+            <!-- Navigation Menu -->
+            <nav class="nav-menu">
+              <a href="#" class="nav-item active">
+                <span class="nav-icon">🏠</span>
+                <span class="nav-text">Insights</span>
+              </a>
+              <a href="week.html" class="nav-item">
+                <span class="nav-icon">📅</span>
+                <span class="nav-text">Week</span>
+              </a>
+              <a href="shopping.html" class="nav-item">
+                <span class="nav-icon">🛍️</span>
+                <span class="nav-text">Shopping</span>
+              </a>
+              <a href="beeps.html" class="nav-item">
+                <span class="nav-icon">🎯</span>
+                <span class="nav-text">Points</span>
+              </a>
+            </nav>
+
+            <!-- Categories -->
+            <div class="categories-section">
+              <h3 class="categories-title">Browse Categories</h3>
+              <div class="category-list">
+                <a href="#" class="category-item">🛒 Items You're Out Of</a>
+                <a href="#" class="category-item">🍽️ Meal Planning</a>
+                <a href="#" class="category-item">👨‍🍳 Recipe Recommendations</a>
+                <a href="#" class="category-item">💡 Smart Recommendations</a>
+                <a href="#" class="category-item">📝 Shopping List</a>
+                <a href="#" class="category-item">🤖 AI Assistant</a>
+              </div>
+            </div>
+          </div>
+
+          <!-- Main Content Area -->
+          <div class="main-content">
+            
+            <!-- Welcome Banner -->
+            <div class="welcome-banner">
+              <h1>Welcome back, Sarah! 👋</h1>
+              <p>Let's make your grocery shopping experience amazing today.</p>
+            </div>
+
+            <!-- Quick Stats Row -->
+            <div class="stats-row">
+              <div class="stat-item">
+                <div class="stat-number">12</div>
+                <div class="stat-label">Items in cart</div>
+              </div>
+              <div class="stat-item">
+                <div class="stat-number">$47.89</div>
+                <div class="stat-label">Estimated total</div>
+              </div>
+              <div class="stat-item">
+                <div class="stat-number">85%</div>
+                <div class="stat-label">Health score</div>
+              </div>
+            </div>
+
+            <!-- Items You're Out Of Section -->
+            <div class="content-section">
+              <div class="section-header">
+                <h2>🛒 Items You're Out Of</h2>
+                <p>Based on your consumption patterns</p>
+                <a href="#" class="view-all">View all →</a>
+              </div>
+              <div class="horizontal-scroll">
+                <div class="scroll-container" id="out-of-items">
+                  <!-- Items will be populated by JavaScript -->
+                </div>
+                <button class="scroll-btn scroll-left">‹</button>
+                <button class="scroll-btn scroll-right">›</button>
+              </div>
+            </div>
+
+            <!-- Meal Planning Section -->
+            <div class="content-section">
+              <div class="section-header">
+                <h2>🍽️ This Week's Meal Plan</h2>
+                <p>Personalized based on your preferences</p>
+                <a href="#" class="view-all">View all →</a>
+              </div>
+              <div class="horizontal-scroll">
+                <div class="scroll-container" id="meal-plan">
+                  <!-- Meal plan will be populated by JavaScript -->
+                </div>
+                <button class="scroll-btn scroll-left">‹</button>
+                <button class="scroll-btn scroll-right">›</button>
+              </div>
+            </div>
+
+            <!-- Recipe Recommendations Section -->
+            <div class="content-section">
+              <div class="section-header">
+                <h2>👨‍🍳 Recipe Recommendations</h2>
+                <p>Perfect for your dietary preferences</p>
+                <a href="#" class="view-all">View all →</a>
+              </div>
+              <div class="horizontal-scroll">
+                <div class="scroll-container" id="recipe-recommendations">
+                  <!-- Recipes will be populated by JavaScript -->
+                </div>
+                <button class="scroll-btn scroll-left">‹</button>
+                <button class="scroll-btn scroll-right">›</button>
+              </div>
+            </div>
+
+            <!-- Smart Recommendations Section -->
+            <div class="content-section">
+              <div class="section-header">
+                <h2>💡 Smart Recommendations</h2>
+                <p>Items you might love based on your history</p>
+                <a href="#" class="view-all">View all →</a>
+              </div>
+              <div class="horizontal-scroll">
+                <div class="scroll-container" id="smart-recommendations">
+                  <!-- Recommendations will be populated by JavaScript -->
+                </div>
+                <button class="scroll-btn scroll-left">‹</button>
+                <button class="scroll-btn scroll-right">›</button>
+              </div>
+            </div>
+
+            <!-- Shopping List Section -->
+            <div class="content-section">
+              <div class="section-header">
+                <h2>📝 Your Shopping List</h2>
+                <p>Organized by category for easy shopping</p>
+                <a href="#" class="view-all">View all →</a>
+              </div>
+              <div class="shopping-list-container" id="shopping-list">
+                <!-- Shopping list will be populated by JavaScript -->
+              </div>
+            </div>
+
+            <!-- AI Assistant Section -->
+            <div class="content-section">
+              <div class="section-header">
+                <h2>🤖 Need help with your shopping?</h2>
+                <p>Ask me anything about meal planning, recipes, or grocery recommendations!</p>
+              </div>
+              <div class="ai-assistant-container">
+                <div class="chat-interface">
+                  <textarea
+                    id="user-input"
+                    class="chat-input"
+                    rows="1"
+                    placeholder="E.g. 'What should I cook for dinner tonight?' or 'Find me healthy snack alternatives'"
+                  ></textarea>
+                  <button class="chat-button" onclick="getAIResponse()">Ask</button>
+                </div>
+                <div id="chatbot-loading" style="display: none; margin-top: 10px; text-align: center;">
+                  <div class="spinner"></div>
+                </div>
+                <div id="chatbot-response" class="chatbot-response-box"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="overlay" class="overlay" style="display: none;">
+        <div class="overlay-content">
+            <!-- Content will be dynamically inserted here -->
+        </div>
+    </div>
+
+    <script src="js/insights.js?v=20250115.2177"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  </body>
+</html>

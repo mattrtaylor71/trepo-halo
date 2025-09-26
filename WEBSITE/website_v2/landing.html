@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>TREPO</title>
+    <style>
+        @font-face {
+            font-family: 'Violet Sans';
+            src: url('fonts/VioletSans.woff2') format('woff2'),
+                 url('fonts/VioletSans.woff') format('woff');
+            font-weight: 700;
+            font-style: normal;
+            font-display: swap;
+        }
+
+        :root {
+            --primary-color: #1D4509;
+            --secondary-color: #D3FBA2;
+            --accent-color: #FFFFFF;
+            --text-color: #FFFFFF;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif;
+            line-height: 1.47059;
+            font-weight: 400;
+            letter-spacing: -0.022em;
+            color: var(--text-color);
+            background: var(--primary-color);
+            -webkit-font-smoothing: antialiased;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .container {
+            text-align: center;
+            padding: 20px;
+            max-width: 800px;
+        }
+
+        .logo {
+            font-family: 'Violet Sans', Arial, sans-serif;
+            font-size: 220px;
+            font-weight: 700;
+            margin-bottom: 30px;
+            color: var(--secondary-color);
+        }
+
+        .hero h1 {
+            font-family: 'Playfair Display', serif;
+            font-size: 36px;
+            line-height: 1.1;
+            font-weight: 600;
+            letter-spacing: -0.02em;
+            margin-bottom: 24px;
+            color: var(--accent-color);
+        }
+
+        .hero p {
+            font-size: 24px;
+            line-height: 1.4;
+            font-weight: 400;
+            letter-spacing: .008em;
+            color: rgba(255, 255, 255, 0.9);
+            margin-bottom: 40px;
+            max-width: 600px;
+            margin-left: auto;
+            margin-right: auto;
+        }
+
+        .cta-button {
+            display: inline-block;
+            background: transparent;
+            color: white;
+            padding: 18px 31px;
+            font-size: 17px;
+            font-weight: 500;
+            letter-spacing: -0.022em;
+            text-decoration: none;
+            transition: all 0.3s ease;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 4px;
+        }
+
+        .cta-button:hover {
+            background: rgba(255, 255, 255, 0.1);
+            transform: translateY(-2px);
+        }
+
+        @media (max-width: 768px) {
+            .logo {
+                font-size: 56px;
+            }
+
+            .hero h1 {
+                font-size: 28px;
+            }
+
+            .hero p {
+                font-size: 20px;
+            }
+        }
+
+        @media (max-width: 480px) {
+            .logo {
+                font-size: 48px;
+            }
+
+            .hero h1 {
+                font-size: 24px;
+            }
+
+            .cta-button {
+                padding: 14px 24px;
+                font-size: 16px;
+            }
+        }
+    </style>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Montserrat:wght@700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="container">
+        <div class="logo">TREPO</div>
+        <div class="hero">
+            <h1>Consumption. Reimagined.</h1>
+            <p>The invisible data layer that reveals consumer intent before it happens.</p>
+            <a href="#demo" class="cta-button">Request Access</a>
+        </div>
+    </div>
+
+    <script>
+        // Easter egg
+        window.addEventListener('keydown', (e) => {
+            if (e.key === 'u' && e.ctrlKey) {
+                console.log('The future belongs to those who can see the invisible patterns.');
+            }
+        });
+    </script>
+</body>
+</html> 

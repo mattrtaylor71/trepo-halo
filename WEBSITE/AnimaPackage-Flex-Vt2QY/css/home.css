@@ -1,0 +1,69 @@
+/* screen - home */
+
+.home {
+  align-items: flex-start;
+  background-color: var(--white);
+  display: flex;
+  flex-direction: column;
+  height: 852px;
+  padding: 28px 20px;
+  width: 393px;
+}
+
+.home .trepo {
+  letter-spacing: -0.40px;
+  line-height: normal;
+  min-height: 20px;
+  white-space: nowrap;
+}
+
+.home .healthier-eating-ev {
+  color: #21500a;
+  font-family: var(--font-family-violet_sans-regular);
+  font-size: var(--font-size-xxxxl);
+  font-weight: 400;
+  line-height: 43.2px;
+  margin-top: 168px;
+  min-height: 129px;
+  width: 327px;
+}
+
+.home .span0 {
+  letter-spacing: -0.26px;
+}
+
+.home .span1 {
+  letter-spacing: 0;
+}
+
+.home .frame-46 {
+  align-items: center;
+  background-color: var(--reef);
+  border-radius: 2px;
+  cursor: pointer;
+  display: inline-flex;
+  gap: 10px;
+  justify-content: center;
+  margin-top: 49px;
+  overflow: hidden;
+  padding: 15px 50px;
+  position: relative;
+}
+
+.home .dont-have-an-accoun {
+  cursor: pointer;
+  letter-spacing: -0.28px;
+  line-height: normal;
+  margin-top: 47px;
+  min-height: 14px;
+  white-space: nowrap;
+}
+
+.home .span0-1 {
+  letter-spacing: -0.04px;
+}
+
+.home .span1-1 {
+  letter-spacing: -0.04px;
+  text-decoration: underline;
+}

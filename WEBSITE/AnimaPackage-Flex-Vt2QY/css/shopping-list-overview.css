@@ -1,0 +1,428 @@
+/* screen - shopping-list-overview */
+
+.shopping-list-overview {
+  align-items: flex-start;
+  background-color: var(--white);
+  display: flex;
+  flex-direction: column;
+  height: 1086px;
+  width: 393px;
+}
+
+.shopping-list-overview .flex-col-1 {
+  align-items: center;
+  min-height: 272px;
+  width: 393px;
+  z-index: 1;
+}
+
+.shopping-list-overview .frame-55 {
+  align-items: flex-end;
+  background-color: var(--white);
+  display: flex;
+  gap: 30px;
+  height: 138px;
+  padding: 22px 20px;
+  width: 393px;
+}
+
+.shopping-list-overview .flex-col-2 {
+  align-items: flex-start;
+  gap: 44px;
+  min-height: 88px;
+  width: 72px;
+}
+
+.shopping-list-overview .trepo {
+  letter-spacing: -0.40px;
+  line-height: normal;
+  min-height: 20px;
+  white-space: nowrap;
+}
+
+.shopping-list-overview .insights {
+  cursor: pointer;
+  letter-spacing: -0.40px;
+  line-height: 24.0px;
+  white-space: nowrap;
+}
+
+.shopping-list-overview .week {
+  cursor: pointer;
+  letter-spacing: -0.40px;
+  line-height: 24.0px;
+  min-width: 50px;
+  white-space: nowrap;
+}
+
+.shopping-list-overview .shopping {
+  letter-spacing: -0.40px;
+  line-height: 24.0px;
+  min-width: 85px;
+  white-space: nowrap;
+}
+
+.shopping-list-overview .flex-row-1 {
+  align-items: flex-start;
+  display: flex;
+  gap: 133px;
+  margin-top: 35px;
+  min-width: 353px;
+}
+
+.shopping-list-overview .title {
+  letter-spacing: -0.48px;
+  line-height: 28.8px;
+  min-height: 29px;
+  min-width: 190px;
+  white-space: nowrap;
+}
+
+.shopping-list-overview .overlap-group {
+  height: 16px;
+  position: relative;
+  width: 16px;
+}
+
+.shopping-list-overview .rectangle-1 {
+  left: 7px;
+  position: absolute;
+  top: 0;
+}
+
+.shopping-list-overview .frame-40 {
+  align-items: flex-start;
+  display: flex;
+  height: 49px;
+  margin-top: 20px;
+  min-width: 353px;
+}
+
+.shopping-list-overview .flex-row-2 {
+  align-items: flex-start;
+  display: flex;
+  height: 48px;
+  min-width: 227px;
+}
+
+.shopping-list-overview .flex-col-3 {
+  align-items: flex-start;
+  gap: 8px;
+  min-height: 48px;
+  width: 62px;
+}
+
+.shopping-list-overview .produce {
+  letter-spacing: -0.24px;
+  line-height: 14.4px;
+  width: 50px;
+}
+
+.shopping-list-overview .flex-col-4 {
+  align-items: flex-start;
+  gap: 8px;
+  min-height: 48px;
+  width: 105px;
+}
+
+.shopping-list-overview .snacks {
+  letter-spacing: -0.24px;
+  line-height: 14.4px;
+  width: 50px;
+}
+
+.shopping-list-overview .flex-col-5 {
+  align-items: flex-start;
+  gap: 8px;
+  min-height: 48px;
+  width: 60px;
+}
+
+.shopping-list-overview .meat {
+  letter-spacing: -0.24px;
+  line-height: 14.4px;
+  width: 50px;
+}
+
+.shopping-list-overview .flex-col-6 {
+  align-items: flex-start;
+  gap: 8px;
+  min-height: 48px;
+  width: 126px;
+}
+
+.shopping-list-overview .frame-container {
+  align-items: flex-start;
+  display: flex;
+  min-width: 126px;
+}
+
+.shopping-list-overview .flex-row-3 {
+  align-items: flex-start;
+  display: flex;
+  gap: 14px;
+  height: 14px;
+  min-width: 114px;
+}
+
+.shopping-list-overview .dairy {
+  letter-spacing: -0.24px;
+  line-height: 14.4px;
+  width: 50px;
+}
+
+.shopping-list-overview .other {
+  letter-spacing: -0.24px;
+  line-height: 14.4px;
+  width: 50px;
+}
+
+.shopping-list-overview .frame-container-1 {
+  margin-top: 29px;
+  min-width: 308px;
+  z-index: 3;
+}
+
+.shopping-list-overview .frame-45 {
+  align-items: center;
+  background-color: var(--green-house);
+  border: 1px solid;
+  border-radius: 30px;
+  display: inline-flex;
+  gap: 5px;
+  justify-content: center;
+  overflow: hidden;
+  padding: 15px 25px;
+  position: relative;
+}
+
+.shopping-list-overview .frame {
+  align-items: center;
+  border: 1px solid;
+  border-color: var(--green-house);
+  border-radius: 30px;
+  display: inline-flex;
+  gap: 5px;
+  justify-content: center;
+  overflow: hidden;
+  padding: 15px 25px;
+  position: relative;
+}
+
+.shopping-list-overview .frame-container-2 {
+  margin-top: 9px;
+  min-width: 284px;
+  z-index: 2;
+}
+
+.shopping-list-overview .frame-64 {
+  align-items: flex-start;
+  align-self: center;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  margin-top: 44px;
+  position: relative;
+  width: 353px;
+  z-index: 4;
+}
+
+.shopping-list-overview .frame-1 {
+  align-self: stretch;
+  border-bottom-style: solid;
+  border-bottom-width: 1px;
+  border-color: var(--green-house-2);
+  height: 67px;
+  position: relative;
+  width: 100%;
+}
+
+.shopping-list-overview .flex-row {
+  align-items: center;
+  display: flex;
+  min-width: 353px;
+  position: relative;
+  top: 8px;
+}
+
+.shopping-list-overview .image-6 {
+  height: 51px;
+  object-fit: cover;
+  width: 51px;
+}
+
+.shopping-list-overview .chobani-greek-yoghurt {
+  letter-spacing: -0.32px;
+  line-height: 19.2px;
+  width: 220px;
+}
+
+.shopping-list-overview .x330ml {
+  letter-spacing: -0.24px;
+  line-height: 14.4px;
+  width: 50px;
+}
+
+.shopping-list-overview .rectangle-2 {
+  transform: rotate(90.00deg);
+}
+
+.shopping-list-overview .image {
+  height: 50px;
+  object-fit: cover;
+  width: 50px;
+}
+
+.shopping-list-overview .flex-col {
+  align-items: flex-start;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 1.0px;
+  margin-left: 17px;
+  min-height: 37px;
+  width: 220px;
+}
+
+.shopping-list-overview .graza-extra-virgin-olive-oil {
+  letter-spacing: -0.32px;
+  line-height: 19.2px;
+  width: 220px;
+}
+
+.shopping-list-overview .x500ml {
+  letter-spacing: -0.24px;
+  line-height: 14.4px;
+  width: 50px;
+}
+
+.shopping-list-overview .flex-row-4 {
+  align-items: flex-end;
+  display: flex;
+  min-width: 353px;
+  position: relative;
+  top: 8px;
+}
+
+.shopping-list-overview .image-9 {
+  height: 44px;
+  object-fit: cover;
+  width: 54px;
+}
+
+.shopping-list-overview .flex-col-8 {
+  align-items: flex-start;
+  gap: 4px;
+  margin-bottom: 1px;
+  margin-left: 13px;
+  min-height: 37px;
+  width: 220px;
+}
+
+.shopping-list-overview .swift-meats-rib-eye-steaks {
+  letter-spacing: -0.32px;
+  line-height: 19.2px;
+  width: 220px;
+}
+
+.shopping-list-overview .x500g {
+  letter-spacing: -0.24px;
+  line-height: 14.4px;
+  width: 50px;
+}
+
+.shopping-list-overview .frame-59-3 {
+  cursor: pointer;
+  margin-bottom: 3px;
+}
+
+.shopping-list-overview .kale {
+  letter-spacing: -0.32px;
+  line-height: 19.2px;
+  width: 220px;
+}
+
+.shopping-list-overview .x400g {
+  letter-spacing: -0.24px;
+  line-height: 14.4px;
+  width: 50px;
+}
+
+.shopping-list-overview .flex-row-5 {
+  align-items: center;
+  display: flex;
+  min-width: 353px;
+  position: relative;
+  top: 7px;
+}
+
+.shopping-list-overview .image-13 {
+  height: 50px;
+  object-fit: cover;
+  width: 65px;
+}
+
+.shopping-list-overview .flex-col-9 {
+  align-items: flex-start;
+  gap: 4px;
+  margin-left: 2px;
+  margin-top: 1.0px;
+  min-height: 37px;
+  width: 220px;
+}
+
+.shopping-list-overview .frame-59-4 {
+  margin-bottom: 4.0px;
+}
+
+.shopping-list-overview .frame-62 {
+  align-self: stretch;
+  height: 67px;
+  position: relative;
+  width: 100%;
+}
+
+.shopping-list-overview .frame-4 {
+  align-items: center;
+  background-color: var(--reef);
+  border-radius: 2px;
+  display: flex;
+  gap: 3px;
+  height: 44px;
+  justify-content: center;
+  left: 0;
+  overflow: hidden;
+  padding: 15px 50px;
+  position: fixed;
+  top: 998px;
+  width: 393px;
+  z-index: 5;
+}
+
+.shopping-list-overview .frame-66 {
+  height: 14px;
+  position: relative;
+  width: 77px;
+}
+
+.shopping-list-overview .flex-col-10 {
+  display: flex;
+  flex-direction: column;
+}
+
+.shopping-list-overview .frame-59-5 {
+  align-items: flex-start;
+  background-color: var(--reef);
+  border-radius: 15px;
+  display: flex;
+  height: 30px;
+  margin-left: 36px;
+  min-width: 30px;
+  padding: 7.0px 14.0px;
+}
+
+.shopping-list-overview .rectangle {
+  background-color: var(--green-house);
+  height: 16px;
+  width: 2px;
+}

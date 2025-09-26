@@ -1,0 +1,110 @@
+/* screen - login */
+
+.login {
+  align-items: flex-start;
+  background-color: var(--white);
+  display: flex;
+  flex-direction: column;
+  height: 852px;
+  padding: 28px 0;
+  width: 393px;
+}
+
+.login .trepo {
+  letter-spacing: -0.40px;
+  line-height: normal;
+  margin-left: 20px;
+  min-height: 20px;
+  white-space: nowrap;
+}
+
+.login .arrow-left-1 {
+  cursor: pointer;
+  height: 24px;
+  margin-left: 20px;
+  margin-top: 79px;
+  width: 24px;
+}
+
+.login .title {
+  align-self: center;
+  letter-spacing: -0.72px;
+  line-height: 43.2px;
+  margin-right: 26.0px;
+  margin-top: 37px;
+  width: 327px;
+}
+
+.login .frame-47 {
+  align-self: center;
+  border: 1px solid;
+  border-color: var(--green-house-2);
+  display: flex;
+  margin-top: 39px;
+  padding: 15px 20px;
+  width: 353px;
+}
+
+.login .username {
+  letter-spacing: -0.28px;
+  line-height: normal;
+  margin-top: -1.00px;
+  position: relative;
+  white-space: nowrap;
+  width: fit-content;
+}
+
+.login .frame-48 {
+  align-self: center;
+  border: 1px solid;
+  border-color: var(--green-house-2);
+  display: flex;
+  margin-top: 24px;
+  padding: 15px 20px;
+  width: 353px;
+}
+
+.login .password {
+  letter-spacing: -0.28px;
+  line-height: normal;
+  margin-top: -1.00px;
+  position: relative;
+  white-space: nowrap;
+  width: fit-content;
+}
+
+.login .frame-46 {
+  background-color: var(--reef);
+  cursor: pointer;
+  display: inline-flex;
+  justify-content: center;
+  margin-left: 20px;
+  margin-top: 38px;
+  padding: 15px 50px;
+}
+
+.login .or-you-can-log-in-w {
+  letter-spacing: -0.28px;
+  line-height: normal;
+  margin-left: 20px;
+  margin-top: 44px;
+  min-height: 14px;
+  white-space: nowrap;
+}
+
+.login .span0 {
+  letter-spacing: -0.04px;
+}
+
+.login .span1 {
+  letter-spacing: -0.04px;
+  text-decoration: underline;
+}
+
+.login .frame {
+  align-items: center;
+  border-radius: 2px;
+  gap: 10px;
+  overflow: hidden;
+  position: relative;
+}

@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta name='impact-site-verification' value='ce7f9bd1-0bc7-4330-ad0c-c480ad2f2d36'>
+    <script>
+      if (window.location.protocol !== "https:") {
+        window.location.href = "https://" + window.location.host + window.location.pathname + window.location.search;
+      }
+    </script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+    <title>TREPO</title>
+    <link rel="stylesheet" href="css/styleguide.css?v=20250108.1014">
+    <link rel="stylesheet" href="css/globals.css?v=20250108.1014">
+    <link rel="stylesheet" href="css/home.css?v=20250108.1037">
+    <script src="https://cdn.auth0.com/js/auth0-spa-js/1.20/auth0-spa-js.production.js"></script>
+    <script src="js/index.js?v=20250108.1027" defer></script>
+    <script type="text/javascript" async src="https://static.klaviyo.com/onsite/js/VxKUiv/klaviyo.js?v=20250108.1037"></script>
+
+</head>
+<body style="margin: 0; background: #ffffff">
+    <input type="hidden" id="anPageName" name="page" value="home">
+    <div class="container-center-horizontal">
+        <div class="home screen">
+            <!-- Logo and Navigation -->
+            <div class="header-container">
+                <div class="trepo violetsans-regular-normal-green-house-20px">TREPO</div>
+                <div class="frame-46">
+                    <button id="auth-button" class="log-in-btn">Login</button>
+                </div>
+            </div>
+
+            <nav class="navbar">
+                <div class="nav-left">
+                    <ul class="nav-links" id="auth-links">
+                        <li><a href="index.html" class="active">Home</a></li>
+                        <li><a href="insights.html">Insights</a></li>
+                        <li><a href="week.html">Week</a></li>
+                        <li><a href="shopping.html">Shopping</a></li>
+                    </ul>
+                </div>
+            </nav>
+
+            <!-- Hero Section -->
+            <h1 id="welcome-message" class="healthier-eating-ev">
+                <span class="span0 violetsans-regular-normal-green-house-36px">Put your kitchen on autopilot.</span>
+            </h1>
+            <p class="dont-have-an-accoun violetsans-regular-normal-green-house-14px">
+                <span class="span0-1 violetsans-regular-normal-green-house-14px">Don’t have an account yet? </span>
+                <!--
+                <a href="https://docs.google.com/forms/d/e/1FAIpQLSepAEDZ9j_Ux2aydJRWeovkLjhbQlSew-wfokwvnrIhlfyFIw/viewform?usp=dialog" class="waitlist-link" target="_blank">Join the waitlist here.</a>
+            -->
+            </p>
+            <script async
+              src="https://js.stripe.com/v3/buy-button.js">
+            </script>
+
+            <stripe-buy-button
+              buy-button-id="buy_btn_1Qyh4eRrzNmI1CGdCZ7oDsOg"
+              publishable-key="pk_live_51OxMWVRrzNmI1CGdd2EpsIhUvtdfVwV97rJpnz9gmBmhP6tSJsHs6A0SMpJ4NufNUiqhd35YUgdKELb4kapPuGZg00M0qBfaCp"
+            >
+            </stripe-buy-button>
+            <div id="page-content" style="display: none;">
+                <div id="weekly-summary" class="weekly-summary-container"></div>
+                <div class="preview-container">
+                    <img src="img/trepo_preview_0.avif" alt="Trepo Preview" class="preview-image">
+                </div>
+                <div class="preview-container">
+                    <span class="span0 violetsans-regular-normal-green-house-24px">Scan discarded items</span>
+                </div>
+                <div class="preview-container">
+                    <img src="img/trepo_preview_1.avif" alt="Trepo Preview" class="preview-image">
+                </div>
+                <div class="preview-container">
+                    <span class="span0 violetsans-regular-normal-green-house-24px">Learn about your health</span>
+                </div>
+                <div class="preview-container">
+                    <img src="https://framerusercontent.com/images/tam7aXoAgdNuC1HSqwJvumVos.gif" 
+                         alt="Trepo Animated Preview" 
+                         class="preview-gif">
+                </div>
+                <div class="preview-container">
+                    <span class="span0 violetsans-regular-normal-green-house-24px">Auto-restock your kitchen</span>
+                </div>
+                <div class="preview-container">
+                    <img src="img/trepo_preview_2.avif" alt="Trepo Preview" class="preview-image">
+                </div>
+                <div class="preview-container">
+                    <span class="span0 violetsans-regular-normal-green-house-24px">Get rewarded</span>
+                </div>
+                <div class="preview-container">
+                    <img src="img/trepo_preview_3.avif" alt="Trepo Preview" class="preview-image">
+                </div>
+                <div class="preview-container">
+                    <img src="img/trepo_preview_4.avif" alt="Trepo Preview" class="preview-image">
+                </div>
+                <p id="setup-guide-title" class="Setup-Guide violetsans-regular-normal-green-house-36px">
+                    Setup Guide
+                </p>
+                <div id="user-images-container" class="user-images hidden">
+                    <img src="img/step1.png" alt="Sample Image 1" class="user-image">
+                    <img src="img/step2.png" alt="Sample Image 1" class="user-image">
+                    <img src="img/step3.png" alt="Sample Image 1" class="user-image">
+                    <img src="img/step4.png" alt="Sample Image 1" class="user-image">
+                    <img src="img/step5.png" alt="Sample Image 1" class="user-image">
+                    <img src="img/step6.png" alt="Sample Image 1" class="user-image">
+                    <img src="img/step7.png" alt="Sample Image 1" class="user-image">
+                    <img src="img/step8.png" alt="Sample Image 1" class="user-image">
+                </div>
+            </div>
+        </div>
+    </div>
+    <script src="js/auth.js?v=20250108.1014" defer></script>
+    <script>
+        document.addEventListener("DOMContentLoaded", function() {
+            if (window._klOnsite) {
+                window._klOnsite.push(['openForm', 'TkeBZJ']);
+            }
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,751 @@
+/* screen - shopping-list-overview */
+
+.shopping-list-overview {
+  align-items: flex-start;
+  background-color: var(--white);
+  display: flex;
+  flex-direction: column;
+  width: 393px;
+  padding-bottom: 100px
+}
+
+.shopping-list-overview .flex-col-1 {
+  align-items: center;
+  min-height: 272px;
+  width: 393px;
+  z-index: 1;
+}
+
+.shopping-list-overview .frame-52 {
+  align-items: flex-end;
+  background-color: var(--white);
+  display: flex;
+  gap: 30px;
+  height: 138px;
+  left: 0;
+  padding: 22px 20px;
+  position: fixed;
+  top: 0;
+  width: 393px;
+  z-index: 100;
+}
+
+.shopping-list-overview .flex-col-69 {
+  gap: 44px;
+  min-height: 88px;
+  width: 72px;
+}
+
+.shopping-list-overview .trepo {
+  letter-spacing: -0.40px;
+  line-height: normal;
+  min-height: 20px;
+  white-space: nowrap;
+}
+
+.shopping-list-overview .insights {
+  cursor: pointer;
+  letter-spacing: -0.40px;
+  line-height: 24.0px;
+  white-space: nowrap;
+}
+
+.shopping-list-overview .week {
+  letter-spacing: -0.40px;
+  line-height: 24.0px;
+  min-width: 50px;
+  white-space: nowrap;
+}
+
+.shopping-list-overview .shopping {
+  cursor: pointer;
+  letter-spacing: -0.40px;
+  line-height: 24.0px;
+  min-width: 85px;
+  white-space: nowrap;
+}
+
+.shopping-list-overview .flex-row-1 {
+  align-items: flex-start;
+  display: flex;
+  gap: 133px;
+  margin-top:138px;
+  min-width: 353px;
+}
+
+.shopping-list-overview .title {
+  letter-spacing: -0.48px;
+  line-height: 28.8px;
+  min-height: 29px;
+  min-width: 190px;
+  white-space: nowrap;
+}
+
+.shopping-list-overview .overlap-group {
+  height: 16px;
+  position: relative;
+  width: 16px;
+}
+
+.shopping-list-overview .frame-40 {
+  align-items: flex-start;
+  display: flex;
+  height: 49px;
+  margin-top: 20px;
+  min-width: 353px;
+}
+
+.shopping-list-overview .flex-row-2 {
+  align-items: flex-start;
+  display: flex;
+  height: 48px;
+  min-width: 227px;
+}
+
+.shopping-list-overview .flex-col-3 {
+  align-items: flex-start;
+  gap: 8px;
+  min-height: 48px;
+  width: 62px;
+}
+
+.shopping-list-overview .produce {
+  letter-spacing: -0.24px;
+  line-height: 14.4px;
+  width: 50px;
+}
+
+.shopping-list-overview .flex-col-4 {
+  align-items: flex-start;
+  gap: 8px;
+  min-height: 48px;
+  width: 105px;
+}
+
+.shopping-list-overview .snacks {
+  letter-spacing: -0.24px;
+  line-height: 14.4px;
+  width: 50px;
+}
+
+.shopping-list-overview .flex-col-5 {
+  align-items: flex-start;
+  gap: 8px;
+  min-height: 48px;
+  width: 60px;
+}
+
+.shopping-list-overview .meat {
+  letter-spacing: -0.24px;
+  line-height: 14.4px;
+  width: 50px;
+}
+
+.shopping-list-overview .flex-col-6 {
+  align-items: flex-start;
+  gap: 8px;
+  min-height: 48px;
+  width: 126px;
+}
+
+.shopping-list-overview .frame-container {
+  align-items: flex-start;
+  display: flex;
+  min-width: 126px;
+}
+
+
+.frame-container-123 {
+  align-items: flex-start;
+  display: flex;
+  gap: 3px;
+}
+
+.shopping-list-overview .flex-row-3 {
+  align-items: flex-start;
+  display: flex;
+  gap: 14px;
+  height: 14px;
+  min-width: 114px;
+}
+
+/*
+.shopping-list-overview .dairy {
+  letter-spacing: -0.24px;
+  line-height: 14.4px;
+  width: 50px;
+}
+
+.shopping-list-overview .other {
+  letter-spacing: -0.24px;
+  line-height: 14.4px;
+  width: 50px;
+}
+*/
+.shopping-list-overview .frame-container-1 {
+  min-width: 308px;
+}
+
+.shopping-list-overview .frame-45 {
+  align-items: center;
+  background-color: var(--green-house);
+  border: 1px solid;
+  border-radius: 30px;
+  display: inline-flex;
+  gap: 5px;
+  justify-content: center;
+  overflow: hidden;
+  padding: 5px 10px;
+  position: relative;
+}
+
+.shopping-list-overview .frame {
+  align-items: center;
+  border: 1px solid;
+  border-color: var(--green-house);
+  border-radius: 30px;
+  display: inline-flex;
+  gap: 5px;
+  justify-content: center;
+  overflow: hidden;
+  padding: 10px 15px;
+  position: relative;
+  transition: background-color 0.3s ease, color 0.3s ease;
+  /*cursor: pointer;*/
+}
+
+.frame.active {
+    background-color: var(--green-house);
+    color: var(--reef); /* Active text color */
+}
+
+.frame div {
+    color: inherit; /* Ensure text color inherits from the parent frame */
+}
+
+.shopping-list-overview .frame-container-2 {
+  margin-top: 3px;
+  min-width: 284px;
+  margin-bottom:20px;
+}
+
+.shopping-list-overview .frame-64 {
+  align-items: flex-start;
+  align-self: center;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  margin-top: 44px;
+  position: relative;
+  width: 353px;
+  z-index: 4;
+}
+
+.shopping-list-overview .frame-1 {
+  position: relative; /* Make it a containing block for pseudo-elements */
+  padding-bottom: 5px; /* Create space below the content */
+}
+
+.shopping-list-overview .frame-1::after {
+  content: '';
+  position: absolute;
+  bottom: 0; /* Position at the bottom of the element */
+  left: 0;
+  width: 100%;
+  height: 1px; /* Border height */
+  background-color: var(--green-house-2); /* Border color */
+} 
+
+.shopping-list-overview .flex-row {
+  align-items: center;
+  display: flex;
+  min-width: 353px;
+  position: relative;
+  top: 8px;
+  margin-bottom: 15px; /* Add spacing between item info and the border */
+}
+
+.shopping-list-overview .image-6 {
+  height: 51px;
+  object-fit: contain;
+  width: 51px;
+}
+
+.shopping-list-overview .chobani-greek-yoghurt {
+  letter-spacing: -0.32px;
+  line-height: 19.2px;
+  width: 220px;
+}
+
+.shopping-list-overview .x330ml {
+  letter-spacing: -0.24px;
+  line-height: 14.4px;
+  width: 200px;
+}
+
+.shopping-list-overview .rectangle-2 {
+  transform: rotate(90.00deg);
+}
+
+.shopping-list-overview .image {
+  height: 50px;
+  object-fit: cover;
+  width: 50px;
+}
+
+.shopping-list-overview .flex-col {
+  align-items: flex-start;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 1.0px;
+  margin-left: 17px;
+  min-height: 37px;
+  width: 220px;
+}
+
+.shopping-list-overview .graza-extra-virgin-olive-oil {
+  letter-spacing: -0.32px;
+  line-height: 19.2px;
+  width: 220px;
+}
+
+.shopping-list-overview .x500ml {
+  letter-spacing: -0.24px;
+  line-height: 14.4px;
+  width: 50px;
+}
+
+.shopping-list-overview .flex-row-4 {
+  align-items: flex-end;
+  display: flex;
+  min-width: 353px;
+  position: relative;
+  top: 8px;
+}
+
+.shopping-list-overview .image-9 {
+  height: 44px;
+  object-fit: cover;
+  width: 54px;
+}
+
+.shopping-list-overview .flex-col-8 {
+  align-items: flex-start;
+  gap: 4px;
+  margin-bottom: 1px;
+  margin-left: 13px;
+  min-height: 37px;
+  width: 220px;
+}
+
+.shopping-list-overview .swift-meats-rib-eye-steaks {
+  letter-spacing: -0.32px;
+  line-height: 19.2px;
+  width: 220px;
+}
+
+.shopping-list-overview .x500g {
+  letter-spacing: -0.24px;
+  line-height: 14.4px;
+  width: 50px;
+}
+
+.shopping-list-overview .frame-59-3 {
+  cursor: pointer;
+  margin-bottom: 3px;
+}
+
+.shopping-list-overview .kale {
+  letter-spacing: -0.32px;
+  line-height: 19.2px;
+  width: 220px;
+}
+
+.shopping-list-overview .x400g {
+  letter-spacing: -0.24px;
+  line-height: 14.4px;
+  width: 50px;
+}
+
+.shopping-list-overview .flex-row-5 {
+  align-items: center;
+  display: flex;
+  min-width: 353px;
+  position: relative;
+  top: 7px;
+}
+
+.shopping-list-overview .image-13 {
+  height: 50px;
+  object-fit: cover;
+  width: 65px;
+}
+
+.shopping-list-overview .flex-col-9 {
+  align-items: flex-start;
+  gap: 4px;
+  margin-left: 2px;
+  margin-top: 1.0px;
+  min-height: 37px;
+  width: 220px;
+}
+
+.shopping-list-overview .frame-59-4 {
+  margin-bottom: 4.0px;
+}
+
+.shopping-list-overview .frame-62 {
+  align-self: stretch;
+  height: 67px;
+  position: relative;
+  width: 100%;
+}
+
+/* Text inside Button */
+.place-order-with {
+  font-size: 14px;
+  color: #FAF1E5; /* Matches foreground text color */
+  white-space: nowrap; /* Prevents text from wrapping */
+  font-family: "Violet Sans-Regular", Helvetica;
+  font-style: normal;
+  font-weight: 400;
+}
+
+.shopping-list-overview .frame-4 {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: #003D29;
+  color: #FAF1E5;
+  padding: 16px 18px;
+  border-radius: 23px;
+  height: 46px;
+  width: auto; /* Allow dynamic width */
+  gap: 6px; /* Reduce space between logo & text */
+  
+  /* ✅ Center the button */
+  margin: 20px auto 0 auto; /* Auto margins horizontally */
+  text-align: center;
+}
+
+
+/* Apply scale effect when button is pressed */
+.shopping-list-overview .frame-4:active,
+.shopping-list-overview .frame-4.pressed { /* Add a custom class for JavaScript */
+  transform: scale(0.95);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+
+.shopping-list-overview .frame-66 {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 22px; /* Match logo height */
+  width: auto; /* Adjust width dynamically */
+  min-width: 22px; /* Prevent excess space */
+  padding: 0; /* Remove unnecessary padding */
+  margin: 0; /* Remove any extra spacing */
+  margin-right: 5px;
+}
+
+
+.shopping-list-overview .flex-col-10 {
+  display: flex;
+  flex-direction: column;
+}
+
+.shopping-list-overview .frame-59-5 {
+  align-items: center;
+  background-color: var(--white);
+  border: 1px solid;
+  border-color: var(--green-house);
+  border-radius: 15px;
+  display: flex;
+  cursor: pointer;
+  gap: 4px;
+  height: 30px;
+  margin-bottom: 7.0px;
+  margin-left: 36px;
+  min-width: 30px;
+  padding: 8.6px 9.8px;
+  transition: background-color 0.3s ease, transform 0.3s ease;
+}
+
+.shopping-list-overview .rectangle {
+  background-color: var(--white);
+  width: 2px;
+}
+
+.shopping-list-overview .rectangle-2 {
+  height: 6px;
+  margin-top: 2.73px;
+  transform: rotate(135deg);
+}
+
+.shopping-list-overview .rectangle-1 {
+  align-self: flex-end;
+  height: 13px;
+  transform: rotate(45deg);
+}
+
+.shopping-list-overview .rectangle-100 {
+  left: 7px;
+  position: absolute;
+  top: 0;
+}
+.shopping-list-overview .rectangle-101 {
+  background-color: var(--green-house);
+  height: 16px;
+  width: 2px;
+}
+
+/* Toggled button style */
+.shopping-list-overview .toggle-btn.active {
+  background-color: var(--green-house);
+}
+
+/* Rectangle styles when toggled */
+.shopping-list-overview .toggle-btn.active .rectangle-2,
+.shopping-list-overview .toggle-btn.active .rectangle-1 {
+  background-color: var(--reef);
+}
+
+/* Title color when toggled */
+.shopping-list-overview .chobani-greek-yoghurt.toggled,
+.shopping-list-overview .x330ml.toggled {
+  color: var(--green-house-2);
+}
+
+/* Highlight for items with inventory set to '2' */
+.shopping-list-overview .chobani-greek-yoghurt.highlight,
+.shopping-list-overview .x330ml.highlight {
+    color: var(--green-house-2) !important; /* Ensure this rule takes precedence */
+}
+
+
+.shopping-list-overview .frame-46 {
+  display: flex;
+  align-items: center;
+  background-color: var(--reef);
+  border-radius: 10px;
+  margin-left: auto;
+  margin-right: auto;
+  margin-top: 0;
+  margin-bottom: 15px;
+  gap: 10px;
+  justify-content: center;
+  overflow: hidden;
+  padding: 15px 50px;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+  cursor: pointer;
+}
+
+/* Archive List Button - Pressed Effect */
+.shopping-list-overview .frame-46:active,
+.shopping-list-overview .frame-46.pressed {
+  transform: scale(0.95);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.shopping-list-overview .archive-list {
+  letter-spacing: -0.28px;
+  line-height: normal;
+  margin-top: -1.00px;
+  border-radius: 10px;
+  position: relative;
+  white-space: nowrap;
+  width: fit-content;
+}
+
+.invisible-img {
+  visibility: hidden;  /* Hides the image but keeps the space */
+}
+
+
+/* =============== OVERLAY STYLING =============== */
+
+.shopping-list-search {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(0, 0, 0, 0.5);
+  z-index: 9999;
+}
+
+.shopping-list-search .search-box-container {
+  background-color: var(--white);
+  border: 1px solid var(--green-house-4);
+  border-radius: 10px;
+  padding: 20px;
+  width: 90%;
+  height: 30%; /* Adjust height to leave some space */
+  text-align: center;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2); /* Subtle shadow for depth */
+  overflow-y: auto; /* Enables scrolling for overflow content */
+}
+
+.shopping-list-search .frame-67 {
+  position: absolute; /* Allows precise positioning within flex-row */
+  top: 0; /* Aligns to the top of flex-row */
+  right: 0; /* Aligns to the right of flex-row */
+  width: 40px; /* Diameter of the circular button */
+  height: 40px;
+  background-color: var(--green-house); /* Circle background color */
+  border-radius: 50%; /* Makes the element circular */
+  cursor: pointer; /* Indicates the element is interactive */
+  z-index: 3; /* Ensures it appears above other elements */
+  display: flex; /* Centers the content inside */
+  justify-content: center;
+  align-items: center;
+  margin-top: 3%;
+  margin-right: 3%;
+}
+
+.shopping-list-search .rectangle-close {
+  position: absolute;
+  width: 24px; /* Length of each line in the cross */
+  height: 2px; /* Thickness of each line in the cross */
+  background-color: var(--reef); /* Color for the cross */
+  transform-origin: center; /* Ensures rotation happens around the center */
+}
+
+.shopping-list-search .rectangle-close-1 {
+  transform: rotate(45deg); /* Rotates the line to form one part of the cross */
+}
+
+.shopping-list-search .rectangle-close-2 {
+  transform: rotate(-45deg); /* Rotates the line to form the other part of the cross */
+}
+
+.shopping-list-search .flex-row {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  width: 100%;
+}
+
+.shopping-list-search .flex-col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+}
+
+.text-input-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center; /* Centers content horizontally */
+  justify-content: center; /* Centers content vertically */
+  width: 100%;
+  margin-top: 24px; /* Adjust spacing as needed */
+  gap: 10px;
+}
+
+.text-input-box {
+  width: 90%; /* Adjust width to fit within container */
+  max-width: 400px; /* Prevents excessive stretching */
+  height: 50px;
+  padding: 8px;
+  border: 2px solid var(--green-house-4);
+  border-radius: 10px;
+  font-size: 16px;
+  outline: none;
+  text-align: center; /* Centers the placeholder text */
+}
+
+
+.add-item-btn {
+  padding: 8px 12px;
+  background-color: var(--green-house);
+  color: var(--reef);
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  text-align: center;
+  align-self: center;
+  /* Optional hover effect */
+  transition: background-color 0.3s ease;
+}
+
+.results-container {
+  margin-top: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+  width: 100%;
+  max-height: 80%; /* Limit the height of the results container */
+  overflow-y: auto; /* Enable scrolling for overflow */
+}
+.result-item {
+  display: flex;
+  align-items: center;
+  padding: 10px;
+  border: 2px solid var(--green-house);
+  border-radius: 8px;
+  background-color: var(--white);
+  transition: transform 0.2s ease;
+  width: 100%;
+}
+
+.result-item-row {
+  width: 100%;
+}
+
+.result-item-info {
+  flex: 1; /* Takes up the remaining space */
+  text-align: left; /* Aligns text to the left */
+  display: flex;
+  flex-direction: column;
+  justify-content: center; /* Centers text vertically */
+}
+
+.result-item-name {
+  color: var(--green-house);
+  font-family: var(--font-family-violet_sans-regular);
+  font-size: var(--font-size-l);
+  font-style: normal;
+  font-weight: 400;
+}
+
+.result-item-brand {
+  color: var(--green-house-3);
+  font-family: var(--font-family-violet_sans-regular);
+  font-size: var(--font-size-s);
+  font-style: normal;
+  font-weight: 400;
+}
+
+.result-item-image {
+  width: 70px; /* Slightly larger for better visibility */
+  height: auto; /* Maintain aspect ratio */
+  object-fit: contain;
+  border-radius: 8px;
+  background-color: #f0f0f0; /* Fallback background */
+  margin-left: 15px; /* Adds space between text and image */
+  flex-shrink: 0; /* Prevents image from resizing */
+}
+
+
+/* Instacart Logo */
+.image-15 {
+  height: 22px; /* Per specs */
+  width: auto; /* Maintain aspect ratio */
+  max-width: 22px; /* Ensure correct width */
+  object-fit: contain;
+}
+
+.grey-text {
+  color: grey !important;
+  opacity: 0.7;
+}
+
+
+

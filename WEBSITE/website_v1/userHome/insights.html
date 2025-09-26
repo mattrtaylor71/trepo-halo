@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <!-- Google tag (gtag.js) -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-Z6BZ81YYV5"></script>
+    <script>
+      window.dataLayer = window.dataLayer || [];
+      function gtag(){dataLayer.push(arguments);}
+      gtag('js', new Date());
+
+      gtag('config', 'G-Z6BZ81YYV5');
+    </script>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
+    <link rel="shortcut icon" type="image/png" href="https://animaproject.s3.amazonaws.com/home/favicon.png" />
+    <meta name="og:type" content="website" />
+    <meta name="twitter:card" content="photo" />
+    <link rel="stylesheet" type="text/css" href="css/insights.css?v=20250113.2013" />
+    <link rel="stylesheet" type="text/css" href="css/styleguide.css?v=20250108.1014" />
+    <link rel="stylesheet" type="text/css" href="css/globals.css?v=20250108.1018" />
+    <title>For You</title>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="js/points.js?v=20250108.1016"></script>
+    <script>
+      document.addEventListener("DOMContentLoaded", () => {
+        fetchAndDisplayPoints();
+      });
+    </script>
+  </head>
+  <body style="margin: 0; background: #ffffff">
+    <input type="hidden" id="anPageName" name="page" value="insights" />
+    <div class="container-center-horizontal">
+      <div class="insights screen">
+        <div class="frame-51">
+            <div class="flex-col violetsans-regular-normal-green-house-20px">
+              <a href="index.html" class="trepo-link">
+                <div class="trepo">TREPO</div>
+              </a>
+              <div class="insights-1">For You</div>
+            </div>
+          <a href="health.html"><div class="week violetsans-regular-normal-green-house-20px-2">Health</div></a>
+          <a href="week.html"><div class="week violetsans-regular-normal-green-house-20px-2">Week</div></a>
+          <a href="shopping.html">
+            <div class="shopping violetsans-regular-normal-green-house-20px-2">Shopping</div>
+          </a>
+          <a href="beeps.html">
+            <div class="points-container">
+              <strong class="user-points">0</strong>
+            </div>
+          </a>
+        </div>
+        <div id="chatbot" class="chatbot-container">
+          <h2 class="chatbot-title">This week I want to...</h2>
+          <div class="chat-interface">
+            <textarea
+              id="user-input"
+              class="chat-input"
+              rows="1"
+              placeholder="E.g. 'Eat more protein'"
+            ></textarea>
+            <button class="chat-button" onclick="getAIResponse()">Send</button>
+          </div>
+          <div id="chatbot-response" class="chatbot-response-box hidden"></div>
+        </div>
+        <h1 class="title0 violetsans-regular-normal-green-house-24px">Recommended Items</h1>
+        <div class="frame-69 recipe-frame" id="recItem-0">
+          <div class="recipe-class violetsans-regular-normal-green-house-18px">
+            <!-- <span class="chatbot-title">A recipe for you<br /></span> -->
+            <!-- switched to DIV and restored all classes -->
+            <div class="ai-loader hidden"></div>
+            <div class="span2 violetsans-regular-normal-green-house-14px"></div>
+          </div>
+        </div>
+        <!-- slot 0 -->
+        <h1 class="title0 violetsans-regular-normal-green-house-24px">Your Recipes</h1>
+        <div class="frame-69 recipe-frame" id="recipe-0">
+          <div class="recipe-class violetsans-regular-normal-green-house-18px">
+            <!-- <span class="chatbot-title">A recipe for you<br /></span> -->
+            <!-- switched to DIV and restored all classes -->
+            <div class="ai-loader hidden"></div>
+            <div class="span2 violetsans-regular-normal-green-house-14px"></div>
+          </div>
+        </div>
+
+        <!-- slot 1 -->
+        <div class="frame-69 recipe-frame" id="recipe-1">
+          <div class="recipe-class violetsans-regular-normal-green-house-18px">
+            <!-- <span class="chatbot-title">A recipe for you<br /></span> -->
+            <div class="ai-loader hidden"></div>
+            <div class="span2 violetsans-regular-normal-green-house-14px"></div>
+          </div>
+        </div>
+
+        <!-- slot 2 -->
+        <div class="frame-69 recipe-frame" id="recipe-2">
+          <div class="recipe-class violetsans-regular-normal-green-house-18px">
+            <!-- <span class="chatbot-title">A recipe for you<br /></span> -->
+            <div class="ai-loader hidden"></div>
+            <div class="span2 violetsans-regular-normal-green-house-14px"></div>
+          </div>
+        </div>
+
+    <script src="js/insights.js?v=20250115.2199"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  </body>
+</html>

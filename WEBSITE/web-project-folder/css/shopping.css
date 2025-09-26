@@ -1,0 +1,211 @@
+/* General body styling */
+body {
+    font-family: 'Avenir', sans-serif; 
+    background: linear-gradient(to bottom right, #f0f4ff, #e6ecf5); 
+    color: #333; 
+    margin: 0;
+    padding: 20px;
+}
+
+.container {
+    max-width: 1200px;
+    margin: 0 auto;
+    text-align: center;
+}
+
+h1 {
+    font-family: 'Avenir', sans-serif; 
+    font-size: 48px; 
+    margin-bottom: 20px; 
+    color: #2c3e50; 
+    font-weight: 600; 
+}
+
+.feed-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+/* Animation for swiping left */
+@keyframes swipeLeft {
+    from {
+        transform: translateX(0);
+    }
+    to {
+        transform: translateX(-100%); /* Move the item off the screen */
+    }
+}
+
+/* Apply swipe left animation */
+.swipe-left {
+    animation: swipeLeft 0.35s forwards;
+}
+
+/* General item styling */
+.item {
+    display: flex;
+    background-color: #ffffff; 
+    padding: 15px;
+    border-radius: 12px; 
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1); 
+    text-align: left; 
+    transition: transform 0.3s, box-shadow 0.3s;
+}
+
+.item img {
+    width: 80px;
+    height: 80px;
+    object-fit: contain; 
+    border-radius: 8px; 
+    margin-right: 10px;
+}
+
+.item-details {
+    font-family: 'Avenir', sans-serif; 
+    font-weight: bold; 
+    margin-top: 10px; 
+    font-size: 18px; 
+    color: #333;
+}
+
+.item-details strong {
+    font-weight: bold; 
+    color: #2c3e50; 
+}
+
+/* Brand font smaller and lighter in color */
+.brand {
+    font-family: 'Avenir', sans-serif;
+    font-size: 12px; /* Smaller font size */
+    color: #777;     /* Lighter color */
+}
+
+/* Alternative container styling, now with light grey background */
+.alternative-container {
+    display: block;
+    padding: 15px;
+    border-radius: 12px;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+    margin-top: 10px;
+    background-color: #ffffff; /* Set background to white */
+    border: 2px solid #00b5e2; /* Add border with color #00b5e2 */
+    transition: background-color 0.3s ease, border-color 0.3s ease; /* Smooth transition */
+}
+
+
+/* Ensure all alternative text uses Avenir font */
+.alternative-container div,
+.alternative-container .reasoning,
+.alternative-container .prompt-text {
+    font-family: 'Avenir', sans-serif; 
+}
+
+.alternative-container img {
+    width: 80px;
+    height: 80px;
+    object-fit: contain;
+    margin-bottom: 10px;
+}
+
+/* Prompt text for switching between original and alternative */
+.prompt-text {
+    font-family: 'Avenir', sans-serif;
+    font-size: 16px;
+    color: #2c3e50;
+    margin-top: 10px;
+    margin-bottom: 10px;
+    text-align: center;
+}
+
+/* Reasoning text shown for the alternative */
+.reasoning {
+    font-family: 'Avenir', sans-serif; 
+    font-size: 14px;
+    color: #555;
+    text-align: center;
+    margin-top: 10px;
+}
+
+/* Button for selecting either the original or alternative item */
+.select-item {
+    cursor: pointer;
+    background-color: #3498db;
+    color: white;
+    padding: 10px 20px;
+    border: none;
+    border-radius: 8px;
+    transition: background-color 0.3s;
+}
+
+.select-item:hover {
+    background-color: #2980b9;
+}
+
+/* Clear All button styling */
+.clear-all-button {
+    background-color: red;
+    color: white;
+    border: none;
+    padding: 10px 20px;
+    font-size: 18px;
+    font-family: 'Avenir', sans-serif;
+    border-radius: 8px;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+    cursor: pointer;
+    margin-bottom: 20px;
+}
+
+.clear-all-button:hover {
+    background-color: darkred;
+}
+
+.top-menu {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background-color: #1f1f1f;
+    padding: 10px 20px;
+    border-bottom: 1px solid #333;
+}
+
+.top-menu .logo img {
+    height: 40px;
+}
+
+.top-menu nav ul {
+    list-style: none;
+    display: flex;
+    gap: 15px;
+}
+
+.top-menu nav ul li a {
+    color: #ffffff;
+    text-decoration: none;
+    padding: 5px 10px;
+}
+
+.top-menu nav ul li a.active {
+    border-bottom: 2px solid #007AFF;
+}
+
+body {
+    font-family: Arial, sans-serif;
+    background-color: #121212;
+    color: #2c3e50; 
+    margin: 0;
+    padding: 0;
+}
+
+/* Media Queries for responsive design */
+@media (max-width: 686px) {
+    .item {
+        width: calc(100% - 20px);
+        padding: 10px; 
+        margin: 0 auto; 
+    }
+
+    .alternative-container img {
+        width: 100%; /* Full width for small screens */
+    }
+}

@@ -1,0 +1,672 @@
+/* screen - desktop */
+
+.desktop {
+  align-items: flex-start;
+  background-color: #ffffff;
+  display: flex;
+  flex-direction: column;
+  height: 1766px;
+  width: 1280px;
+}
+
+.desktop .header {
+  align-items: flex-end;
+  background-color: transparent;
+  display: flex;
+  flex-direction: row;
+  flex-shrink: 1;
+  height: 108px;
+  justify-content: flex-start;
+  margin-top: 1px;
+  padding: 34px 481px;
+  width: 1280px;
+  overflow: visible;
+  position: sticky;   /* the one that does the sticking            */
+  top: 0;             /* clamp to top edge                         */
+  z-index: 1000;      /* above the rest of the content             */
+}
+
+.desktop .frame-17 {
+  -webkit-backdrop-filter: blur(2px) brightness(100%);
+  align-items: center;
+  backdrop-filter: blur(2px) brightness(100%);
+  background-color: #ffffff40;
+  border-radius: 15px;
+  display: inline-flex;
+  gap: 15px;
+  margin-left: 1px;
+  position: sticky;
+  top:0;
+  z-index: 1000;
+}
+
+.desktop .frame-112 {
+  height: 13px;
+  position: relative;
+  width: 87px;
+}
+
+.desktop .group-2-2 {
+  height: 16px;
+  left: 15px;
+  position: absolute;
+  top: 0;
+  width: 58px;
+}
+
+.desktop .frame-13 {
+  align-items: center;
+  border-radius: 15px;
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 10px;
+  justify-content: center;
+  overflow: hidden;
+  padding: 8px 15px;
+  position: relative;
+}
+
+.desktop .features {
+  letter-spacing: 0;
+  line-height: normal;
+  margin-top: -1.00px;
+  position: relative;
+  text-align: center;
+  width: fit-content;
+}
+
+.desktop .button {
+  flex: 0 0 auto;
+}
+
+.desktop .get-in-touch {
+  height: 23px;
+  letter-spacing: 0;
+  line-height: normal;
+  margin-top: -1.00px;
+  position: relative;
+  text-align: center;
+  width: 62px;
+}
+
+.desktop .arrow-1 {
+  height: 3.68px;
+  margin-right: -0.25px;
+  position: relative;
+  width: 8.25px;
+}
+
+.desktop .hero-section {
+  height: 803px;
+  margin-left: 2px;
+  position: relative;
+  width: 1278px;
+}
+
+.desktop .flex-col {
+  flex-direction: column;
+  gap: 144px;
+  left: 152px;
+  min-height: 326px;
+  position: absolute;
+  top: 385px;
+  width: 324px;
+}
+
+.desktop .flex-row {
+  gap: 6px;
+  min-width: 324px;
+}
+
+.desktop .arrow-1-1 {
+  margin-right: -0.25px;
+}
+
+.desktop .frame-111 {
+  align-items: center;
+  border-radius: 15px;
+  display: inline-flex;
+  gap: 10px;
+  height: 39px;
+  justify-content: center;
+  overflow: hidden;
+  padding: 8px 23px;
+  position: relative;
+}
+
+.desktop .download-pitch-materials {
+  height: 21px;
+  letter-spacing: 0;
+  line-height: normal;
+  position: relative;
+  width: 126px;
+}
+
+.desktop .download {
+  height: 10px;
+  position: relative;
+  width: 10px;
+}
+
+.desktop .vector-container {
+  height: 8px;
+  left: 1px;
+  position: relative;
+  top: 1px;
+  width: 8px;
+}
+
+.desktop .vector {
+  height: 3px;
+  left: 0;
+  position: absolute;
+  top: 5px;
+  width: 8px;
+}
+
+.desktop .vector-1 {
+  height: 3px;
+  left: 2px;
+  position: absolute;
+  top: 3px;
+  width: 5px;
+}
+
+.desktop .vector-2 {
+  height: 6px;
+  left: 4px;
+  position: absolute;
+  top: 0;
+  width: 1px;
+}
+
+.desktop .product-highlight-container-1 {
+  height: 143px;
+  margin-left: 2px;
+  position: relative;
+  width: 248px;
+}
+
+.desktop .product-highlight {
+  align-items: flex-start;
+  display: flex;
+  flex-direction: column;
+  left: 0;
+  min-height: 143px;
+  position: absolute;
+  top: 0;
+  width: 248px;
+}
+
+.desktop .overlap-group {
+  height: 4px;
+  position: relative;
+  width: 30px;
+}
+
+.desktop .rectangle-1 {
+  background-color: var(--reef-2);
+}
+
+.desktop .rectangle-2 {
+  background-color: var(--reef);
+}
+
+.desktop .eliminates-harmful-i {
+  letter-spacing: -0.48px;
+  line-height: 21.6px;
+  margin-top: 26px;
+  min-height: 36px;
+  width: 248px;
+}
+
+.desktop .informs-you-when-you {
+  letter-spacing: 0;
+  line-height: 14.4px;
+  margin-top: 25px;
+  min-height: 51px;
+  width: 248px;
+}
+
+.desktop .flex-col-1 {
+  gap: 46px;
+  left: 152px;
+  min-height: 229px;
+  position: absolute;
+  top: 109px;
+  width: 532px;
+}
+
+.desktop .trepo-is-the-persona {
+  color: var(--green-house);
+  font-family: var(--font-family-darker_grotesque);
+  font-size: 56px;
+  font-weight: 500;
+  letter-spacing: -1.12px;
+  line-height: 50.4px;
+  margin-left: 3px;
+  min-height: 132px;
+  width: 529px;
+}
+
+.desktop .a-screen-free-batte {
+  color: var(--green-house);
+  font-family: var(--font-family-darker_grotesque);
+  font-size: var(--font-size-l);
+  font-weight: 400;
+  letter-spacing: 0;
+  line-height: 20px;
+  min-height: 51px;
+  width: 461px;
+}
+
+.desktop .overlap-group-container {
+  gap: 114px;
+  height: 143px;
+  left: 514px;
+  min-width: 610px;
+  position: absolute;
+  top: 568px;
+}
+
+.desktop .product-highlight-container {
+  height: 143px;
+  position: relative;
+  width: 248px;
+}
+
+.desktop .frame-109 {
+  align-items: flex-end;
+  background-color: #f3eee7;
+  border-radius: 15px;
+  display: flex;
+  height: 440px;
+  left: 701px;
+  overflow: hidden;
+  padding: 12px 6px;
+  position: absolute;
+  top: 51px;
+  width: 423px;
+}
+
+.desktop .overlap-group-1 {
+  background-image: url(../img/image-20-1.png);
+  background-position: 50% 50%;
+  background-size: cover;
+  gap: 13px;
+  height: 406px;
+  min-width: 406px;
+  padding: 147.8px 121px;
+}
+
+.desktop .your-weekly-consumpt {
+  color: var(--green-house);
+  font-family: var(--font-family-darker_grotesque);
+  font-size: var(--font-size-xs);
+  font-weight: 500;
+  letter-spacing: 0;
+  line-height: 11.7px;
+  margin-top: 4.21px;
+  min-height: 59px;
+  width: 88px;
+}
+
+.desktop .overlap-group1 {
+  background-image: url(../img/ellipse-4-1.svg);
+  background-size: 100% 100%;
+  height: 62px;
+  position: relative;
+  width: 62px;
+}
+
+.desktop .number {
+  color: var(--green-house);
+  font-family: var(--font-family-darker_grotesque);
+  font-size: 26px;
+  font-weight: 500;
+  left: 17px;
+  letter-spacing: -0.52px;
+  line-height: 23.4px;
+  position: absolute;
+  text-align: center;
+  top: 23px;
+  white-space: nowrap;
+}
+
+.desktop .ellipse-3 {
+  height: 62px;
+  left: 0;
+  position: absolute;
+  top: 0;
+  width: 62px;
+}
+
+.desktop .contact-module {
+  align-items: flex-start;
+  display: flex;
+  height: 517px;
+  padding: 51px 154px;
+  width: 1280px;
+}
+
+.desktop .contact {
+  align-items: center;
+  background-color: var(--reef);
+  border-radius: 25px;
+  display: flex;
+  flex-direction: column;
+  height: 402px;
+  overflow: hidden;
+  padding: 94px 0;
+  width: 972px;
+}
+
+.desktop .frame-97 {
+  align-items: center;
+  display: inline-flex;
+  gap: 10px;
+  position: relative;
+}
+
+.desktop .ellipse-4 {
+  background-color: var(--green-house);
+  border-radius: 3px;
+  height: 6px;
+  position: relative;
+  width: 6px;
+}
+
+.desktop .currently-raising-pre-seed-capital {
+  letter-spacing: -0.20px;
+  line-height: 9.0px;
+  margin-top: -1.00px;
+  position: relative;
+  white-space: nowrap;
+  width: fit-content;
+}
+
+.desktop .if-youd-like-to-lea {
+  color: var(--green-house);
+  font-family: var(--font-family-darker_grotesque);
+  font-size: var(--font-size-xxl);
+  font-weight: 500;
+  letter-spacing: -0.64px;
+  line-height: 28.8px;
+  margin-top: 32px;
+  min-height: 58px;
+  text-align: center;
+  width: 512px;
+}
+
+.desktop .were-heads-down-in {
+  letter-spacing: 0;
+  line-height: 12.6px;
+  margin-top: 26px;
+  min-height: 21px;
+  text-align: center;
+  width: 512px;
+}
+
+.desktop .frame-15 {
+  align-items: center;
+  background-color: #ffffff;
+  border-radius: 15px;
+  display: flex;
+  gap: 0px;
+  margin-left: 1.0px;
+  margin-top: 34px;
+  overflow: hidden;
+  padding: 6px 15px;
+  position: relative;
+  width: 455px;
+}
+
+/* new interactive field — inherits the old typography */
+.desktop .frame-15 .email-input {
+  flex: 1 1 auto;          /* lets text span but arrow stays at right */
+  min-width: 0;            /* prevents overflow on small screens      */
+  border: none;
+  background: transparent;
+  outline: none;
+  padding: 0;              /* uses frame‑15’s own padding             */
+  font-family: var(--font-family-darker_grotesque);
+  font-size: var(--font-size-s);
+  font-weight: 400;
+  line-height: normal;
+  text-align: left;      /* keeps the placeholder centred           */
+  color: var(--green-house);   /* entered text colour */
+}
+
+/* placeholder keeps the original faded green */
+.desktop .frame-15 .email-input::placeholder {
+  color: #1d440980;        /* exactly the same RGBA as before */
+}
+
+
+.desktop .email-address {
+  color: #1d440980;
+  font-family: var(--font-family-darker_grotesque);
+  font-size: var(--font-size-s);
+  font-weight: 400;
+  letter-spacing: 0;
+  line-height: normal;
+  position: relative;
+  text-align: center;
+  width: fit-content;
+}
+
+.desktop .frame-16 {
+  align-items: center;
+  background-color: var(--reef);
+  border-radius: 15px;
+  display: flex;
+  gap: 10px;
+  height: 24px;
+  justify-content: center;
+  overflow: hidden;
+  padding: 8px 15px;
+  position: relative;
+  width: 24px;
+  margin-left: auto;
+  border: none;
+  outline: none;          /* optional; keep if you don’t want a ring */
+  box-shadow: none;       /* safety‑catch for Firefox                */
+}
+
+/* subtle shrink while mouse / finger is down */
+.desktop .frame-16:active {
+  transform: scale(0.85);                 /* 15 % smaller */
+  transition: transform 120ms ease-out;   /* smooth in/out */
+}
+
+.desktop .frame-16:active img {
+  transform: translateX(1px);             /* tiny nudge right */
+}
+
+/* success state for the whole box -----------------------------------*/
+.contact.signup-complete{
+    background: var(--green-house);
+}
+
+/* make ALL existing text inside flip to reef ------------------------*/
+.contact.signup-complete,
+.contact.signup-complete *{
+    color: var(--reef) !important;
+}
+
+/* the little success row --------------------------------------------*/
+.signup-success{
+    display:flex;align-items:center;gap:10px;
+    margin-top:34px;               /* same space the pill had */
+    font-family:var(--font-family-darker_grotesque);
+    font-size:var(--font-size-s);
+}
+.signup-success .tick{
+    color: var(--green-house);
+    font:700 18px/1 "Arial",sans-serif;   /* heavier, centered */
+}
+
+/* 1️⃣  the little dot next to “CURRENTLY RAISING…”  */
+.contact.signup-complete .ellipse-4{
+    background: var(--reef);
+}
+
+
+.desktop .arrow-1-2 {
+  margin-left: -7.00px;
+  margin-right: -7.25px;
+}
+
+.desktop .footer {
+  background-color: transparent;
+  flex-shrink: 1;
+  height: 244px;
+  margin-top: 93px;
+  position: relative;
+  width: 1280px;
+}
+
+.desktop .flex-row-1 {
+  align-items: flex-start;
+  display: flex;
+  gap: 230px;
+  height: 77px;
+  left: 30px;
+  min-width: 700px;
+  position: absolute;
+  top: 81px;
+}
+
+.desktop .flex-col-2 {
+  gap: 23px;
+  min-height: 77px;
+  width: 290px;
+}
+
+.desktop .group-3 {
+  height: 29px;
+  width: 104px;
+}
+
+.desktop .building-a-fridge-sc {
+  color: var(--green-house);
+  font-family: var(--font-family-darker_grotesque);
+  font-size: var(--font-size-m);
+  font-weight: 400;
+  letter-spacing: 0;
+  line-height: 16px;
+  min-height: 25px;
+  width: 290px;
+}
+
+.desktop .frame-110 {
+  align-items: flex-end;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  min-height: 73px;
+  width: 180px;
+}
+
+.desktop .built-by-a-passionat {
+  letter-spacing: -0.20px;
+  line-height: 9.0px;
+  margin-top: -1px;
+  min-height: 6px;
+  min-width: 179px;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.desktop .image-container {
+  align-items: center;
+  display: flex;
+  gap: 15px;
+  margin-right: -10px;
+  min-width: 182px;
+}
+
+.desktop .image-27 {
+  height: 48px;
+  object-fit: cover;
+  width: 48px;
+}
+
+.desktop .image-24 {
+  height: 40px;
+  object-fit: cover;
+  width: 40px;
+}
+
+.desktop .image-28 {
+  height: 29px;
+  margin-bottom: 1.0px;
+  object-fit: cover;
+  width: 64px;
+}
+
+.desktop .matttrepoai-1-858-232-1987 {
+  color: var(--green-house);
+  font-family: var(--font-family-darker_grotesque);
+  font-size: var(--font-size-m);
+  font-weight: 400;
+  left: 1146px;
+  letter-spacing: 0;
+  line-height: 16px;
+  position: absolute;
+  top: 117px;
+  width: 134px;
+}
+
+.desktop .place {
+  left: 1145px;
+  letter-spacing: 0;
+  line-height: 9.0px;
+  position: absolute;
+  top: 80px;
+  white-space: nowrap;
+}
+
+.desktop .arrow-1-3 {
+  height: 3.68px;
+  position: relative;
+  width: 8.25px;
+}
+
+.desktop .button-2 {
+  align-items: center;
+  background-color: var(--reef);
+  border-radius: 15px;
+  cursor: pointer;
+  display: inline-flex;
+  gap: 10px;
+  justify-content: center;
+  overflow: hidden;
+  padding: 8px 23px;
+  position: relative;
+}
+
+.desktop .flex {
+  align-items: flex-start;
+  display: flex;
+}
+
+.desktop .flex-col-3 {
+  align-items: flex-start;
+  display: flex;
+  flex-direction: column;
+}
+
+.desktop .overlap-group-2 {
+  align-items: flex-start;
+  display: flex;
+}
+
+.desktop .rectangle {
+  height: 30px;
+  left: 13px;
+  position: absolute;
+  top: -13px;
+  transform: rotate(-90deg);
+  width: 4px;
+}

@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+    <title>TREPO</title>
+    <link rel="stylesheet" href="css/styleguide.css">
+    <link rel="stylesheet" href="css/globals.css">
+    <link rel="stylesheet" href="css/home.css">
+    <script src="https://cdn.auth0.com/js/auth0-spa-js/1.20/auth0-spa-js.production.js"></script>
+    <script src="js/auth.js" defer></script>
+    <script src="js/index.js" defer></script>
+</head>
+<body style="margin: 0; background: #ffffff">
+    <input type="hidden" id="anPageName" name="page" value="home">
+    <div class="container-center-horizontal">
+        <div class="home screen">
+            <!-- Logo and Navigation -->
+            <div class="trepo violetsans-regular-normal-green-house-20px">TREPO</div>
+            <nav class="navbar">
+                <div class="nav-left">
+                    <ul class="nav-links" id="auth-links">
+                        <li><a href="index.html" class="active">Home</a></li>
+                        <li><a href="insights.html">Insights</a></li>
+                        <li><a href="week.html">Week</a></li>
+                        <li><a href="shopping.html">Shopping</a></li>
+                    </ul>
+                </div>
+            </nav>
+
+            <!-- Hero Section -->
+            <h1 id="welcome-message" class="healthier-eating-ev">
+                <span class="span0 violetsans-regular-normal-green-house-36px">Groceries just got simpler</span>
+                <span class="span1 violetsans-regular-normal-green-house-36px">.</span>
+            </h1>
+
+            <div class="frame-46">
+                <button id="auth-button" class="log-in-btn">Login</button>
+            </div>
+            <p class="dont-have-an-accoun violetsans-regular-normal-green-house-14px">
+                <span class="span0-1 violetsans-regular-normal-green-house-14px">Don’t have an account yet? </span>
+                <a href="https://docs.google.com/forms/d/e/1FAIpQLSepAEDZ9j_Ux2aydJRWeovkLjhbQlSew-wfokwvnrIhlfyFIw/viewform?usp=dialog" class="waitlist-link" target="_blank">Join the waitlist here.</a>
+            </p>
+        </div>
+    </div>
+</body>
+</html>

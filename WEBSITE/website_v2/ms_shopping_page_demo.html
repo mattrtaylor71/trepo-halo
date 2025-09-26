@@ -1,0 +1,520 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Trepo Smart Shopping</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --green: #43B02A;
+      --yellow: #FFD600;
+      --gray-bg: #f6f7fb;
+      --sidebar: #fff;
+      --header: #fff;
+      --border: #e5e5e5;
+      --black: #222;
+      --banner: #111;
+    }
+    html, body {
+      height: 100%;
+      margin: 0;
+      padding: 0;
+      font-family: 'Inter', Arial, sans-serif;
+      background: var(--gray-bg);
+      color: var(--black);
+    }
+    body {
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+    .header {
+      background: var(--header);
+      box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+      padding: 0 32px;
+      height: 72px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+    .header-left {
+      display: flex;
+      align-items: center;
+      gap: 18px;
+    }
+    .instacart-logo {
+      width: 120px;
+      height: 32px;
+      background: url('https://upload.wikimedia.org/wikipedia/commons/7/7b/Instacart_logo_2022.svg') no-repeat center/contain;
+      display: inline-block;
+    }
+    .search-bar {
+      background: #f3f3f3;
+      border-radius: 8px;
+      padding: 8px 16px;
+      border: 1px solid var(--border);
+      font-size: 1rem;
+      width: 260px;
+      outline: none;
+    }
+    .header-right {
+      display: flex;
+      align-items: center;
+      gap: 18px;
+    }
+    .delivery-info {
+      background: #f3f3f3;
+      border-radius: 20px;
+      padding: 6px 18px;
+      font-size: 0.95rem;
+      color: #222;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .cart-btn {
+      background: var(--green);
+      color: #fff;
+      border: none;
+      border-radius: 50%;
+      width: 40px;
+      height: 40px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.3rem;
+      cursor: pointer;
+      position: relative;
+    }
+    .cart-btn:after {
+      content: '0';
+      position: absolute;
+      top: 6px;
+      right: 6px;
+      background: #fff;
+      color: var(--green);
+      font-size: 0.8rem;
+      border-radius: 50%;
+      width: 18px;
+      height: 18px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 700;
+      border: 2px solid var(--green);
+    }
+    .layout {
+      display: flex;
+      flex: 1 1 auto;
+      min-height: 0;
+    }
+    .sidebar {
+      width: 240px;
+      background: var(--sidebar);
+      border-right: 1px solid var(--border);
+      padding: 32px 0 0 0;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      position: sticky;
+      top: 72px;
+    }
+    .sidebar-content {
+      width: 100%;
+      padding-left: 32px;
+    }
+    .store-info {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      margin-bottom: 24px;
+    }
+    .store-logo {
+      width: 48px;
+      height: 48px;
+      border-radius: 12px;
+      background: #eee;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 2rem;
+    }
+    .store-details {
+      font-size: 1rem;
+    }
+    .sidebar-nav {
+      margin-bottom: 32px;
+    }
+    .sidebar-nav a {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      color: #222;
+      text-decoration: none;
+      font-size: 1.05rem;
+      padding: 10px 0;
+      border-radius: 6px;
+      transition: background 0.15s;
+      font-weight: 500;
+    }
+    .sidebar-nav a:hover {
+      background: #f6f7fb;
+    }
+    .sidebar-browse {
+      font-size: 0.98rem;
+      color: #888;
+      margin-top: 24px;
+    }
+    .sidebar-browse ul {
+      list-style: none;
+      padding: 0;
+      margin: 8px 0 0 0;
+    }
+    .sidebar-browse li {
+      margin-bottom: 6px;
+    }
+    .main-content {
+      flex: 1 1 auto;
+      padding: 32px 0 0 0;
+      min-width: 0;
+    }
+    .banner {
+      background: var(--banner);
+      color: #fff;
+      border-radius: 18px;
+      margin: 0 32px 32px 32px;
+      padding: 32px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      min-height: 120px;
+      font-size: 1.5rem;
+      font-weight: 500;
+      overflow: hidden;
+      position: relative;
+    }
+    .banner .banner-img {
+      height: 80px;
+      width: 180px;
+      object-fit: contain;
+      margin-left: 32px;
+    }
+    .section-title {
+      font-size: 2rem;
+      font-weight: 700;
+      margin: 0 0 24px 32px;
+      color: #222;
+    }
+    .product-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 24px;
+      margin: 0 32px 48px 32px;
+    }
+    .product-card {
+      background: #fff;
+      border-radius: 18px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+      padding: 18px 18px 16px 18px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      position: relative;
+      min-height: 260px;
+      transition: box-shadow 0.15s;
+    }
+    .product-card:hover {
+      box-shadow: 0 6px 24px rgba(67,176,42,0.10);
+    }
+    .product-img {
+      width: 100px;
+      height: 100px;
+      background: #f6f7fb;
+      border-radius: 12px;
+      margin-bottom: 18px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 2.5rem;
+      color: #43B02A;
+    }
+    .product-name {
+      font-size: 1.1rem;
+      font-weight: 600;
+      color: #222;
+      margin-bottom: 6px;
+      text-align: center;
+      min-height: 48px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .product-badge {
+      display: inline-block;
+      padding: 2px 10px;
+      font-size: 12px;
+      border-radius: 999px;
+      background: #e9f5e1;
+      color: #43B02A;
+      font-weight: 600;
+      margin-bottom: 6px;
+    }
+    .product-desc {
+      font-size: 13px;
+      color: #888;
+      margin-bottom: 12px;
+      text-align: center;
+      min-height: 32px;
+    }
+    .product-footer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      width: 100%;
+      margin-top: auto;
+    }
+    .product-price {
+      font-size: 1.15rem;
+      font-weight: 700;
+      color: #222;
+      background: var(--yellow);
+      border-radius: 6px;
+      padding: 2px 10px;
+      margin-right: 8px;
+    }
+    .add-btn {
+      background: var(--green);
+      color: #fff;
+      border: none;
+      border-radius: 999px;
+      padding: 10px 28px;
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.15s;
+      box-shadow: 0 1px 2px rgba(67,176,42,0.08);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .add-btn:hover {
+      background: #368c22;
+    }
+    @media (max-width: 900px) {
+      .layout {
+        flex-direction: column;
+      }
+      .sidebar {
+        width: 100%;
+        min-height: unset;
+        border-right: none;
+        border-bottom: 1px solid var(--border);
+        flex-direction: row;
+        align-items: flex-start;
+        padding: 0;
+        position: static;
+      }
+      .sidebar-content {
+        padding-left: 16px;
+      }
+      .main-content {
+        padding: 24px 0 0 0;
+      }
+      .banner, .section-title, .product-grid {
+        margin-left: 8px;
+        margin-right: 8px;
+      }
+    }
+    @media (max-width: 600px) {
+      .header {
+        padding: 0 8px;
+        height: 56px;
+      }
+      .instacart-logo {
+        width: 80px;
+        height: 24px;
+      }
+      .search-bar {
+        width: 120px;
+        font-size: 0.95rem;
+      }
+      .sidebar {
+        display: none;
+      }
+      .main-content {
+        padding: 12px 0 0 0;
+      }
+      .banner {
+        padding: 18px 8px;
+        min-height: 70px;
+        font-size: 1rem;
+      }
+      .product-grid {
+        grid-template-columns: 1fr;
+        gap: 12px;
+      }
+      .product-card {
+        min-height: 180px;
+        padding: 10px 8px 10px 8px;
+      }
+      .product-img {
+        width: 60px;
+        height: 60px;
+        font-size: 1.3rem;
+      }
+      .product-name {
+        font-size: 1rem;
+        min-height: 32px;
+      }
+      .product-footer {
+        flex-direction: column;
+        gap: 6px;
+      }
+      .add-btn {
+        width: 100%;
+        justify-content: center;
+        padding: 8px 0;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="header-left">
+      <span class="instacart-logo"></span>
+      <input class="search-bar" placeholder="Try 'milk' or 'eggs'" />
+    </div>
+    <div class="header-right">
+      <span class="delivery-info">Delivery <span style="font-size:1.1em;">•</span> 175 Pfeiffer St</span>
+      <button class="cart-btn" aria-label="Cart">
+        <span style="font-size:1.3em;">🛒</span>
+      </button>
+    </div>
+  </div>
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="sidebar-content">
+        <div class="store-info">
+          <div class="store-logo">S</div>
+          <div class="store-details">
+            <div style="font-weight:700;">Safeway</div>
+            <div style="font-size:0.95em; color:#888;">Pricing & fees • 8% service fee</div>
+            <div style="font-size:0.95em; color:#43B02A;">100% satisfaction guarantee</div>
+          </div>
+        </div>
+        <nav class="sidebar-nav">
+          <a href="#"><span>🛒</span> Shop</a>
+          <a href="#"><span>🔁</span> Buy it again</a>
+          <a href="#"><span>📰</span> Flyers</a>
+          <a href="#"><span>🍳</span> Recipes</a>
+          <a href="#"><span>📝</span> Lists</a>
+        </nav>
+        <div class="sidebar-browse">
+          Browse aisles
+          <ul>
+            <li>Produce</li>
+            <li>Meat & Seafood</li>
+            <li>Dairy & Eggs</li>
+            <li>Snacks</li>
+            <li>Beverages</li>
+          </ul>
+        </div>
+      </div>
+    </aside>
+    <main class="main-content">
+      <div class="banner">
+        <span>siggi's &nbsp; 15g of high-quality protein</span>
+        <img class="banner-img" src="https://d2lnr5mha7bycj.cloudfront.net/product-image/file/large_6e2e7e2b-2e7e-4e7e-8e2e-2e7e2e7e2e7e.png" alt="siggi's yogurt" />
+      </div>
+      <div class="section-title">Picked For You</div>
+      <div class="product-grid">
+        <!-- Smart Predictions -->
+        <div class="product-card">
+          <div class="product-img">🍚</div>
+          <div class="product-name">Organic Jasmine Rice</div>
+          <div class="product-badge">Score: 85</div>
+          <div class="product-desc">Bought 5 days ago • Repeats weekly</div>
+          <div class="product-footer">
+            <span class="product-price">$3.99</span>
+            <button class="add-btn">+ Add</button>
+          </div>
+        </div>
+        <div class="product-card">
+          <div class="product-img">🧀</div>
+          <div class="product-name">Low-Fat Cottage Cheese</div>
+          <div class="product-badge">Score: 90</div>
+          <div class="product-desc">Bought 4 days ago • High frequency</div>
+          <div class="product-footer">
+            <span class="product-price">$2.49</span>
+            <button class="add-btn">+ Add</button>
+          </div>
+        </div>
+        <!-- Time to Replenish -->
+        <div class="product-card">
+          <div class="product-img">🍝</div>
+          <div class="product-name">Trader Joe's Penne Rigate</div>
+          <div class="product-desc">8 days since last bought • Typical interval: 7–9 days</div>
+          <div class="product-footer">
+            <span class="product-price">$1.99</span>
+            <button class="add-btn">+ Add</button>
+          </div>
+        </div>
+        <div class="product-card">
+          <div class="product-img">🧈</div>
+          <div class="product-name">Unsalted Butter Quarters</div>
+          <div class="product-desc">9 days since last bought • Runs low now</div>
+          <div class="product-footer">
+            <span class="product-price">$3.29</span>
+            <button class="add-btn">+ Add</button>
+          </div>
+        </div>
+        <!-- Health Favorites -->
+        <div class="product-card">
+          <div class="product-img">🫐</div>
+          <div class="product-name">Organic Blueberries</div>
+          <div class="product-badge">Score: 95</div>
+          <div class="product-desc">No UPF • Low sugar • High antioxidants</div>
+          <div class="product-footer">
+            <span class="product-price">$4.99</span>
+            <button class="add-btn">+ Add</button>
+          </div>
+        </div>
+        <div class="product-card">
+          <div class="product-img">🥚</div>
+          <div class="product-name">Pasture-Raised Eggs</div>
+          <div class="product-badge">Score: 95</div>
+          <div class="product-desc">Whole food • High protein • Frequent buy</div>
+          <div class="product-footer">
+            <span class="product-price">$5.49</span>
+            <button class="add-btn">+ Add</button>
+          </div>
+        </div>
+        <!-- Smart Swaps -->
+        <div class="product-card">
+          <div class="product-img">🥨</div>
+          <div class="product-name">Swap: Cheddar Snack Puffs</div>
+          <div class="product-desc">Low health score (35) → Try Kale Chips (Score: 85)</div>
+          <div class="product-footer">
+            <span class="product-price">$2.99</span>
+            <button class="add-btn">+ Swap</button>
+          </div>
+        </div>
+        <div class="product-card">
+          <div class="product-img">🌶️</div>
+          <div class="product-name">Swap: Chili Lime Chips</div>
+          <div class="product-desc">Processed • High UPF → Try Baked Veggie Crisps</div>
+          <div class="product-footer">
+            <span class="product-price">$2.79</span>
+            <button class="add-btn">+ Swap</button>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+</body>
+</html>

@@ -1,0 +1,724 @@
+/* screen - mobile */
+
+.mobile {
+  align-items: flex-start;
+  background-color: var(--white);
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  position: relative;
+}
+
+.mobile-wrapper {
+  display: flex;
+  justify-content: center;   /* centers .mobile horizontally */
+  width: 100vw;              /* fills the full viewport */
+  overflow-x: hidden;        /* avoids horizontal scroll */
+}
+
+
+.mobile .header {
+  align-self: stretch;
+  background-color: transparent;
+  height: 78px;
+  position: relative;
+  width: 100%;
+}
+
+.mobile .group-2-2 {
+  height: 23px;
+  left: 20px;
+  position: absolute;
+  top: 28px;
+  width: 83px;
+}
+
+.mobile .hero-section {
+  align-self: stretch;
+  height: 714px;
+  position: relative;
+  width: 100%;
+}
+
+.mobile .flex-col {
+  align-items: center;
+  display: flex;
+  flex-direction: column;
+  left: 20px;
+  min-height: 639px;
+  position: relative;
+  top: 55px;
+  width: 353px;
+}
+
+.mobile .trepo-is-the-persona {
+  color: var(--green-house);
+  font-family: var(--font-family-darker_grotesque);
+  font-size: 36px;
+  font-weight: 500;
+  letter-spacing: -0.72px;
+  line-height: 32.4px;
+  min-height: 84px;
+  text-align: center;
+  width: 353px;
+}
+
+.mobile .a-screen-free-batte {
+  letter-spacing: 0;
+  line-height: 16px;
+  margin-top: 29px;
+  min-height: 41px;
+  text-align: center;
+  width: 353px;
+}
+
+.mobile .flex-row {
+  align-items: flex-start;
+  justify-content: center;
+  display: flex;
+  gap: 6px;
+  margin-left: 0px;
+  margin-top: 41px;
+  min-width: 324px;
+}
+
+.mobile .button {
+  align-items: center;
+  background-color: var(--reef);
+  border-radius: 15px;
+  display: inline-flex;
+  gap: 10px;
+  justify-content: center;
+  overflow: hidden;
+  padding: 8px 23px;
+  position: relative;
+}
+
+.mobile .get-in-touch {
+  color: var(--green-house);
+  font-family: var(--font-family-darker_grotesque);
+  font-size: var(--font-size-s);
+  font-weight: 400;
+  height: 23px;
+  letter-spacing: 0;
+  line-height: normal;
+  margin-top: -1.00px;
+  position: relative;
+  text-align: center;
+  width: 62px;
+}
+
+.mobile .arrow-1 {
+  height: 3.68px;
+  margin-right: -0.25px;
+  position: relative;
+  width: 8.25px;
+}
+
+.mobile .frame-114 {
+  align-items: center;
+  border-radius: 15px;
+  display: inline-flex;
+  gap: 10px;
+  height: 39px;
+  justify-content: center;
+  overflow: hidden;
+  padding: 8px 23px;
+  position: relative;
+}
+
+.mobile .download-pitch-materials {
+  color: var(--green-house);
+  font-family: var(--font-family-darker_grotesque);
+  font-size: var(--font-size-s);
+  font-weight: 400;
+  height: 21px;
+  letter-spacing: 0;
+  line-height: normal;
+  position: relative;
+  width: 126px;
+}
+
+.mobile .download {
+  height: 10px;
+  position: relative;
+  width: 10px;
+}
+
+.mobile .vector-container-1 {
+  height: 8px;
+  left: 1px;
+  position: relative;
+  top: 1px;
+  width: 8px;
+}
+
+.mobile .vector-2 {
+  height: 3px;
+  left: 0;
+  position: absolute;
+  top: 5px;
+  width: 8px;
+}
+
+.mobile .vector-3 {
+  height: 3px;
+  left: 2px;
+  position: absolute;
+  top: 3px;
+  width: 5px;
+}
+
+.mobile .vector-4 {
+  height: 6px;
+  left: 4px;
+  position: absolute;
+  top: 0;
+  width: 1px;
+}
+
+.mobile .frame-113 {
+  align-items: flex-start;
+  background-color: #f3eee7;
+  border-radius: 15px;
+  display: flex;
+  height: 351px;
+  margin-top: 54px;
+  overflow: hidden;
+  width: 353px;
+}
+
+.mobile .overlap-group {
+  align-items: flex-start;
+  background-image: url(../img/image-20-1.png);
+  background-position: 50% 50%;
+  background-size: cover;
+  display: flex;
+  gap: 13px;
+  height: 406px;
+  margin-left: -26px;
+  margin-top: -27px;
+  min-width: 406px;
+  padding: 147.8px 121px;
+}
+
+.mobile .your-weekly-consumpt {
+  color: var(--green-house);
+  font-family: var(--font-family-darker_grotesque);
+  font-size: var(--font-size-xs);
+  font-weight: 500;
+  letter-spacing: 0;
+  line-height: 11.7px;
+  margin-top: 4.21px;
+  min-height: 59px;
+  width: 88px;
+}
+
+.mobile .overlap-group1 {
+  background-image: url(../img/ellipse-4.svg);
+  background-size: 100% 100%;
+  height: 62px;
+  position: relative;
+  width: 62px;
+}
+
+.mobile .number {
+  color: var(--green-house);
+  font-family: var(--font-family-darker_grotesque);
+  font-size: 26px;
+  font-weight: 500;
+  left: 17px;
+  letter-spacing: -0.52px;
+  line-height: 23.4px;
+  position: absolute;
+  text-align: center;
+  top: 23px;
+  white-space: nowrap;
+}
+
+.mobile .ellipse-3 {
+  height: 62px;
+  left: 0;
+  position: absolute;
+  top: 0;
+  width: 62px;
+}
+
+.mobile .product-features {
+  align-items: center;
+  align-self: stretch;
+  display: flex;
+  flex: 0 0 auto;
+  gap: 10px;
+  padding: 15px 20px;
+  position: relative;
+  width: 100%;
+}
+
+.mobile .product-features-1 {
+  flex-direction: column;
+  gap: 18px;
+  width: 353px;
+}
+
+.mobile .product-features-item {
+  align-self: stretch;
+  background-color: var(--white);
+  border: 1px solid;
+  border-color: var(--saltpan);
+  border-radius: 15px;
+  flex: 0 0 auto;
+  justify-content: space-between;
+  overflow: hidden;
+  padding: 30px 22px;
+  width: 100%;
+}
+
+.mobile .frame-115-1 {
+  align-items: flex-start;
+  display: inline-flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  gap: 20px;
+  justify-content: center;
+  position: relative;
+}
+
+.mobile .eliminates-harmful-i-1 {
+  letter-spacing: -0.40px;
+  line-height: 18.0px;
+  margin-top: -1.00px;
+  position: relative;
+  width: 252px;
+}
+
+.mobile .informs-you-when-you {
+  color: #1d440999;
+  font-family: var(--font-family-darker_grotesque);
+  font-size: var(--font-size-s);
+  font-weight: 400;
+  letter-spacing: 0;
+  line-height: 12.6px;
+  position: relative;
+  width: 253px;
+}
+
+.mobile .group {
+  height: 13px;
+  position: relative;
+  width: 13px;
+}
+
+.mobile .vector {
+  height: 2px;
+  left: 0;
+  position: absolute;
+  top: 6px;
+  width: 13px;
+}
+
+.mobile .vector-5 {
+  height: 2px;
+  left: -1333px;
+  position: absolute;
+  top: -706px;
+  width: 13px;
+}
+
+.mobile .frame-115 {
+  height: 29px;
+  position: relative;
+  width: 252px;
+}
+
+.mobile .eliminates-harmful-i {
+  left: 0;
+  letter-spacing: -0.40px;
+  line-height: 18.0px;
+  position: absolute;
+  top: -1px;
+  width: 252px;
+}
+
+.mobile .vector-container {
+  height: 13px;
+  position: relative;
+}
+
+.mobile .vector-1 {
+  height: 13px;
+  left: 6px;
+  position: absolute;
+  top: 0;
+  width: 2px;
+}
+
+.mobile .contact-module {
+  align-self: stretch;
+  height: 364px;
+  position: relative;
+  width: 100%;
+}
+
+.mobile .frame-86 {
+  align-items: center;
+  background-color: var(--reef);
+  border-radius: 25px;
+  display: flex;
+  flex-direction: column;
+  gap: 30px;
+  left: 20px;
+  overflow: hidden;
+  padding: 60px 20px;
+  position: relative;
+  top: 20px;
+  width: 353px;
+}
+
+.mobile .frame-97 {
+  align-items: center;
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 10px;
+  position: relative;
+}
+
+.mobile .ellipse-4 {
+  background-color: var(--green-house);
+  border-radius: 3px;
+  height: 6px;
+  position: relative;
+  width: 6px;
+}
+
+.mobile .currently-raising-pre-seed-capital {
+  letter-spacing: -0.20px;
+  line-height: 9.0px;
+  margin-top: -1.00px;
+  position: relative;
+  white-space: nowrap;
+  width: fit-content;
+}
+
+.mobile .if-youd-like-to-lea {
+  align-self: stretch;
+  color: var(--green-house);
+  font-family: var(--font-family-darker_grotesque);
+  font-size: var(--font-size-xl);
+  font-weight: 500;
+  letter-spacing: -0.48px;
+  line-height: 21.6px;
+  position: relative;
+  text-align: center;
+}
+
+.mobile .were-heads-down-in {
+  align-self: stretch;
+  color: var(--green-house);
+  font-family: var(--font-family-darker_grotesque);
+  font-size: var(--font-size-xxs);
+  font-weight: 400;
+  letter-spacing: 0;
+  line-height: 10.8px;
+  position: relative;
+  text-align: center;
+}
+
+.mobile .frame-15 {
+  align-items: center;
+  align-self: stretch;
+  background-color: var(--white);
+  border-radius: 15px;
+  display: flex;
+  flex: 0 0 auto;
+  justify-content: space-between;
+  overflow: hidden;
+  padding: 6px 15px;
+  position: relative;
+  width: 100%;
+}
+
+/* turn the pill into an input ---------------------------------------*/
+.mobile .frame-15 .email-input{
+    flex:1 1 auto;
+    min-width:0;
+    border:none;
+    background:transparent;
+    outline:none;
+    padding:0;
+    font-family:var(--font-family-darker_grotesque);
+    font-size:var(--font-size-xxs);
+    color:var(--green-house);
+}
+.mobile .frame-15 .email-input::placeholder{
+    color:#1d440980;
+}
+
+/* tiny press effect like desktop ------------------------------------*/
+.mobile .frame-16:active{transform:scale(.85);transition:120ms;}
+.mobile .frame-16:active img{transform:translateX(1px);}
+
+/* success colours ----------------------------------------------------*/
+.frame-86.signup-complete{background:var(--green-house);}
+.frame-86.signup-complete,
+.frame-86.signup-complete *{color:var(--reef)!important;}
+
+.signup-success{
+    display:flex;align-items:center;gap:10px;margin-top:30px;
+    font-family:var(--font-family-darker_grotesque);
+    font-size:var(--font-size-xxs);
+}
+.signup-success .tick{
+    width:24px;height:24px;border-radius:12px;
+    display:inline-flex;align-items:center;justify-content:center;
+    font:700 16px/1 Arial,sans-serif;
+}
+
+/* little dot flips too */
+.frame-86.signup-complete .ellipse-4{background:var(--reef);}
+
+
+.mobile .email-address {
+  color: #1d440980;
+  font-family: var(--font-family-darker_grotesque);
+  font-size: var(--font-size-xxs);
+  font-weight: 400;
+  letter-spacing: 0;
+  line-height: normal;
+  position: relative;
+  text-align: center;
+  width: fit-content;
+}
+
+.mobile .frame-16 {
+  align-items: center;
+  background-color: var(--reef);
+  border-radius: 15px;
+  display: flex;
+  gap: 10px;
+  height: 20px;
+  justify-content: center;
+  overflow: hidden;
+  padding: 8px 15px;
+  position: relative;
+  width: 20px;
+  border:none !important;     /* remove grey border */
+  outline:none;               /* remove focus ring  */
+  box-shadow:none;            /* Firefox safeguard  */
+}
+
+.mobile .arrow-1-1 {
+  height: 3.68px;
+  margin-left: -9.00px;
+  margin-right: -9.25px;
+  position: relative;
+  width: 8.25px;
+}
+
+.mobile .footer {
+  align-self: stretch;
+  background-color: transparent;
+  height: 305px;
+  position: relative;
+  width: 100%;
+}
+
+.mobile .flex-row-1 {
+  align-items: flex-start;
+  display: flex;
+  gap: 20px;
+  height: 93px;
+  left: 20px;
+  min-width: 353px;
+  position: absolute;
+  top: 180px;
+}
+
+.mobile .flex-col-1 {
+  gap: 23px;
+  min-height: 93px;
+  width: 204px;
+}
+
+.mobile .group-6 {
+  height: 29px;
+  width: 104px;
+}
+
+.mobile .building-a-fridge-sc {
+  letter-spacing: 0;
+  line-height: 16px;
+  min-height: 41px;
+  width: 204px;
+}
+
+.mobile .flex-col-2 {
+  gap: 31px;
+  min-height: 61px;
+  width: 129px;
+}
+
+.mobile .place {
+  letter-spacing: 0;
+  line-height: 9.0px;
+  margin-top: -1px;
+  min-height: 6px;
+  min-width: 39px;
+  position: relative;
+  white-space: nowrap;
+}
+
+.mobile .matttrepoai-1-858-232-1987 {
+  letter-spacing: 0;
+  line-height: 16px;
+  margin-left: 1px;
+  min-height: 25px;
+  width: 128px;
+}
+
+.mobile .frame-111 {
+  align-items: flex-end;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  left: 107px;
+  min-height: 73px;
+  position: absolute;
+  top: 21px;
+  width: 180px;
+}
+
+.mobile .built-by-a-passionat {
+  letter-spacing: -0.20px;
+  line-height: 9.0px;
+  margin-top: -1px;
+  min-height: 6px;
+  min-width: 179px;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.mobile .image-container {
+  align-items: center;
+  display: flex;
+  margin-right: -5px;
+  min-width: 180px;
+}
+
+.mobile .image-27 {
+  height: 48px;
+  object-fit: cover;
+  width: 48px;
+}
+
+.mobile .image-24 {
+  height: 40px;
+  margin-left: 18px;
+  object-fit: cover;
+  width: 40px;
+}
+
+.mobile .image-28 {
+  height: 29px;
+  margin-bottom: 1.0px;
+  margin-left: 10px;
+  object-fit: cover;
+  width: 64px;
+}
+
+.mobile .flex-col-3 {
+  align-items: flex-start;
+  display: flex;
+  flex-direction: column;
+}
+
+.mobile .product-features-2 {
+  align-items: flex-start;
+  display: flex;
+  position: relative;
+}
+
+
+/* accordion ----------------------------------------------------------*/
+.product-features-item{
+    cursor:pointer;                 /* shows it’s tappable */
+    transition:box-shadow .2s;
+}
+.product-features-item:active{
+    box-shadow:0 0 4px #0001;       /* tiny feedback tap */
+}
+
+/* body text wrapper */
+.product-features-item .details{
+    max-height:0;
+    overflow:hidden;
+    transition:max-height .35s ease;
+}
+
+/* expanded state – added by JS */
+.product-features-item.open .details{
+    max-height:200px;               /* big enough for your copy */
+}
+
+/* rotate the caret when open */
+.product-features-item.open .group{
+    transform:rotate(180deg);
+    transition:transform .25s;
+}
+
+/* let the second & third cards grow like the first one -------------*/
+.product-features-item .frame-115{
+    height:auto !important;          /* ditch the 29 px cap  */
+    display:flex;                    /* stack children       */
+    flex-direction:column;
+    gap:20px;                        /* same spacing as card #1 */
+}
+
+.product-features-item .vector-5{
+    left:6px !important;   /* centre horizontally (13‑px box)  */
+    top:0  !important;     /* flush to the top                 */
+    width:2px !important;  /* slim vertical bar                */
+    height:13px !important;
+}
+
+/* turn “+” into “–” when the card opens ---------------------------*/
+.product-features-item.open .vector-5{
+    opacity:0;             /* simply hide the vertical stroke  */
+    transition:opacity .25s;
+}
+
+/* === accordion toggle drawn with CSS ============================= */
+.product-features-item .group{
+    position:relative;            /* anchor the pseudo‑elements   */
+    width:20px; height:20px;      /* a touch‑friendly hit‑area    */
+    flex-shrink:0;                /* keep its size in flex row    */
+    margin-left:auto;             /* push it to the right edge    */
+    cursor:pointer;
+}
+
+/* horizontal bar */
+.product-features-item .group::before{
+    content:"";
+    position:absolute;
+    top:50%; left:0;
+    width:100%; height:2px;
+    background:var(--green-house);
+    transform:translateY(-50%);
+    transition:.25s;
+}
+
+/* vertical bar (forms the +) */
+.product-features-item .group::after{
+    content:"";
+    position:absolute;
+    left:50%; top:0;
+    width:2px; height:100%;
+    background:var(--green-house);
+    transform:translateX(-50%);
+    transition:.25s;
+}
+
+/* when the card is open -> turn “+” into “–” */
+.product-features-item.open .group::after{
+    opacity:0;                    /* hide the vertical bar        */
+}

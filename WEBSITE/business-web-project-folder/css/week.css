@@ -1,0 +1,236 @@
+/* Icon Button */
+.icon-button {
+    position: absolute;
+    top: 10px; 
+    right: 10px; 
+    background: url('https://i.ibb.co/NFr1zGG/image.png') no-repeat center center;
+    background-size: contain;
+    width: 40px; 
+    height: 40px; 
+    border: none; 
+    cursor: pointer; 
+    transition: transform 0.2s, background-color 0.2s, box-shadow 0.2s; 
+}
+
+.icon-button:hover {
+    transform: scale(1.2); 
+    background-color: rgba(0, 0, 0, 0.1); 
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2); 
+}
+
+/* Submit Button */
+.submit-button {
+    margin: 20px 0; 
+    padding: 10px 20px; 
+    font-size: 16px; 
+    background-color: #00B5E2; 
+    color: white; 
+    border: none; 
+    border-radius: 5px; 
+    cursor: pointer; 
+    transition: background-color 0.3s; 
+}
+
+.submit-button:hover {
+    background-color: #008cb5; 
+}
+
+/* Navigation Menu Styles */
+.top-menu {
+    background-color: #00b5e2; /* Dark blue background for the menu */
+    padding: 15px 0;
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1); /* Subtle shadow for depth */
+    position: fixed;
+    width: 100%;
+    top: 0;
+    left: 0;
+    z-index: 1000;
+}
+
+.top-menu ul {
+    list-style-type: none;
+    margin: 0;
+    padding: 0;
+    text-align: center;
+}
+
+.top-menu ul li {
+    display: inline-block;
+    margin: 0 5px;
+}
+
+.top-menu ul li a {
+    font-family: 'Avenir', sans-serif; 
+    font-size: 18px;
+    color: #ecf0f1; /* Light text color */
+    text-decoration: none;
+    padding: 10px 20px;
+    border-radius: 5px;
+    transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+.top-menu ul li a:hover {
+    background-color: #3498db; /* Blue background on hover */
+    color: #fff;
+}
+
+.top-menu ul li a:active {
+    background-color: #2980b9; /* Darker blue when active */
+}
+
+body {
+    font-family: 'Lora', serif; 
+    background: linear-gradient(to bottom right, #f0f4ff, #e6ecf5); 
+    color: #333; 
+    margin: 0;
+    padding: 40px;
+    padding-top: 70px; /* Ensure page content is not hidden behind fixed nav */
+}
+
+.container {
+    max-width: 1200px;
+    margin: 0 auto;
+    text-align: center;
+}
+
+h1 {
+    font-family: 'Helvetica Neue', Arial, sans-serif; 
+    font-size: 48px; 
+    margin-bottom: 40px;
+    color: #2c3e50; 
+    font-weight: 600; 
+}
+
+.day-section {
+    margin: 50px 0; 
+    text-align: left;
+}
+
+.day-title {
+    font-family: 'Montserrat', sans-serif; 
+    font-size: 32px; 
+    color: #2c3e50; 
+    margin-bottom: 20px;
+    font-weight: 600; 
+}
+
+.feed-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); 
+    gap: 30px; 
+}
+
+.item {
+    background-color: #ffffff; 
+    padding: 20px; 
+    border-radius: 12px; 
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1); 
+    text-align: center; 
+    transition: transform 0.3s, box-shadow 0.3s; 
+    position: relative; 
+}
+
+.item.selected {
+    border: 2px solid green; 
+}
+
+.item.highlight {
+    border: 2px solid red; 
+}
+
+.item:hover {
+    transform: translateY(-5px); 
+    box-shadow: 0 6px 30px rgba(0, 0, 0, 0.2); 
+}
+
+.item img {
+    width: 100%; 
+    height: 150px; 
+    object-fit: contain; 
+    border-radius: 8px; 
+}
+
+.item-details {
+    font-family: 'Avenir', sans-serif; /* Set the font to Avenir */
+    font-weight: bold; /* Set the font to bold */
+    margin-top: 10px; 
+    font-size: 18px; 
+    color: #333; 
+    overflow: hidden; 
+    white-space: normal; 
+}
+
+
+.item-details strong {
+    font-weight: bold; 
+    color: #2c3e50; 
+}
+
+.brand {
+    font-family: 'Avenir', sans-serif; 
+    font-size: 14px; 
+    color: #555; 
+}
+
+/* Media Queries for smaller screen sizes */
+@media (max-width: 686px) {
+    /* Scale down the entire item box */
+    .item {
+        width: calc(100% - 30px); /* Make the item box smaller */
+        padding: 10px; /* Reduce padding inside the box */
+        margin: 0 auto; /* Center item boxes */
+    }
+
+    /* Scale down the image inside the item box */
+    .item img {
+        width: 100%;  /* Adjust the image size to fit */
+        height: 100px; /* Reduce the height of the image */
+        object-fit: contain;
+    }
+
+    /* Scale down the item title */
+    .item-details {
+        font-size: 14px; /* Reduce the font size for item details */
+    }
+
+    /* Scale down the brand text */
+    .brand {
+        font-size: 12px; /* Make the brand text smaller */
+        color: #666; /* Lighten the color slightly */
+    }
+
+    /* Adjust the grid layout */
+    .feed-grid {
+        grid-template-columns: 1fr 1fr; /* Stack items vertically */
+        gap: 15px; /* Reduce the space between items */
+    }
+}
+
+@media (max-width: 430px) {
+    /* Further scale down for very small screens */
+    .item {
+        width: calc(100% - 20px); /* Full width for very small screens */
+        padding: 8px; /* Reduce padding more */
+    }
+
+    /* Scale down the image further */
+    .item img {
+        height: 80px; /* Further reduce the image height */
+    }
+
+    /* Further reduce text sizes */
+    .item-details {
+        font-size: 15px; /* Smaller font size for item details */
+    }
+
+    .brand {
+        font-size: 10px; /* Even smaller font size for brand */
+    }
+
+    /* Adjust the grid layout for very small screens */
+    .feed-grid {
+        grid-template-columns: 1fr 1fr; /* Full width for each item on very small screens */
+        gap: 10px; /* Reduce space between items */
+    }
+}
+

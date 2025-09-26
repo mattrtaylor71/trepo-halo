@@ -1,0 +1,349 @@
+/* screen - home */
+
+/* ---- overwrite the original Figma export ------------------------------ */
+.home {
+  width: 100vw !important;          /* stretch from edge to edge            */
+  max-width: none !important;       /* kill the 1280 px cap we added         */
+  padding-left: clamp(16px, 3vw, 40px);   /* keep a bit of side-padding     */
+}
+
+.container-center-horizontal {
+  transform: none !important;       /* no more translateX trick             */
+}
+
+
+.home .trepo {
+  letter-spacing: -0.40px;
+  line-height: normal;
+  min-height: 20px;
+  white-space: nowrap;
+}
+
+.home .healthier-eating-ev {
+  color: #21500a;
+  font-family: var(--font-family-violet_sans-regular);
+  font-size: var(--font-size-xxxxl);
+  font-weight: 400;
+  line-height: 43.2px;
+  margin-top: 40px;
+  width: 100%;
+  text-align: center;
+}
+
+.home .span0 {
+  letter-spacing: -0.26px;
+}
+
+.home .span1 {
+  letter-spacing: 0;
+}
+
+.home .frame-46{
+  display:flex;            /* we want flex, but our own settings      */
+  position: relative;
+  flex-direction:column;   /* one button per row                      */
+  gap:8px;                 /* same vertical space as before           */
+  max-width:none;          /* remove tiny clamp from export           */
+  max-height:none;
+  overflow:visible;        /* let the second button show fully        */
+  padding:0;               /* buttons already have internal padding   */
+}
+
+.log-in-btn {
+    background-color: var(--green-house); /* Match the existing box color */
+    border: none; /* Remove default button borders */
+    border-radius: 5px;
+    color: var(--reef); /* Match the text color */
+    font-family: var(--font-family-violet_sans-regular);
+    font-size: 14px;
+    cursor: pointer;
+    display: inline-block;
+    text-align: center;
+    padding-top: 5px;
+    padding-bottom: 5px;
+}
+
+.frame-99 {
+    width: 100%;
+    text-align: center;
+}
+
+.frame-98 {
+    width: 100%;
+    text-align: center;
+}
+
+.guide-btn {
+    background-color: var(--reef); /* Match the existing box color */
+    border: none; /* Remove default button borders */
+    border-radius: 2px;
+    color: var(--green-house); /* Match the text color */
+    font-family: var(--font-family-violet_sans-regular);
+    font-size: 14px;
+    cursor: pointer;
+    display: inline-block;
+    text-align: center;
+    padding: 10px 25px;
+    border-radius: 6px;
+}
+
+.dive-btn {
+    background-color: var(--green-house); /* Match the existing box color */
+    border: none; /* Remove default button borders */
+    border-radius: 2px;
+    color: var(--reef); /* Match the text color */
+    font-family: var(--font-family-violet_sans-regular);
+    font-size: 64px;
+    cursor: pointer;
+    display: inline-block;
+    text-align: center;
+    padding: 10px 25px;
+    border-radius: 20px;
+}
+
+.log-in-btn:hover {
+    background-color: var(--reef-dark); /* Optional: Add hover effect */
+}
+
+
+.home .dont-have-an-accoun {
+  cursor: pointer;
+  letter-spacing: -0.28px;
+  line-height: normal;
+  margin-top: 47px;
+  min-height: 14px;
+  white-space: nowrap;
+  text-align: center;  /* Centers inline text elements inside */
+  display: block;      /* Ensures it takes full width */
+  width: 100%;         /* Ensures it spans the container */
+}
+
+.home .span0-1 {
+  letter-spacing: -0.04px;
+  justify-content: center;
+}
+
+.home .span1-1 {
+  letter-spacing: -0.04px;
+  text-decoration: underline;
+}
+/* Navigation Bar */
+.navbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 0px;
+}
+
+.nav-left {
+    display: flex;
+    align-items: center;
+}
+
+.navbar .nav-links {
+    list-style: none;
+    display: flex;
+    gap: 15px;
+}
+
+.navbar .nav-links li a {
+    font-family: var(--font-family-violet_sans-regular);
+    font-weight: 400;
+    color: #1d4509;
+    font-size: 20px;
+    letter-spacing: -0.40px;
+    line-height: normal;
+    text-decoration: none;
+    padding: 5px 10px;
+    white-space: nowrap;
+}
+
+.navbar .nav-links li a.active {
+    border-bottom: 2px solid #007AFF;
+}
+
+#auth-links {
+    display: none; /* Hidden by default */
+}
+
+/* Default font size */
+.healthier-eating-ev {
+    font-size: var(--font-size-xxxxl);
+    line-height: 43.2px;
+}
+
+/* Smaller font size for authenticated users */
+h1#welcome-message.authenticated-welcome {
+    font-size: 24px; /* Slightly smaller font size */
+    line-height: 32px; /* Adjust line height accordingly */
+}
+
+
+.user-images {
+    display: none; /* Hidden by default */
+    text-align: center;
+    margin-top: 20px;
+}
+
+.user-images img {
+    width: 95%; /* Adjust size */
+    height: auto;
+    margin: 10px;
+    border-radius: 10px;
+}
+
+.Setup-Guide {
+    margin-top: 30px;
+}
+
+.hidden {
+    display: none;
+}
+
+
+stripe-buy-button {
+  display: block;
+  margin: 10px auto;
+  margin-bottom: 40px;
+  text-align: center;
+}
+
+.header-container {
+    display: flex;
+    align-items: center; /* Align items vertically */
+    justify-content: space-between; /* Add spacing between them */
+    width: 100%; /* Ensures it spans the available space */
+    padding: 10px 0px; /* Add padding for spacing */
+}
+
+.preview-container {
+    display: flex;
+    justify-content: center;  /* Centers horizontally */
+    align-items: center;      /* Centers vertically if needed */
+    width: 100%;
+    padding: 20px 0;
+    border-radius: 20px;       /* Rounds the corners */
+}
+
+.preview-image {
+    max-width: 100%;  /* Ensures it doesn't overflow */
+    height: auto;     /* Maintains aspect ratio */
+    border-radius: 15px; /* Soft rounded corners */
+    box-shadow: 0px 10px 20px rgba(0, 0, 0, 0.2); /* Adds depth */
+}
+
+.preview-gif {
+    max-width: 100%;  /* Ensures it doesn't overflow */
+    height: auto;     /* Maintains aspect ratio */
+    border-radius: 15px; /* Soft rounded corners */
+    box-shadow: 0px 10px 20px rgba(0, 0, 0, 0.2); /* Adds depth */
+}
+
+
+/* -------- Responsive logo + tagline -------- */
+.home .trepo {
+  /* iPhone (~375 px) ≈ 32 px → big desktop (≥1440 px) ≈ 90 px */
+  font-size: clamp(1.5rem, 6vw + 0.25rem, 3.75rem) !important;
+  line-height: 1.05;
+  white-space: nowrap;          /* prevent wrapping */
+}
+
+/* --- hero line ---------------------------------------------------------- */
+#welcome-message {
+  font-size: clamp(1.75rem, 7vw, 4rem);
+  line-height: 1.15;
+
+  width: max-content;        /* shrink to the text itself            */
+  margin: clamp(2rem, 8vh, 4rem) auto 0;
+  text-align: center;        /* centre the words inside the box      */
+  /* align-self not needed now; margin auto does the job               */
+}
+
+/* ─── fullscreen hero  ──────────────────────────────────────────── */
+.hero-center{
+  position:fixed;                 /* takes it out of normal flow       */
+  inset:0;                        /* stretch to viewport               */
+  display:flex;                   /* flex magic                        */
+  flex-direction:column;
+  justify-content:center;         /* vertical centring                 */
+  align-items:center;             /* horizontal centring               */
+  text-align:center;
+  pointer-events:none;            /* header/login still clickable      */
+  z-index:1;                      /* sits above background, below nav  */
+}.hidden{display:none !important;}
+
+/* TREPO logo  */
+.trepo-center{
+  font-size:clamp(3rem,10vw,7rem);  /* 48 px → 112 px */
+  margin:0;
+  color:#21500a;
+  letter-spacing:-0.04em;
+  font-family:var(--font-family-violet_sans-regular);
+}
+
+/* tagline */
+.hero-tagline{
+  font-size:clamp(1.25rem,3.5vw,2.25rem); /* 20 px → 36 px   */
+  margin:0.75em 0 0;
+  color:#21500a;
+  font-family:var(--font-family-violet_sans-regular);
+}
+
+.hero-tagline2{
+  font-size:clamp(1rem,3vw,2rem); /* 20 px → 36 px   */
+  margin:0.75em 0 0;
+  color:#21500a;
+  font-family:var(--font-family-violet_sans-regular);
+}
+
+/* identical pill for the contact button */
+.contact-btn{
+  background: var(--reef);
+  color: var(--green-house);
+  border:none;
+  border-radius:5px;
+  padding:5px 10px;
+  display:block;
+  text-align:center;
+  cursor:pointer;
+}
+
+.contact-btn:hover{
+  background: var(--reef-dark);
+}
+
+.email-tip {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  margin-top: 6px;
+
+  font-size: 13px;
+  font-weight: 500;
+  font-family: var(--font-family-violet_sans-regular);
+  color: #1b3a0a;
+  background-color: #d4f0c1;
+
+  padding: 6px 12px;
+  border-radius: 6px;
+
+  white-space: nowrap;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.08);
+  transition: opacity 0.3s ease, transform 0.3s ease;
+  transform: translateY(0);
+  opacity: 1;
+  z-index: 5;
+}
+
+.email-tip.hidden {
+  opacity: 0;
+  transform: translateY(-4px);
+  pointer-events: none;
+}
+
+html,
+body{
+  background:#FAFAF7;   /* ← pick your off-white hex here        */
+  /* If you had an inline `background:#ffffff` on <body>,
+     delete that so this rule can win.                           */
+}

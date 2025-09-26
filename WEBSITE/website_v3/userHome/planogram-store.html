@@ -1,0 +1,557 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Your Personalized Grocery Planogram | Trepo</title>
+  <link rel="stylesheet" href="css/planogram-store.css"/>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet"/>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"/>
+</head>
+<body>
+  <!-- Header -->
+  <header class="header">
+    <div class="header-content">
+      <div class="logo">
+        <i class="fas fa-leaf"></i><span>Trepo</span>
+      </div>
+      <div class="user-profile">
+        <div class="points-badge"><i class="fas fa-star"></i><span>2,847 pts</span></div>
+        <div class="avatar"><i class="fas fa-user"></i></div>
+      </div>
+    </div>
+  </header>
+
+  <!-- Hero -->
+  <section class="hero">
+    <div class="hero-content">
+      <div class="hero-text">
+        <h1 class="hero-title"><span class="gradient-text">Hey Matt,</span><br/>It’s grocery time!</h1>
+        <p class="hero-subtitle">Built from your actual consumption + health goals</p>
+        <div class="hero-stats">
+          <div class="stat"><span class="stat-number">93%</span><span class="stat-label">Avg Health</span></div>
+          <div class="stat"><span class="stat-number">6</span><span class="stat-label">Core Sets</span></div>
+          <div class="stat"><span class="stat-number">20</span><span class="stat-label">Smart Swaps</span></div>
+        </div>
+      </div>
+      <div class="hero-visual">
+        <div class="floating-card card-1"><i class="fas fa-tint"></i><span>Hydration</span></div>
+        <div class="floating-card card-2"><i class="fas fa-apple-alt"></i><span>Produce</span></div>
+        <div class="floating-card card-3"><i class="fas fa-seedling"></i><span>Snacks</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Quick Actions -->
+  <section class="quick-actions">
+    <div class="container">
+      <div class="action-grid">
+        <div class="action-card primary" id="add-all">
+          <i class="fas fa-shopping-cart"></i>
+          <h3>Shop Planogram</h3>
+          <p>Add all recommended items</p>
+        </div>
+        <div class="action-card"><i class="fas fa-heart"></i><h3>Favorites</h3><p>Your top picks</p></div>
+        <div class="action-card"><i class="fas fa-exchange-alt"></i><h3>Smart Swaps</h3><p>Replace weak links</p></div>
+        <div class="action-card"><i class="fas fa-leaf"></i><h3>Eco Picks</h3><p>Low-UPF, whole foods</p></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Categories -->
+  <section class="categories">
+    <div class="container">
+      <h2 class="section-title">Your Grocery Categories</h2>
+      <p class="section-subtitle">Prioritized by health score + relevance to habits</p>
+
+      <!-- Beverages -->
+      <div class="category-section" data-category="Beverages">
+        <div class="category-header">
+          <div class="category-icon"><i class="fas fa-tint"></i></div>
+          <div class="category-info">
+            <h3>Beverages</h3>
+            <p>Daily hydration stack • high adherence</p>
+            <div class="category-stats"><span class="stat">6 items</span><span class="stat">•</span><span class="stat">Avg Score: 90</span></div>
+          </div>
+          <div class="category-score"><div class="score-circle"><span>90</span></div></div>
+        </div>
+
+        <div class="products-grid">
+          <!-- 100% OJ -->
+          <div class="product-card featured" data-health="95" data-barcode="701725001074" data-category="Beverages">
+            <div class="product-image">
+              <img src="https://images.barcodelookup.com/9050/90501824-1.jpg" alt="100% Squeezed Orange Juice"/>
+              <div class="product-badge">Top Pick</div>
+            </div>
+            <div class="product-info">
+              <h4>100% Squeezed Orange Juice</h4>
+              <div class="product-meta"><span class="health-score">95</span><span class="points">10 pts</span><span class="placement">Eye-level</span></div>
+              <p class="product-description">Pure OJ. No added sugar. Breakfast anchor.</p>
+              <div class="product-actions"><button class="btn-add">Add to Cart</button><button class="btn-heart"><i class="far fa-heart"></i></button></div>
+            </div>
+          </div>
+
+          <!-- Peet's pods -->
+          <div class="product-card" data-health="95" data-barcode="785357019461" data-category="Beverages">
+            <div class="product-image"><img src="https://images.barcodelookup.com/10157/101575352-1.jpg" alt="Peet's Espresso Pods"/></div>
+            <div class="product-info">
+              <h4>Peet’s Ricchezza Espresso Pods</h4>
+              <div class="product-meta"><span class="health-score">95</span><span class="points">20 pts</span><span class="placement">Coffee bar</span></div>
+              <p class="product-description">Zero additives. Morning ritual.</p>
+              <div class="product-actions"><button class="btn-add">Add</button><button class="btn-heart"><i class="far fa-heart"></i></button></div>
+            </div>
+          </div>
+
+          <!-- Health-Ade kombucha -->
+          <div class="product-card" data-health="85" data-barcode="811184030888" data-category="Beverages">
+            <div class="product-image"><img src="https://images.barcodelookup.com/52449/524492767-1.jpg" alt="Health-Ade Apple Kombucha"/></div>
+            <div class="product-info">
+              <h4>Health-Ade Pink Lady Apple Kombucha</h4>
+              <div class="product-meta"><span class="health-score">85</span><span class="points">5 pts</span><span class="placement">Cold case</span></div>
+              <p class="product-description">Probiotics with a touch of sweet.</p>
+              <div class="product-actions"><button class="btn-add">Add</button><button class="btn-heart"><i class="far fa-heart"></i></button></div>
+            </div>
+          </div>
+
+          <!-- Olipop -->
+          <div class="product-card" data-health="85" data-barcode="860439001005" data-category="Beverages">
+            <div class="product-image"><img src="https://images.barcodelookup.com/17400/174005264-1.jpg" alt="Olipop Vintage Cola"/></div>
+            <div class="product-info">
+              <h4>Olipop Vintage Cola (Low Sugar)</h4>
+              <div class="product-meta"><span class="health-score">85</span><span class="points">10 pts</span><span class="placement">Soda swap</span></div>
+              <p class="product-description">Prebiotic tonic—your Diet Coke replacement.</p>
+              <div class="product-actions"><button class="btn-add">Add</button><button class="btn-heart"><i class="far fa-heart"></i></button></div>
+            </div>
+          </div>
+
+          <!-- Vita Coco -->
+          <div class="product-card" data-health="85" data-barcode="898999012698" data-category="Beverages">
+            <div class="product-image"><img src="https://images.barcodelookup.com/67154/671543180-1.jpg" alt="Vita Coco Coconut Juice"/></div>
+            <div class="product-info">
+              <h4>Vita Coco Coconut Juice (with pulp)</h4>
+              <div class="product-meta"><span class="health-score">85</span><span class="points">10 pts</span><span class="placement">Workout fridge</span></div>
+              <p class="product-description">Electrolytes, minimal additives.</p>
+              <div class="product-actions"><button class="btn-add">Add</button><button class="btn-heart"><i class="far fa-heart"></i></button></div>
+            </div>
+          </div>
+
+          <!-- LMNT -->
+          <div class="product-card" data-health="80" data-barcode="850009273437" data-category="Beverages">
+            <div class="product-image"><img src="https://images.barcodelookup.com/67194/671944505-1.jpg" alt="LMNT Grapefruit"/></div>
+            <div class="product-info">
+              <h4>LMNT Electrolyte (Grapefruit)</h4>
+              <div class="product-meta"><span class="health-score">80</span><span class="points">10 pts</span><span class="placement">Gym bag peg</span></div>
+              <p class="product-description">High sodium for training days only.</p>
+              <div class="product-actions"><button class="btn-add">Add</button><button class="btn-heart"><i class="far fa-heart"></i></button></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Produce -->
+      <div class="category-section" data-category="Produce">
+        <div class="category-header">
+          <div class="category-icon"><i class="fas fa-apple-alt"></i></div>
+          <div class="category-info">
+            <h3>Produce</h3>
+            <p>Antioxidant-forward • snackable</p>
+            <div class="category-stats"><span class="stat">6 items</span><span class="stat">•</span><span class="stat">Avg Score: 94</span></div>
+          </div>
+          <div class="category-score"><div class="score-circle"><span>94</span></div></div>
+        </div>
+
+        <div class="products-grid">
+          <!-- Blueberries -->
+          <div class="product-card featured" data-health="95" data-barcode="812049009209" data-category="Produce">
+            <div class="product-image">
+              <img src="https://images.barcodelookup.com/5685/56851909-1.jpg" alt="Organic Blueberries"/>
+              <div class="product-badge">Eco Pick</div>
+            </div>
+            <div class="product-info">
+              <h4>Organic Blueberries</h4>
+              <div class="product-meta"><span class="health-score">95</span><span class="points">5 pts</span><span class="placement">Eye-level</span></div>
+              <p class="product-description">Daily handful target.</p>
+              <div class="product-actions"><button class="btn-add">Add</button><button class="btn-heart"><i class="far fa-heart"></i></button></div>
+            </div>
+          </div>
+
+          <!-- Dried apricots -->
+          <div class="product-card" data-health="95" data-barcode="720379501181" data-category="Produce">
+            <div class="product-image"><img src="https://images.barcodelookup.com/1032/10329241-1.jpg" alt="Organic Dried Apricots"/></div>
+            <div class="product-info">
+              <h4>Organic Dried Apricots</h4>
+              <div class="product-meta"><span class="health-score">95</span><span class="points">20 pts</span><span class="placement">Snack bay</span></div>
+              <p class="product-description">Whole fruit, no sulfites.</p>
+              <div class="product-actions"><button class="btn-add">Add</button><button class="btn-heart"><i class="far fa-heart"></i></button></div>
+            </div>
+          </div>
+
+          <!-- Prunes -->
+          <div class="product-card" data-health="95" data-barcode="802763029928" data-category="Produce">
+            <div class="product-image"><img src="https://images.barcodelookup.com/3181/31810988-1.jpg" alt="Pitted Prunes"/></div>
+            <div class="product-info">
+              <h4>Sunsweet D’Noir Pitted Prunes</h4>
+              <div class="product-meta"><span class="health-score">95</span><span class="points">20 pts</span><span class="placement">Snack bay</span></div>
+              <p class="product-description">Fiber + micronutrients.</p>
+              <div class="product-actions"><button class="btn-add">Add</button><button class="btn-heart"><i class="far fa-heart"></i></button></div>
+            </div>
+          </div>
+
+          <!-- Strawberry banana mix -->
+          <div class="product-card" data-health="95" data-barcode="021130093274" data-category="Produce">
+            <div class="product-image"><img src="https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTyX4QfStzaZFO8Z6NHq4oV2PcznNws0GsmwTyqeyfsLdAdI9umNWHx5K4aRQ&s" alt="Strawberry Banana Mix"/></div>
+            <div class="product-info">
+              <h4>Strawberries & Bananas (fresh mix)</h4>
+              <div class="product-meta"><span class="health-score">95</span><span class="points">10 pts</span><span class="placement">Grab-and-go</span></div>
+              <p class="product-description">Prepped fruit = adherence.</p>
+              <div class="product-actions"><button class="btn-add">Add</button><button class="btn-heart"><i class="far fa-heart"></i></button></div>
+            </div>
+          </div>
+
+          <!-- Micro greens -->
+          <div class="product-card" data-health="95" data-barcode="857494005130" data-category="Produce">
+            <div class="product-image"><img src="https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQ9dIq_h8Ltp0-qxzAIVMWY47cMbGtLyI9b350FSQN7DZjku6Lcx7VBM1t4BPg&s" alt="Micro Kale Mix"/></div>
+            <div class="product-info">
+              <h4>Micro Kale Mix (Microgreens)</h4>
+              <div class="product-meta"><span class="health-score">95</span><span class="points">5 pts</span><span class="placement">Salad wall</span></div>
+              <p class="product-description">Add to bowls for nutrient density.</p>
+              <div class="product-actions"><button class="btn-add">Add</button><button class="btn-heart"><i class="far fa-heart"></i></button></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Dairy -->
+      <div class="category-section" data-category="Dairy">
+        <div class="category-header">
+          <div class="category-icon"><i class="fas fa-cheese"></i></div>
+          <div class="category-info">
+            <h3>Dairy</h3>
+            <p>Probiotic base • low sugar bias</p>
+            <div class="category-stats"><span class="stat">3 items</span><span class="stat">•</span><span class="stat">Avg Score: 83</span></div>
+          </div>
+          <div class="category-score"><div class="score-circle"><span>83</span></div></div>
+        </div>
+
+        <div class="products-grid">
+          <!-- 365 Plain Yogurt -->
+          <div class="product-card featured" data-health="88" data-barcode="099482446802" data-category="Dairy">
+            <div class="product-image">
+              <img src="https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTEI_mEweHacTyIF52VMWEvgzabFpPs6KBwSffAAOTggQfaEq070bVnQwXLChc&s" alt="365 Plain Lowfat Yogurt"/>
+              <div class="product-badge">Base Item</div>
+            </div>
+            <div class="product-info">
+              <h4>365 Plain Low-Fat Yogurt (Unsweetened)</h4>
+              <div class="product-meta"><span class="health-score">88</span><span class="points">5 pts</span><span class="placement">Eye-level</span></div>
+              <p class="product-description">Pair with blueberries/dried fruit.</p>
+              <div class="product-actions"><button class="btn-add">Add</button><button class="btn-heart"><i class="far fa-heart"></i></button></div>
+            </div>
+          </div>
+
+          <!-- Brown Cow (kept but not featured) -->
+          <div class="product-card" data-health="75" data-barcode="088194340621" data-category="Dairy">
+            <div class="product-image"><img src="https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcSb2srzbbRQBOtcb8QbjKI-0MR3T74YHBh9YyspHCIcxiOYYm2HpLZaNT3Jx3U&s" alt="Brown Cow Maple Yogurt"/></div>
+            <div class="product-info">
+              <h4>Brown Cow Cream-Top Maple Yogurt</h4>
+              <div class="product-meta"><span class="health-score">75</span><span class="points">10 pts</span><span class="placement">Below eye</span></div>
+              <p class="product-description">Treat; rotate with plain yogurt.</p>
+              <div class="product-actions"><button class="btn-add">Add</button><button class="btn-heart"><i class="far fa-heart"></i></button></div>
+            </div>
+          </div>
+
+          <!-- TJ Mango yogurt (swap target) -->
+          <div class="product-card swap" data-health="65" data-barcode="00978606" data-category="Dairy">
+            <div class="product-image">
+              <img src="https://images.barcodelookup.com/81659/816595464-1.jpg" alt="TJ Greek Mango Yogurt"/>
+              <div class="product-badge swap-badge">Swap Available</div>
+            </div>
+            <div class="product-info">
+              <h4>Trader Joe’s Mango Yogurt</h4>
+              <div class="product-meta"><span class="health-score">65</span><span class="points">10 pts</span><span class="placement">Lower shelf</span></div>
+              <p class="product-description">Swap to 365 Plain + blueberries.</p>
+              <div class="product-actions"><button class="btn-swap">View Swap</button><button class="btn-heart"><i class="far fa-heart"></i></button></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Snacks -->
+      <div class="category-section" data-category="Snacks">
+        <div class="category-header">
+          <div class="category-icon"><i class="fas fa-seedling"></i></div>
+          <div class="category-info">
+            <h3>Snacks</h3>
+            <p>Keep the crunch • better oils • lower UPF</p>
+            <div class="category-stats"><span class="stat">5 items</span><span class="stat">•</span><span class="stat">Avg Score: 60</span></div>
+          </div>
+          <div class="category-score"><div class="score-circle"><span>60</span></div></div>
+        </div>
+
+        <div class="products-grid">
+          <!-- LesserEvil -->
+          <div class="product-card featured" data-health="85" data-barcode="855469006557" data-category="Snacks">
+            <div class="product-image">
+              <img src="https://images.barcodelookup.com/3800/38009375-1.jpg" alt="LesserEvil Himalayan Gold Popcorn"/>
+              <div class="product-badge">Better Choice</div>
+            </div>
+            <div class="product-info">
+              <h4>LesserEvil Himalayan Gold Popcorn</h4>
+              <div class="product-meta"><span class="health-score">85</span><span class="points">5 pts</span><span class="placement">Eye-level</span></div>
+              <p class="product-description">Organic corn + coconut oil.</p>
+              <div class="product-actions"><button class="btn-add">Add</button><button class="btn-heart"><i class="far fa-heart"></i></button></div>
+            </div>
+          </div>
+
+          <!-- MadeGood bars -->
+          <div class="product-card" data-health="75" data-barcode="687456216980" data-category="Snacks">
+            <div class="product-image"><img src="https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcT-A3PW5x331Thm7sRKz1VYxGvncKDh6xCIfhSxNBW2NFR5IFU9fV7bRZp5wLQ&s" alt="MadeGood Granola Bars"/></div>
+            <div class="product-info">
+              <h4>MadeGood Granola Bars</h4>
+              <div class="product-meta"><span class="health-score">75</span><span class="points">5 pts</span><span class="placement">Grab-and-go</span></div>
+              <p class="product-description">Kid-friendly; vitamins from veg.</p>
+              <div class="product-actions"><button class="btn-add">Add</button><button class="btn-heart"><i class="far fa-heart"></i></button></div>
+            </div>
+          </div>
+
+          <!-- Lay's (swap target) -->
+          <div class="product-card swap" data-health="30" data-barcode="028400199148" data-category="Snacks">
+            <div class="product-image">
+              <img src="https://images.barcodelookup.com/3181/31813079-1.jpg" alt="Lay's Classic Chips"/>
+              <div class="product-badge swap-badge">Swap Available</div>
+            </div>
+            <div class="product-info">
+              <h4>Lay’s Classic Potato Chips</h4>
+              <div class="product-meta"><span class="health-score">30</span><span class="points">10 pts</span><span class="placement">Bottom shelf</span></div>
+              <p class="product-description">Swap → LesserEvil popcorn.</p>
+              <div class="product-actions"><button class="btn-swap">View Swap</button><button class="btn-heart"><i class="far fa-heart"></i></button></div>
+            </div>
+          </div>
+
+          <!-- Gingerbread cookies (swap target) -->
+          <div class="product-card swap" data-health="45" data-barcode="756963160151" data-category="Snacks">
+            <div class="product-image">
+              <img src="https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcROZgUpff35yzDTTMg4017qwmbxvAg6LpfAKtAwSNQ1aXqeXlyNqzeHILFGXg&s" alt="Rustic Bakery Gingerbread"/>
+              <div class="product-badge swap-badge">Swap Available</div>
+            </div>
+            <div class="product-info">
+              <h4>Glazed Gingerbread Cookies</h4>
+              <div class="product-meta"><span class="health-score">45</span><span class="points">15 pts</span><span class="placement">Occasional</span></div>
+              <p class="product-description">Swap → dried apricots/prunes.</p>
+              <div class="product-actions"><button class="btn-swap">View Swap</button><button class="btn-heart"><i class="far fa-heart"></i></button></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Protein -->
+      <div class="category-section" data-category="Protein">
+        <div class="category-header">
+          <div class="category-icon"><i class="fas fa-drumstick-bite"></i></div>
+          <div class="category-info">
+            <h3>Protein</h3>
+            <p>Deli lean • sandwich-ready</p>
+            <div class="category-stats"><span class="stat">1 item</span><span class="stat">•</span><span class="stat">Avg Score: 85</span></div>
+          </div>
+          <div class="category-score"><div class="score-circle"><span>85</span></div></div>
+        </div>
+
+        <div class="products-grid">
+          <div class="product-card featured" data-health="85" data-barcode="042421500837" data-category="Protein">
+            <div class="product-image">
+              <img src="https://images.barcodelookup.com/81652/816520102-1.jpg" alt="Boar's Head Roasted Turkey"/>
+              <div class="product-badge">Top Pick</div>
+            </div>
+            <div class="product-info">
+              <h4>Boar’s Head Roasted Turkey Breast</h4>
+              <div class="product-meta"><span class="health-score">85</span><span class="points">10 pts</span><span class="placement">Deli front</span></div>
+              <p class="product-description">Clean label, solid lean protein.</p>
+              <div class="product-actions"><button class="btn-add">Add</button><button class="btn-heart"><i class="far fa-heart"></i></button></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Cooking / Condiments -->
+      <div class="category-section" data-category="Cooking">
+        <div class="category-header">
+          <div class="category-icon"><i class="fas fa-pepper-hot"></i></div>
+          <div class="category-info">
+            <h3>Cooking & Condiments</h3>
+            <p>Flavor without junk</p>
+            <div class="category-stats"><span class="stat">3 items</span><span class="stat">•</span><span class="stat">Avg Score: 87</span></div>
+          </div>
+          <div class="category-score"><div class="score-circle"><span>87</span></div></div>
+        </div>
+
+        <div class="products-grid">
+          <div class="product-card" data-health="95" data-barcode="799857005015" data-category="Cooking">
+            <div class="product-image"><img src="https://images.barcodelookup.com/5104/51044929-1.jpg" alt="Organic Oregano"/></div>
+            <div class="product-info">
+              <h4>Organic Oregano Leaves</h4>
+              <div class="product-meta"><span class="health-score">95</span><span class="points">5 pts</span><span class="placement">Spice rack</span></div>
+              <p class="product-description">Simple, clean herb—elevates sauces.</p>
+              <div class="product-actions"><button class="btn-add">Add</button><button class="btn-heart"><i class="far fa-heart"></i></button></div>
+            </div>
+          </div>
+
+          <div class="product-card" data-health="90" data-barcode="078732004009" data-category="Cooking">
+            <div class="product-image"><img src="https://images.barcodelookup.com/9060/90606772-1.jpg" alt="Salsa Roja"/></div>
+            <div class="product-info">
+              <h4>Casa Sanchez Salsa Roja</h4>
+              <div class="product-meta"><span class="health-score">90</span><span class="points">5 pts</span><span class="placement">Eye-level</span></div>
+              <p class="product-description">Tomato-onion-cilantro—no junk.</p>
+              <div class="product-actions"><button class="btn-add">Add</button><button class="btn-heart"><i class="far fa-heart"></i></button></div>
+            </div>
+          </div>
+
+          <div class="product-card" data-health="75" data-barcode="049733091015" data-category="Cooking">
+            <div class="product-image"><img src="https://images.barcodelookup.com/1389/13890888-1.jpg" alt="Cholula Original"/></div>
+            <div class="product-info">
+              <h4>Cholula Original Hot Sauce</h4>
+              <div class="product-meta"><span class="health-score">75</span><span class="points">20 pts</span><span class="placement">Condiment bar</span></div>
+              <p class="product-description">Sodium-aware; great flavor per calorie.</p>
+              <div class="product-actions"><button class="btn-add">Add</button><button class="btn-heart"><i class="far fa-heart"></i></button></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Smart Swaps -->
+  <section class="smart-swaps">
+    <div class="container">
+      <h2 class="section-title">Smart Swaps for Healthier Choices</h2>
+      <div class="swaps-grid">
+        <!-- Diet soda -> Olipop -->
+        <div class="swap-card" data-swap="soda">
+          <div class="swap-current">
+            <img src="https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQ9oJ8nwpJr6hrV10n3dGVSSX888W3waERv98O4e_5wjnaZSNcFPGYchQxpOg&s" alt="Diet Coke"/>
+            <h4>Diet Coke</h4><span class="score-low">30</span>
+          </div>
+          <div class="swap-arrow"><i class="fas fa-arrow-right"></i></div>
+          <div class="swap-better">
+            <img src="https://images.barcodelookup.com/17400/174005264-1.jpg" alt="Olipop"/>
+            <h4>Olipop Vintage Cola</h4><span class="score-high">85</span>
+          </div>
+        </div>
+
+        <!-- Sugar-free Red Bull -> Coffee/LMNT -->
+        <div class="swap-card" data-swap="energy">
+          <div class="swap-current">
+            <img src="https://images.barcodelookup.com/2974/29742302-1.jpg" alt="Sugar-Free Red Bull"/>
+            <h4>Red Bull Sugar-Free</h4><span class="score-low">35</span>
+          </div>
+          <div class="swap-arrow"><i class="fas fa-arrow-right"></i></div>
+          <div class="swap-better">
+            <img src="https://images.barcodelookup.com/10157/101575352-1.jpg" alt="Peet's Pods"/>
+            <h4>Peet’s Espresso / LMNT (training)</h4><span class="score-high">80–95</span>
+          </div>
+        </div>
+
+        <!-- Sweet yogurt -> Plain + fruit -->
+        <div class="swap-card" data-swap="yogurt">
+          <div class="swap-current">
+            <img src="https://images.barcodelookup.com/81659/816595464-1.jpg" alt="TJ Mango Yogurt"/>
+            <h4>TJ Mango Yogurt</h4><span class="score-low">65</span>
+          </div>
+          <div class="swap-arrow"><i class="fas fa-arrow-right"></i></div>
+          <div class="swap-better">
+            <img src="https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTEI_mEweHacTyIF52VMWEvgzabFpPs6KBwSffAAOTggQfaEq070bVnQwXLChc&s" alt="365 Plain Yogurt"/>
+            <h4>365 Plain + Blueberries</h4><span class="score-high">88–95</span>
+          </div>
+        </div>
+
+        <!-- Chips -> Popcorn/Dried fruit -->
+        <div class="swap-card" data-swap="chips">
+          <div class="swap-current">
+            <img src="https://images.barcodelookup.com/3181/31813079-1.jpg" alt="Lay's Classic"/>
+            <h4>Lay’s Classic</h4><span class="score-low">30</span>
+          </div>
+          <div class="swap-arrow"><i class="fas fa-arrow-right"></i></div>
+          <div class="swap-better">
+            <img src="https://images.barcodelookup.com/3800/38009375-1.jpg" alt="LesserEvil Popcorn"/>
+            <h4>LesserEvil Popcorn / Dried Apricots</h4><span class="score-high">85–95</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Bundles -->
+  <section class="bundle-kits">
+    <div class="container">
+      <h2 class="section-title">Curated Shopping Kits</h2>
+      <div class="kits-grid">
+        <div class="kit-card" data-kit="hydration-hub">
+          <div class="kit-header"><i class="fas fa-tint"></i><h3>Hydration Hub</h3></div>
+          <div class="kit-items">
+            <span>100% OJ</span><span>Vita Coco Coconut Juice</span><span>Olipop Vintage Cola</span><span>LMNT (training)</span>
+          </div>
+          <button class="btn-kit">Add Kit to Cart</button>
+        </div>
+
+        <div class="kit-card" data-kit="breakfast-power">
+          <div class="kit-header"><i class="fas fa-apple-alt"></i><h3>Breakfast Power</h3></div>
+          <div class="kit-items">
+            <span>365 Plain Yogurt</span><span>Organic Blueberries</span><span>Organic Dried Apricots</span>
+          </div>
+          <button class="btn-kit">Add Kit to Cart</button>
+        </div>
+
+        <div class="kit-card" data-kit="clean-snack">
+          <div class="kit-header"><i class="fas fa-seedling"></i><h3>Clean Snack Set</h3></div>
+          <div class="kit-items">
+            <span>LesserEvil Popcorn</span><span>Prunes</span><span>MadeGood Bars</span>
+          </div>
+          <button class="btn-kit">Add Kit to Cart</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Footer -->
+  <footer class="footer">
+    <div class="container">
+      <div class="footer-content">
+        <div class="footer-section">
+          <h4>Your Planogram</h4>
+          <p>Personalized from your logged items with emphasis on high-scoring, whole foods and simple swaps.</p>
+        </div>
+        <div class="footer-section">
+          <h4>Quick Links</h4>
+          <ul>
+            <li><a href="#">Favorites</a></li>
+            <li><a href="#">Smart Swaps</a></li>
+            <li><a href="#">Eco Picks</a></li>
+            <li><a href="#">Shopping History</a></li>
+          </ul>
+        </div>
+        <div class="footer-section">
+          <h4>Support</h4>
+          <ul>
+            <li><a href="#">Help Center</a></li>
+            <li><a href="#">Contact Us</a></li>
+            <li><a href="#">Privacy Policy</a></li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </footer>
+
+  <script>
+    // Example: Add-all handler (hooks into your existing JS if present)
+    document.getElementById('add-all')?.addEventListener('click', () => {
+      const items = [...document.querySelectorAll('.product-card:not(.swap)')].map(c => ({
+        barcode: c.getAttribute('data-barcode'),
+        score: Number(c.getAttribute('data-health')),
+        category: c.getAttribute('data-category')
+      }));
+      // window.addPlanogramItems?.(items); // integrate with your app
+      console.log('Planogram items →', items);
+      alert('Added recommended planogram items to your cart.');
+    });
+  </script>
+  <script src="js/planogram-store.js"></script>
+</body>
+</html>

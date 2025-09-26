@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>My Week</title>
+    <link rel="stylesheet" href="css/week.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels"></script>
+</head>
+<body>
+    <!-- Navigation Menu -->
+    <nav class="top-menu">
+        <ul>
+            <li><a href="index.html">Home</a></li>
+            <li><a href="week.html">Week</a></li>
+            <li><a href="shopping.html">Shopping List</a></li>
+        </ul>
+    </nav>
+
+    <!-- User Greeting or Sign-in Message -->
+    <div id="user-greeting" class="user-greeting"></div>
+
+    <div class="container" id="content-container" style="display: none;">
+        <h1>My Week</h1>
+        <canvas id="categoryChart" width="200" height="200"></canvas>
+        <button id="submitBtn" class="submit-button">Submit Items</button>
+        <div id="feed"></div>
+        <button id="submitBtnBottom" class="submit-button">Submit Items</button>
+    </div>
+
+    <script src="js/week.js"></script>
+
+    <script>
+        // Retrieve user data from localStorage
+        const userData = JSON.parse(localStorage.getItem("user"));
+
+        // Display a greeting or a sign-in prompt based on user login status
+        const userGreetingElement = document.getElementById("user-greeting");
+        const contentContainer = document.getElementById("content-container");
+
+        if (userData && userData.name) {
+            //userGreetingElement.textContent = `Hello, ${userData.name}! Welcome to your week overview.`;
+            contentContainer.style.display = "block"; // Show the main content
+        } else {
+            userGreetingElement.textContent = "Please sign in!";
+            contentContainer.style.display = "none"; // Hide the main content
+        }
+    </script>
+</body>
+</html>

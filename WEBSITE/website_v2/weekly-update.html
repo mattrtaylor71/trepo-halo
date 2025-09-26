@@ -1,0 +1,658 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Weekly Update - TREPO</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+            margin: 0;
+            padding: 16px;
+            background: #ffffff;
+            color: #1d4509;
+            line-height: 1.6;
+            -webkit-text-size-adjust: 100%;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 0 8px;
+        }
+
+        .logo {
+            color: #1d4509;
+            font-size: 22px;
+            font-weight: bold;
+            margin-bottom: 24px;
+            padding: 8px 0;
+        }
+
+        .nav-tabs {
+            display: flex;
+            gap: 16px;
+            margin-bottom: 24px;
+            border-bottom: 1px solid #eee;
+            padding-bottom: 8px;
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
+            scrollbar-width: none;
+            -ms-overflow-style: none;
+        }
+
+        .nav-tabs::-webkit-scrollbar {
+            display: none;
+        }
+
+        .nav-tabs a {
+            text-decoration: none;
+            color: #8e8e8e;
+            font-size: 16px;
+            white-space: nowrap;
+            padding: 4px 0;
+        }
+
+        .nav-tabs a.active {
+            color: #1d4509;
+            font-weight: 500;
+        }
+
+        .header {
+            margin-bottom: 32px;
+        }
+
+        .header h1 {
+            font-size: 24px;
+            margin: 0 0 8px 0;
+        }
+
+        .date-range {
+            color: #666;
+            font-size: 15px;
+            margin-bottom: 16px;
+        }
+
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+            gap: 12px;
+            margin-bottom: 32px;
+        }
+
+        .metric-card {
+            background: #f8f9fa;
+            padding: 16px;
+            border-radius: 12px;
+            border: 1px solid #eee;
+        }
+
+        .metric-label {
+            font-size: 13px;
+            color: #666;
+            margin-bottom: 6px;
+        }
+
+        .metric-value {
+            font-size: 20px;
+            font-weight: 500;
+        }
+
+        .section {
+            margin-bottom: 32px;
+        }
+
+        .section-title {
+            font-size: 18px;
+            font-weight: 500;
+            margin-bottom: 16px;
+            color: #1d4509;
+        }
+
+        .food-group-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 24px;
+            font-size: 14px;
+        }
+
+        .food-group-table th,
+        .food-group-table td {
+            padding: 10px 8px;
+            text-align: left;
+            border-bottom: 1px solid #eee;
+        }
+
+        .food-group-table th {
+            font-weight: 500;
+            color: #666;
+            position: sticky;
+            top: 0;
+            background: #fff;
+        }
+
+        .highlight-box {
+            background-color: #e8ffd7;
+            padding: 16px;
+            border-radius: 12px;
+            margin-bottom: 16px;
+        }
+
+        .highlight-title {
+            font-weight: 500;
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 16px;
+        }
+
+        .emoji {
+            font-size: 18px;
+        }
+
+        .tip-list {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+
+        .tip-list li {
+            margin-bottom: 12px;
+            padding-left: 16px;
+            position: relative;
+            font-size: 14px;
+        }
+
+        .tip-list li:before {
+            content: "•";
+            position: absolute;
+            left: 0;
+            color: #1d4509;
+        }
+
+        .tip-list li:last-child {
+            margin-bottom: 0;
+        }
+
+        .tip-list strong {
+            display: block;
+            margin-bottom: 4px;
+        }
+
+        .ingredients-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 24px;
+            font-size: 14px;
+        }
+
+        .ingredients-table th,
+        .ingredients-table td {
+            padding: 10px 8px;
+            text-align: left;
+            border-bottom: 1px solid #eee;
+        }
+
+        .ingredients-table th {
+            font-weight: 500;
+            color: #666;
+            position: sticky;
+            top: 0;
+            background: #fff;
+        }
+
+        .culprit-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 24px;
+            font-size: 14px;
+        }
+
+        .culprit-table th,
+        .culprit-table td {
+            padding: 12px 8px;
+            text-align: left;
+            border-bottom: 1px solid #eee;
+            vertical-align: top;
+        }
+
+        .culprit-table th {
+            font-weight: 500;
+            color: #666;
+            position: sticky;
+            top: 0;
+            background: #fff;
+        }
+
+        .culprit-table td:first-child {
+            font-weight: 500;
+        }
+
+        .culprit-table td:nth-child(2) {
+            color: #666;
+        }
+
+        .allergen-tag {
+            display: inline-block;
+            background: #f0f0f0;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 12px;
+            margin: 2px;
+            color: #666;
+        }
+
+        .allergen-tag .count {
+            color: #1d4509;
+            font-weight: 500;
+        }
+
+        .metric-card .sub-value {
+            font-size: 13px;
+            color: #666;
+            margin-top: 2px;
+        }
+
+        .timeline-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 24px;
+            font-size: 14px;
+        }
+
+        .timeline-table th,
+        .timeline-table td {
+            padding: 10px 8px;
+            text-align: left;
+            border-bottom: 1px solid #eee;
+        }
+
+        .timeline-table th {
+            font-weight: 500;
+            color: #666;
+            position: sticky;
+            top: 0;
+            background: #fff;
+        }
+
+        .timeline-table td:first-child {
+            white-space: nowrap;
+            color: #666;
+        }
+
+        .timeline-table td:nth-child(2) {
+            white-space: nowrap;
+            color: #666;
+            font-family: monospace;
+        }
+
+        .timeline-note {
+            font-size: 13px;
+            color: #666;
+            margin-top: 8px;
+            font-style: italic;
+        }
+
+        @media (max-width: 480px) {
+            body {
+                padding: 12px;
+            }
+
+            .container {
+                padding: 0 4px;
+            }
+
+            .metrics-grid {
+                grid-template-columns: 1fr 1fr;
+            }
+
+            .metric-card {
+                padding: 12px;
+            }
+
+            .metric-value {
+                font-size: 18px;
+            }
+
+            .food-group-table {
+                font-size: 13px;
+            }
+
+            .food-group-table th,
+            .food-group-table td {
+                padding: 8px 6px;
+            }
+
+            .highlight-box {
+                padding: 12px;
+            }
+
+            .tip-list li {
+                font-size: 13px;
+            }
+
+            .ingredients-table,
+            .culprit-table {
+                font-size: 13px;
+            }
+
+            .ingredients-table th,
+            .ingredients-table td,
+            .culprit-table th,
+            .culprit-table td {
+                padding: 8px 6px;
+            }
+
+            .culprit-table {
+                display: block;
+                overflow-x: auto;
+                -webkit-overflow-scrolling: touch;
+            }
+
+            .allergen-tag {
+                font-size: 11px;
+                padding: 1px 6px;
+            }
+
+            .timeline-table {
+                font-size: 13px;
+            }
+
+            .timeline-table th,
+            .timeline-table td {
+                padding: 8px 6px;
+            }
+
+            .timeline-table td:first-child,
+            .timeline-table td:nth-child(2) {
+                font-size: 12px;
+            }
+
+            .timeline-note {
+                font-size: 12px;
+            }
+        }
+
+        /* iPhone SE and smaller */
+        @media (max-width: 375px) {
+            .metrics-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .metric-card {
+                padding: 10px;
+            }
+
+            .metric-value {
+                font-size: 16px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="logo">TREPO</div>
+
+        <nav class="nav-tabs">
+            <a href="insights.html">Feed</a>
+            <a href="week.html" class="active">Week</a>
+            <a href="shopping.html">Shopping</a>
+        </nav>
+
+        <div class="header">
+            <h1>Weekly Consumption Snapshot</h1>
+            <div class="date-range">Apr 24 – Apr 30 2025</div>
+        </div>
+
+        <div class="metrics-grid">
+            <div class="metric-card">
+                <div class="metric-label">Packages tossed ≈ items consumed</div>
+                <div class="metric-value">11</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-label">Est. grocery spend</div>
+                <div class="metric-value">≈ $51</div>
+                <div class="metric-label">(≈ $4.60 / item)</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-label">Active consumption days</div>
+                <div class="metric-value">4 / 7</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-label">Busiest day</div>
+                <div class="metric-value">Tue Apr 29</div>
+                <div class="metric-label">(6 packages)</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-label">Most-repeated item</div>
+                <div class="metric-value">Liquid egg-white cartons</div>
+                <div class="metric-label">× 5</div>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2 class="section-title">Quick-view: What you tossed (≈ consumed)</h2>
+            <div class="timeline-note">(local time — America/Los Angeles)</div>
+            <table class="timeline-table">
+                <thead>
+                    <tr>
+                        <th>Day</th>
+                        <th>Time</th>
+                        <th>Item</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Sat Apr 26</td>
+                        <td>14:06</td>
+                        <td>Organic Low-Fat Cottage Cheese</td>
+                    </tr>
+                    <tr>
+                        <td>Sun Apr 27</td>
+                        <td>05:13</td>
+                        <td>Cilantro-Lime Crema Sauce</td>
+                    </tr>
+                    <tr>
+                        <td></td>
+                        <td>05:15</td>
+                        <td>Liquid Egg Whites</td>
+                    </tr>
+                    <tr>
+                        <td></td>
+                        <td>05:15</td>
+                        <td>Liquid Egg Whites</td>
+                    </tr>
+                    <tr>
+                        <td>Tue Apr 29</td>
+                        <td>07:44</td>
+                        <td>Sliced Oven-Roasted Turkey Breast Deli Meat</td>
+                    </tr>
+                    <tr>
+                        <td></td>
+                        <td>08:35</td>
+                        <td>Organic Mayonnaise</td>
+                    </tr>
+                    <tr>
+                        <td></td>
+                        <td>08:35</td>
+                        <td>Fresh Strawberries</td>
+                    </tr>
+                    <tr>
+                        <td></td>
+                        <td>08:35</td>
+                        <td>Fresh Organic Strawberries</td>
+                    </tr>
+                    <tr>
+                        <td></td>
+                        <td>08:36</td>
+                        <td>Carton of Pasteurized Egg Whites</td>
+                    </tr>
+                    <tr>
+                        <td></td>
+                        <td>08:49</td>
+                        <td>Organic Reduced-Sugar Strawberry Preserve</td>
+                    </tr>
+                    <tr>
+                        <td>Wed Apr 30</td>
+                        <td>09:28</td>
+                        <td>Liquid Egg Whites</td>
+                    </tr>
+                </tbody>
+            </table>
+            <div class="timeline-note">(Multiple identical entries show up separately because each carton or jar was scanned individually.)</div>
+        </div>
+
+        <div class="section">
+            <h2 class="section-title">What you ate, by food group</h2>
+            <table class="food-group-table">
+                <thead>
+                    <tr>
+                        <th>Group</th>
+                        <th>Packages</th>
+                        <th>Share</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Dairy (egg whites, cottage cheese)</td>
+                        <td>5</td>
+                        <td>45%</td>
+                    </tr>
+                    <tr>
+                        <td>Cooking staples & condiments (crema sauce, mayo, preserve)</td>
+                        <td>3</td>
+                        <td>27%</td>
+                    </tr>
+                    <tr>
+                        <td>Produce (fresh strawberries)</td>
+                        <td>2</td>
+                        <td>18%</td>
+                    </tr>
+                    <tr>
+                        <td>Protein entrée (roasted-turkey deli)</td>
+                        <td>1</td>
+                        <td>9%</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="section">
+            <div class="highlight-box">
+                <div class="highlight-title">
+                    <span class="emoji">🌱💪</span>
+                    Health highlights
+                </div>
+                <ul class="tip-list">
+                    <li><strong>Lean-protein powerhouse.</strong> Four egg-white cartons plus turkey deliver ≥ 130 g of high-quality protein—excellent for muscle recovery with minimal saturated fat.</li>
+                    <li><strong>Fruit is in, veggies are missing.</strong> Two strawberry packs give antioxidants and ~6 g fibre, but no vegetables appeared. Aim to match each fruit package with a veg-forward item next week.</li>
+                    <li><strong>Condiments concentrate calories & sodium.</strong> The crema sauce, mayo and strawberry preserve add ~1 600 kcal (mostly fat or sugar) and ~2 g sodium in just a few servings. Portion control or lighter swaps can trim both.</li>
+                </ul>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2 class="section-title">Ingredient insights 🔎</h2>
+            <table class="ingredients-table">
+                <tbody>
+                    <tr>
+                        <td>Avg. ingredients / package</td>
+                        <td>≈ 8</td>
+                    </tr>
+                    <tr>
+                        <td>Items with added sugar</td>
+                        <td>2 / 11 (18%)</td>
+                    </tr>
+                    <tr>
+                        <td>Items with artificial sweeteners</td>
+                        <td>0</td>
+                    </tr>
+                    <tr>
+                        <td>Items listing salt / sodium in top-3 ingredients</td>
+                        <td>2</td>
+                    </tr>
+                    <tr>
+                        <td>Common allergens present</td>
+                        <td>
+                            <span class="allergen-tag">Milk <span class="count">(2)</span></span>
+                            <span class="allergen-tag">Eggs <span class="count">(5)</span></span>
+                            <span class="allergen-tag">Soy <span class="count">(1)</span></span>
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="section">
+            <h2 class="section-title">Culprit watch-list & easy upgrades</h2>
+            <table class="culprit-table">
+                <thead>
+                    <tr>
+                        <th>Item (category)</th>
+                        <th>Why it's on the list</th>
+                        <th>Simple improvement</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Organic Reduced-Sugar Strawberry Preserve (condiment)</td>
+                        <td>Added sugar is still #2 ingredient; 7 g per Tbsp</td>
+                        <td>Swap to freezer-aisle whole-fruit purée or mash fresh berries with chia seeds—same flavour, 60% less sugar</td>
+                    </tr>
+                    <tr>
+                        <td>Cilantro-Lime Crema Sauce (cooking)</td>
+                        <td>Dextrose + artificial "flavour", salt high</td>
+                        <td>Make a 3-ingredient DIY crema (Greek yogurt, lime, cilantro) for fewer additives & extra protein</td>
+                    </tr>
+                    <tr>
+                        <td>Organic Mayonnaise (cooking)</td>
+                        <td>90 kcal per Tbsp, salt in top-3</td>
+                        <td>Try avocado-oil mayo or light mayo at half the portion, or sub smashed avocado in sandwiches</td>
+                    </tr>
+                    <tr>
+                        <td>Sliced Turkey Breast Deli Meat (protein)</td>
+                        <td>Mono- & diglycerides, sodium phosphate, 450 mg Na / 2 oz</td>
+                        <td>Rotate in rotisserie chicken breast or freshly roasted turkey—same protein, ~40% less sodium & additives</td>
+                    </tr>
+                    <tr>
+                        <td>Organic Low-Fat Cottage Cheese (dairy)</td>
+                        <td>Carrageenan thickener + salt</td>
+                        <td>Choose a "no stabiliser" brand or strained Greek cottage cheese to drop gums & lower sodium</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="section">
+            <div class="highlight-box">
+                <div class="highlight-title">
+                    <span class="emoji">💰</span>
+                    Money matters
+                </div>
+                <ul class="tip-list">
+                    <li><strong>Protein drives the bill.</strong> Egg-white cartons ≈ $20 and turkey ≈ $6 (51% of spend). Bulk 32-oz egg-white cartons or buying turkey in a family-pack can shave ~$4 per week.</li>
+                    <li><strong>Condiments cost more than produce.</strong> Three condiments ($12) vs. two fruit packs ($8). Use one condiment till empty before buying another to cut waste and cash.</li>
+                </ul>
+            </div>
+        </div>
+
+        <div class="section">
+            <div class="highlight-box">
+                <div class="highlight-title">
+                    <span class="emoji">📈</span>
+                    Smart tweaks for next week
+                </div>
+                <ul class="tip-list">
+                    <li>Add two veggie-forward items (bagged salad, baby carrots) to balance the protein load and boost potassium.</li>
+                    <li>Finish or freeze one open condiment before cracking a new jar—reduces both calories and grocery costs.</li>
+                    <li>Cap high-sodium items at one per main meal; pair each with ≥ 16 oz plain water.</li>
+                    <li>Keep the protein streak but diversify—trade one egg-white carton for a 6-oz Greek-yogurt cup to add calcium and probiotics.</li>
+                </ul>
+                <p style="margin-top: 20px;">Swapping out the handful of "culprit" items can slash added sugar by > 40%, drop sodium by ~600 mg per day, and save roughly $7 without losing the convenience you like. 🚀</p>
+            </div>
+        </div>
+    </div>
+</body>
+</html> 

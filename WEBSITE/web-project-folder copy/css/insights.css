@@ -1,0 +1,87 @@
+body {
+    font-family: Arial, sans-serif;
+    background-color: #121212;
+    color: #ffffff;
+    margin: 0;
+    padding: 0;
+}
+
+.top-menu {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background-color: #1f1f1f;
+    padding: 10px 20px;
+    border-bottom: 1px solid #333;
+}
+
+.top-menu .logo img {
+    height: 40px;
+}
+
+.top-menu nav ul {
+    list-style: none;
+    display: flex;
+    gap: 15px;
+}
+
+.top-menu nav ul li a {
+    color: #ffffff;
+    text-decoration: none;
+    padding: 5px 10px;
+}
+
+.top-menu nav ul li a.active {
+    border-bottom: 2px solid #007AFF;
+}
+
+.insights-container {
+    padding: 20px;
+    text-align: center;
+}
+
+.score-section {
+    margin: 20px 0;
+}
+
+.score-circle {
+    width: 150px;
+    height: 150px;
+    margin: 0 auto;
+    border: 5px solid #007AFF;
+    border-radius: 50%;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    flex-direction: column;
+    background-color: #1f1f1f;
+}
+
+.score-number {
+    font-size: 3em;
+    font-weight: bold;
+    color: #ffffff;
+}
+
+.score-status {
+    font-size: 1.2em;
+    color: #007AFF;
+}
+
+.tips-section {
+    margin-top: 20px;
+}
+
+.tips-section h2 {
+    font-size: 1.5em;
+    color: #ffffff;
+}
+
+.hydration-tip {
+    margin-top: 20px;
+    background-color: #292929;
+    padding: 15px;
+    border-radius: 10px;
+    font-style: italic;
+    color: #a0a0a0;
+}

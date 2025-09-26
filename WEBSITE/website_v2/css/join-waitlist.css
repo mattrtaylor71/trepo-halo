@@ -1,0 +1,91 @@
+/* screen - join-waitlist */
+
+.join-waitlist {
+  align-items: flex-start;
+  background-color: var(--white);
+  display: flex;
+  flex-direction: column;
+  height: 852px;
+  padding: 28px 0;
+  width: 393px;
+}
+
+.join-waitlist .trepo {
+  letter-spacing: -0.40px;
+  line-height: normal;
+  margin-left: 20px;
+  min-height: 20px;
+  white-space: nowrap;
+}
+
+.join-waitlist .arrow-left-1 {
+  cursor: pointer;
+  height: 24px;
+  margin-left: 20px;
+  margin-top: 79px;
+  width: 24px;
+}
+
+.join-waitlist .title {
+  align-self: center;
+  letter-spacing: -0.72px;
+  line-height: 43.2px;
+  margin-right: 26.0px;
+  margin-top: 37px;
+  width: 327px;
+}
+
+.join-waitlist .if-you-havent-been {
+  align-self: center;
+  letter-spacing: -0.28px;
+  line-height: 16.8px;
+  margin-top: 21px;
+  min-height: 51px;
+  width: 353px;
+}
+
+.join-waitlist .frame-47 {
+  align-self: center;
+  border: 1px solid;
+  border-color: var(--green-house-2);
+  display: flex;
+  margin-top: 40px;
+  padding: 15px 20px;
+  width: 353px;
+}
+
+.join-waitlist .email-address {
+  letter-spacing: -0.28px;
+  line-height: normal;
+  margin-top: -1.00px;
+  position: relative;
+  white-space: nowrap;
+  width: fit-content;
+}
+
+.join-waitlist .frame-46 {
+  background-color: var(--reef);
+  cursor: pointer;
+  display: inline-flex;
+  justify-content: center;
+  margin-left: 20px;
+  margin-top: 31px;
+  padding: 15px 50px;
+}
+
+.join-waitlist .join-waitlist-1 {
+  letter-spacing: -0.28px;
+  line-height: normal;
+  margin-top: -1.00px;
+  position: relative;
+  white-space: nowrap;
+  width: fit-content;
+}
+
+.join-waitlist .frame {
+  align-items: center;
+  border-radius: 2px;
+  gap: 10px;
+  overflow: hidden;
+  position: relative;
+}

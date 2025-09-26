@@ -1,0 +1,275 @@
+/* screen - in-store-shopping-list-u40filteredu41 */
+
+.in-store-shopping-list-u40filteredu41 {
+  align-items: center;
+  background-color: var(--white);
+  display: flex;
+  flex-direction: column;
+  height: 826px;
+  width: 393px;
+}
+
+.in-store-shopping-list-u40filteredu41 .flex-col {
+  align-items: flex-start;
+  display: flex;
+  flex-direction: column;
+  min-height: 283px;
+  width: 393px;
+}
+
+.in-store-shopping-list-u40filteredu41 .frame-55 {
+  align-items: flex-end;
+  background-color: var(--white);
+  display: flex;
+  gap: 30px;
+  height: 138px;
+  padding: 22px 20px;
+  width: 393px;
+}
+
+.in-store-shopping-list-u40filteredu41 .flex-col-1 {
+  gap: 44px;
+  min-height: 88px;
+  width: 72px;
+}
+
+.in-store-shopping-list-u40filteredu41 .trepo {
+  letter-spacing: -0.40px;
+  line-height: normal;
+  min-height: 20px;
+  white-space: nowrap;
+}
+
+.in-store-shopping-list-u40filteredu41 .insights {
+  cursor: pointer;
+  letter-spacing: -0.40px;
+  line-height: 24.0px;
+  white-space: nowrap;
+}
+
+.in-store-shopping-list-u40filteredu41 .week {
+  cursor: pointer;
+  letter-spacing: -0.40px;
+  line-height: 24.0px;
+  min-width: 50px;
+  white-space: nowrap;
+}
+
+.in-store-shopping-list-u40filteredu41 .shopping {
+  letter-spacing: -0.40px;
+  line-height: 24.0px;
+  min-width: 85px;
+  white-space: nowrap;
+}
+
+.in-store-shopping-list-u40filteredu41 .title {
+  letter-spacing: -0.48px;
+  line-height: 28.8px;
+  margin-left: 20px;
+  margin-top: 35px;
+  min-height: 29px;
+  white-space: nowrap;
+}
+
+.in-store-shopping-list-u40filteredu41 .frame-container {
+  align-items: flex-start;
+  display: flex;
+  gap: 8px;
+  height: 44px;
+  margin-left: 20px;
+  margin-top: 37px;
+  min-width: 308px;
+}
+
+.in-store-shopping-list-u40filteredu41 .frame-45 {
+  align-items: center;
+  border: 1px solid;
+  border-color: var(--green-house);
+  border-radius: 30px;
+  cursor: pointer;
+  display: inline-flex;
+  gap: 5px;
+  justify-content: center;
+  overflow: hidden;
+  padding: 15px 25px;
+  position: relative;
+}
+
+.in-store-shopping-list-u40filteredu41 .frame {
+  align-items: center;
+  border: 1px solid;
+  border-color: var(--green-house);
+  border-radius: 30px;
+  display: inline-flex;
+  gap: 5px;
+  justify-content: center;
+  overflow: hidden;
+  padding: 15px 25px;
+  position: relative;
+}
+
+.in-store-shopping-list-u40filteredu41 .frame-42 {
+  align-items: center;
+  background-color: var(--green-house);
+  border: 1px solid;
+  border-radius: 30px;
+  display: inline-flex;
+  gap: 5px;
+  justify-content: center;
+  overflow: hidden;
+  padding: 15px 25px;
+  position: relative;
+}
+
+.in-store-shopping-list-u40filteredu41 .dairy {
+  letter-spacing: -0.28px;
+  line-height: normal;
+  margin-top: -1.00px;
+  position: relative;
+  white-space: nowrap;
+  width: fit-content;
+}
+
+.in-store-shopping-list-u40filteredu41 .frame-container-1 {
+  align-items: flex-start;
+  align-self: flex-start;
+  display: flex;
+  gap: 8px;
+  height: 44px;
+  margin-left: 20px;
+  margin-top: 9px;
+  min-width: 284px;
+}
+
+.in-store-shopping-list-u40filteredu41 .snacks {
+  letter-spacing: -0.28px;
+  line-height: normal;
+  margin-top: -1.00px;
+  position: relative;
+  white-space: nowrap;
+  width: fit-content;
+}
+
+.in-store-shopping-list-u40filteredu41 .other {
+  letter-spacing: -0.28px;
+  line-height: normal;
+  margin-top: -1.00px;
+  position: relative;
+  white-space: nowrap;
+  width: fit-content;
+}
+
+.in-store-shopping-list-u40filteredu41 .meat {
+  letter-spacing: -0.28px;
+  line-height: normal;
+  margin-top: -1.00px;
+  position: relative;
+  white-space: nowrap;
+  width: fit-content;
+}
+
+.in-store-shopping-list-u40filteredu41 .frame-63 {
+  align-items: flex-start;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  margin-top: 44px;
+  position: relative;
+  width: 353px;
+}
+
+.in-store-shopping-list-u40filteredu41 .frame-1 {
+  align-self: stretch;
+  border-bottom-style: solid;
+  border-bottom-width: 1px;
+  border-color: var(--green-house-2);
+  height: 67px;
+  position: relative;
+  width: 100%;
+}
+
+.in-store-shopping-list-u40filteredu41 .flex-row {
+  align-items: center;
+  display: flex;
+  min-width: 353px;
+  position: relative;
+  top: 8px;
+}
+
+.in-store-shopping-list-u40filteredu41 .image-6 {
+  height: 51px;
+  object-fit: cover;
+  width: 51px;
+}
+
+.in-store-shopping-list-u40filteredu41 .flex-col-2 {
+  gap: 4px;
+  margin-bottom: 2.0px;
+  margin-left: 16px;
+  min-height: 37px;
+  width: 220px;
+}
+
+.in-store-shopping-list-u40filteredu41 .chobani-greek-yoghurt {
+  letter-spacing: -0.32px;
+  line-height: 19.2px;
+  width: 220px;
+}
+
+.in-store-shopping-list-u40filteredu41 .x330ml {
+  letter-spacing: -0.24px;
+  line-height: 14.4px;
+  width: 50px;
+}
+
+.in-store-shopping-list-u40filteredu41 .flex-row-1 {
+  align-items: center;
+  display: flex;
+  min-width: 353px;
+  position: relative;
+  top: 7px;
+}
+
+.in-store-shopping-list-u40filteredu41 .image-13 {
+  height: 50px;
+  object-fit: cover;
+  width: 65px;
+}
+
+.in-store-shopping-list-u40filteredu41 .flex-col-3 {
+  gap: 4px;
+  margin-left: 2px;
+  margin-top: 1.0px;
+  min-height: 37px;
+  width: 220px;
+}
+
+.in-store-shopping-list-u40filteredu41 .frame-12-1 {
+  border: 1px solid;
+  border-color: var(--green-house);
+  border-radius: 15px;
+  height: 30px;
+  margin-bottom: 4.0px;
+  margin-left: 36px;
+  width: 30px;
+}
+
+.in-store-shopping-list-u40filteredu41 .frame-4 {
+  align-items: center;
+  background-color: var(--reef);
+  border-radius: 2px;
+  display: inline-flex;
+  gap: 10px;
+  justify-content: center;
+  margin-left: 1.0px;
+  margin-top: 44px;
+  overflow: hidden;
+  padding: 15px 50px;
+  position: relative;
+}
+
+.in-store-shopping-list-u40filteredu41 .flex-col-4 {
+  align-items: flex-start;
+  display: flex;
+  flex-direction: column;
+}

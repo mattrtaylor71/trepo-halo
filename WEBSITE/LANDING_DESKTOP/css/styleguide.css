@@ -1,0 +1,48 @@
+:root { 
+  --black: #000000;
+  --green-house: #1d4409;
+  --green-house-2: #1d440999;
+  --reef: #d4fba3;
+  --reef-2: #d4fba34c;
+ 
+  --font-size-l: 20px;
+  --font-size-m: 16px;
+  --font-size-s: 14px;
+  --font-size-xl: 24px;
+  --font-size-xs: 13px;
+  --font-size-xxl: 32px;
+  --font-size-xxs: 10px;
+ 
+  --font-family-darker_grotesque: "Darker Grotesque", Helvetica;
+}
+.darkergrotesque-medium-green-house-24px {
+  color: var(--green-house);
+  font-family: var(--font-family-darker_grotesque);
+  font-size: var(--font-size-xl);
+  font-style: normal;
+  font-weight: 500;
+}
+
+.darkergrotesque-normal-green-house-16px {
+  color: var(--green-house-2);
+  font-family: var(--font-family-darker_grotesque);
+  font-size: var(--font-size-m);
+  font-style: normal;
+  font-weight: 400;
+}
+
+.darkergrotesque-normal-green-house-14px {
+  color: var(--green-house);
+  font-family: var(--font-family-darker_grotesque);
+  font-size: var(--font-size-s);
+  font-style: normal;
+  font-weight: 400;
+}
+
+.darkergrotesque-semi-bold-green-house-10px {
+  color: var(--green-house);
+  font-family: var(--font-family-darker_grotesque);
+  font-size: var(--font-size-xxs);
+  font-style: normal;
+  font-weight: 600;
+}

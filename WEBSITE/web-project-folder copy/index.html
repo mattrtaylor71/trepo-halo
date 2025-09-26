@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Your Product</title>
+    <link rel="stylesheet" href="css/index.css">
+    <script src="https://cdn.auth0.com/js/auth0-spa-js/1.20/auth0-spa-js.production.js"></script>
+    <script src="js/auth.js" defer></script>
+    <script src="js/index.js" defer></script>
+</head>
+<body>
+    <!-- Navigation Bar -->
+    <nav class="navbar">
+        <div class="nav-left">
+            <div class="logo">
+                <img src="https://i.ibb.co/jTB0BLS/trepo-v0-1024-4.png" alt="Logo" class="logo-image">
+            </div>
+            <!-- Conditional Auth Links -->
+            <div id="auth-links">
+                <ul class="nav-links">
+                    <li><a href="insights.html">Insights</a></li>
+                    <li><a href="week.html">Week</a></li>
+                    <li><a href="shopping.html">Shopping</a></li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Hero Section with Auth Button -->
+    <section class="hero">
+        <div class="form-container">
+            <h2>Welcome</h2>
+            <p id="welcome-message">Log in to get started.</p>
+            <button id="auth-button" class="btn">Login / Sign Up</button>
+        </div>
+        <div class="hero-image">
+            <img src="https://i.ibb.co/jTB0BLS/trepo-v0-1024-4.png" alt="Product Image">
+        </div>
+    </section>
+</body>
+</html>

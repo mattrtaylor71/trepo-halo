@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <!-- Google tag (gtag.js) -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-Z6BZ81YYV5"></script>
+    <script>
+      window.dataLayer = window.dataLayer || [];
+      function gtag(){dataLayer.push(arguments);}
+      gtag('js', new Date());
+
+      gtag('config', 'G-Z6BZ81YYV5');
+    </script>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
+    <link rel="shortcut icon" type="image/png" href="https://animaproject.s3.amazonaws.com/home/favicon.png" />
+    <meta name="og:type" content="website" />
+    <meta name="twitter:card" content="photo" />
+    <link rel="stylesheet" type="text/css" href="css/insights.css?v=20250113.1976" />
+    <link rel="stylesheet" type="text/css" href="css/styleguide.css?v=20250108.1014" />
+    <link rel="stylesheet" type="text/css" href="css/globals.css?v=20250108.1018" />
+    <title>For You</title>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="js/points.js?v=20250108.1016"></script>
+    <script>
+      document.addEventListener("DOMContentLoaded", () => {
+        fetchAndDisplayPoints();
+      });
+    </script>
+  </head>
+  <body style="margin: 0; background: #ffffff">
+    <input type="hidden" id="anPageName" name="page" value="insights" />
+    <div class="container-center-horizontal">
+      <div class="insights screen">
+        <div class="frame-51">
+            <div class="flex-col violetsans-regular-normal-green-house-20px">
+              <a href="index.html" class="trepo-link">
+                <div class="trepo">TREPO</div>
+              </a>
+              <div class="insights-1">For You</div>
+            </div>
+          <a href="week.html"><div class="week violetsans-regular-normal-green-house-20px-2">Week</div></a>
+          <a href="shopping.html">
+            <div class="shopping violetsans-regular-normal-green-house-20px-2">Shopping</div>
+          </a>
+          <a href="beeps.html">
+            <div class="points-container">
+              <strong class="user-points">0</strong>
+            </div>
+          </a>
+        </div>
+
+
+        <!-- 3 columns side by side -->
+        <!-- 3 columns side by side -->
+        <div class="metrics-row">
+          <!-- Column 1 -->
+          <div class="metric-group">
+            <div class="overlap-group">
+              <!-- Title at the top -->
+              <h1 class="title violetsans-regular-normal-green-house-20px">UPF<br>rating</h1>
+              
+              <!-- Number + suffix on one row -->
+              <div class="metric-line">
+                <div class="upf-number">0</div>
+                <div class="out-of-100 violetsans-regular-normal-green-house-28px">%</div>
+              </div>
+
+              <!-- Explanatory paragraph below -->
+              <p class="well-done-this-is-a violetsans-regular-normal-green-house-10px">
+                Percentage of your products that are ultra-processed.
+              </p>
+            </div>
+          </div>
+
+          <!-- Column 2 -->
+          <div class="metric-group">
+            <div class="overlap-group">
+              <h1 class="title violetsans-regular-normal-green-house-20px">Harmful ingredients</h1>
+
+              <div class="metric-line">
+                <div class="harmful-number">0</div>
+                <!-- If you wanted a suffix here, e.g., "items," place it here. -->
+              </div>
+
+              <p class="well-done-this-is-a violetsans-regular-normal-green-house-10px">
+                Consumed in the last 14 days.
+              </p>
+            </div>
+          </div>
+
+          <!-- Column 3 -->
+          <div class="metric-group">
+            <div class="overlap-group">
+              <h1 class="title violetsans-regular-normal-green-house-20px">Consumption score</h1>
+
+              <div class="metric-line">
+                <div class="number">0</div>
+              </div>
+
+              <p class="well-done-this-is-a violetsans-regular-normal-green-house-10px">
+                Overall health rating of your consumption.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div class="frame-69">
+          <p class="recipe-class violetsans-regular-normal-green-house-18px">
+            <span class="chatbot-title">A recipe for you<br /></span>
+            <span class="span2 violetsans-regular-normal-green-house-14px">
+               
+            </span>
+          </p>
+        </div>
+
+
+        <div id="chatbot" class="chatbot-container">
+          <h2 class="chatbot-title">Trepo Coach</h2>
+          <div class="chat-interface">
+            <textarea
+              id="user-input"
+              class="chat-input"
+              rows="2"
+              placeholder="E.g. 'Make a high-protein shopping list' 'Provide a dinner recipe...'"
+            ></textarea>
+            <button class="chat-button" onclick="getAIResponse()">Send</button>
+          </div>
+          <div id="chatbot-loading" style="display: none; margin-top: 10px; text-align: center;">
+            <div class="spinner"></div>
+          </div>
+          <div id="chatbot-response" class="chatbot-response-box"></div>
+        </div>
+
+        <div class="frame-9">
+          <p class="highlights-your-di violetsans-regular-normal-green-house-18px">
+            <span class="chatbot-title">Highlights<br /></span>
+            <span class="span1 violetsans-regular-normal-green-house-14px">
+              <br />+ Your diet includes nutritious foods like nuts, berries, and lean proteins.<br />
+              <br />+ Your protein intake is at a sufficient level for your age, body type, and gender.
+            </span>
+          </p>
+        </div>
+        <div class="frame-10">
+          <p class="areas-for-improvemen">
+            <span class="chatbot-title1">Areas for improvement<br /></span>
+            <span class="span1 violetsans-regular-normal-reef-14px">
+              <br />- Your level of fiber was a little low. Try incorporating some higher-fiber ingredients, such as
+              lentils, chickpeas, or almonds.<br />
+              <br />- Your processed food intake was a little higher than usual. Try switching out some processed
+              snacks for fresh fruits, dried fruit, or nuts.
+            </span>
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <div id="product-comparison-overlay" class="product-comparison screen" style="display: none;">
+        <div class="product-comparison-1">
+            <button class="frame-67" onclick="toggleOverlay(false)">
+                    <div class="rectangle rectangle-1"></div>
+                    <div class="rectangle rectangle-2"></div>
+            </button>
+            <!-- Overlay Title -->
+            <h3 class="overlay-title">Insights</h3>
+
+            <!-- Weekly Scores Chart Container -->
+            <div id="chart-container" style="display: none; width: 100%; height: 300px;">
+                <canvas id="weekly-scores-chart"></canvas>
+            </div>
+
+            <!-- UPF Items List -->
+            <ul id="upf-item-list" style="display: none;"></ul>
+        </div>
+    </div>
+
+    <script src="js/insights.js?v=20250115.2175"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  </body>
+</html>

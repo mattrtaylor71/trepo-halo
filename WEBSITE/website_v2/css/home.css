@@ -1,0 +1,202 @@
+/* screen - home */
+
+.home {
+  align-items: flex-start;
+  background-color: var(--white);
+  display: flex;
+  flex-direction: column;
+  height: 852px;
+  padding: 28px 20px;
+  width: 393px;
+}
+
+.home .trepo {
+  letter-spacing: -0.40px;
+  line-height: normal;
+  min-height: 20px;
+  white-space: nowrap;
+}
+
+.home .healthier-eating-ev {
+  color: #21500a;
+  font-family: var(--font-family-violet_sans-regular);
+  font-size: var(--font-size-xxxxl);
+  font-weight: 400;
+  line-height: 43.2px;
+  margin-top: 60px;
+  width: 327px;
+  text-align: center;
+}
+
+.home .span0 {
+  letter-spacing: -0.26px;
+}
+
+.home .span1 {
+  letter-spacing: 0;
+}
+
+.home .frame-46 {
+  align-items: center;
+  background-color: var(--reef);
+  border-radius: 7px;
+  cursor: pointer;
+  display: inline-flex;
+  gap: 10px;
+  justify-content: center;
+  overflow: hidden;
+  padding: 15px 50px;
+  max-height: 20px;
+  max-width: 30px;
+  position: relative;
+}
+
+.log-in-btn {
+    background-color: var(--reef); /* Match the existing box color */
+    border: none; /* Remove default button borders */
+    border-radius: 2px;
+    color: var(--green-house); /* Match the text color */
+    font-family: var(--font-family-violet_sans-regular);
+    font-size: 14px;
+    cursor: pointer;
+    display: inline-block;
+    text-align: center;
+}
+
+.log-in-btn:hover {
+    background-color: var(--reef-dark); /* Optional: Add hover effect */
+}
+
+
+.home .dont-have-an-accoun {
+  cursor: pointer;
+  letter-spacing: -0.28px;
+  line-height: normal;
+  margin-top: 47px;
+  min-height: 14px;
+  white-space: nowrap;
+  text-align: center;  /* Centers inline text elements inside */
+  display: block;      /* Ensures it takes full width */
+  width: 100%;         /* Ensures it spans the container */
+}
+
+.home .span0-1 {
+  letter-spacing: -0.04px;
+  justify-content: center;
+}
+
+.home .span1-1 {
+  letter-spacing: -0.04px;
+  text-decoration: underline;
+}
+/* Navigation Bar */
+.navbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background-color: var(--white);
+    padding: 10px 0px;
+}
+
+.nav-left {
+    display: flex;
+    align-items: center;
+}
+
+.navbar .nav-links {
+    list-style: none;
+    display: flex;
+    gap: 15px;
+}
+
+.navbar .nav-links li a {
+    font-family: var(--font-family-violet_sans-regular);
+    font-weight: 400;
+    color: #1d4509;
+    font-size: 20px;
+    letter-spacing: -0.40px;
+    line-height: normal;
+    text-decoration: none;
+    padding: 5px 10px;
+    white-space: nowrap;
+}
+
+.navbar .nav-links li a.active {
+    border-bottom: 2px solid #007AFF;
+}
+
+#auth-links {
+    display: none; /* Hidden by default */
+}
+
+/* Default font size */
+.healthier-eating-ev {
+    font-size: var(--font-size-xxxxl);
+    line-height: 43.2px;
+}
+
+/* Smaller font size for authenticated users */
+h1#welcome-message.authenticated-welcome {
+    font-size: 24px; /* Slightly smaller font size */
+    line-height: 32px; /* Adjust line height accordingly */
+}
+
+
+.user-images {
+    display: none; /* Hidden by default */
+    text-align: center;
+    margin-top: 20px;
+}
+
+.user-images img {
+    width: 95%; /* Adjust size */
+    height: auto;
+    margin: 10px;
+    border-radius: 10px;
+}
+
+.Setup-Guide {
+    margin-top: 30px;
+}
+
+.hidden {
+    display: none;
+}
+
+
+stripe-buy-button {
+  display: block;
+  margin: 10px auto;
+  margin-bottom: 40px;
+}
+
+.header-container {
+    display: flex;
+    align-items: center; /* Align items vertically */
+    justify-content: space-between; /* Add spacing between them */
+    width: 100%; /* Ensures it spans the available space */
+    padding: 10px 0px; /* Add padding for spacing */
+}
+
+.preview-container {
+    display: flex;
+    justify-content: center;  /* Centers horizontally */
+    align-items: center;      /* Centers vertically if needed */
+    width: 100%;
+    padding: 20px 0;
+    border-radius: 20px;       /* Rounds the corners */
+}
+
+.preview-image {
+    max-width: 100%;  /* Ensures it doesn't overflow */
+    height: auto;     /* Maintains aspect ratio */
+    border-radius: 15px; /* Soft rounded corners */
+    box-shadow: 0px 10px 20px rgba(0, 0, 0, 0.2); /* Adds depth */
+}
+
+.preview-gif {
+    max-width: 100%;  /* Ensures it doesn't overflow */
+    height: auto;     /* Maintains aspect ratio */
+    border-radius: 15px; /* Soft rounded corners */
+    box-shadow: 0px 10px 20px rgba(0, 0, 0, 0.2); /* Adds depth */
+}

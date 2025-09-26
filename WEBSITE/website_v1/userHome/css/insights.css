@@ -1,0 +1,874 @@
+/* screen - insights */
+
+.insights {
+  align-items: center;
+  background-color: var(--white);
+  display: flex;
+  flex-direction: column;
+  width: 393px;
+}
+
+.insights .frame-51 {
+  align-items: flex-end;
+  background-color: var(--white);
+  display: flex;
+  gap: 30px;
+  left: 0;
+  padding: 22px 20px;
+  position: fixed;
+  top: 0;
+  width: 100%;
+  z-index: 6;
+}
+
+.insights .flex-col {
+  align-items: flex-start;
+  display: flex;
+  flex-direction: column;
+  gap: 44px;
+  min-height: 88px;
+  width: 72px;
+}
+
+.insights .trepo {
+  letter-spacing: -0.40px;
+  line-height: normal;
+  min-height: 20px;
+  white-space: nowrap;
+}
+
+.insights .insights-1 {
+  letter-spacing: -0.40px;
+  line-height: 24.0px;
+  white-space: nowrap;
+}
+
+.insights .week {
+  cursor: pointer;
+  letter-spacing: -0.40px;
+  line-height: 24.0px;
+  min-width: 50px;
+  white-space: nowrap;
+}
+
+.insights .shopping {
+  cursor: pointer;
+  letter-spacing: -0.40px;
+  line-height: 24.0px;
+  min-width: 85px;
+  white-space: nowrap;
+}
+
+
+
+.insights .title {
+  letter-spacing: -0.56px;
+  line-height: 20px;
+  position: static;
+}
+
+.insights .info-1 {
+  cursor: pointer;
+  height: 24px;
+  left: 311px;
+  position: absolute;
+  top: 6px;
+  width: 24px;
+}
+
+
+
+.insights .overlap-group2 {
+  margin-right: 1.0px;
+  margin-bottom: 5px;
+  margin-top: 32px;
+  position: relative;
+  width: 354px;
+  z-index: 2;
+  display: flex;
+  height: auto;
+}
+
+.insights .overlap-group3 {
+  margin-top: 15px;
+  margin-bottom: 5px;
+  position: relative;
+  width: 353px;
+  z-index: 1;
+  left: 0;
+  display: flex;
+  height: auto;
+  align-items: center;
+  text-align: center;
+}
+
+.insights .overlap-group4 {
+  margin-right: 1.0px;
+  margin-top: 12px;
+  margin-bottom: 5px;
+  position: relative;
+  width: 354px;
+  z-index: 2;
+  display: flex;
+  height: auto;
+}
+
+.insights .overlap-group5 {
+  margin-top: 320px;
+  margin-bottom: 5px;
+  position: relative;
+  width: 353px;
+  z-index: 1;
+  left: 0;
+  display: flex;
+  height: auto;
+  align-items: center;
+  text-align: center;
+}
+
+.insights .overlap-group6 {
+  margin-right: 1.0px;
+  margin-top: 12px;
+  margin-bottom: 5px;
+  position: relative;
+  width: 354px;
+  z-index: 2;
+  display: flex;
+  height: auto;
+}
+
+.insights .well-done-this-is-a {
+  font-size: 10px; /* Font size remains increased */
+  letter-spacing: -0.28px;
+  line-height: 12px; /* Adjusted to match the larger font size */
+  position: static;
+  margin-bottom: 10px; /* Reduced gap below */
+  margin-top: 0;
+  top: auto;
+  left: auto;
+}
+
+.insights .upf-number {
+  color: var(--green-house);
+  font-family: var(--font-family-violet_sans-regular);
+  font-weight: 400;
+  position: static;
+  display: inline-block; /* or block */
+  font-size: 80px;
+  line-height: 1;
+  margin: 0; /* any extra space around if needed */
+  margin-top: 5px;
+}
+
+.insights .harmful-number {
+  color: var(--green-house);
+  font-family: var(--font-family-violet_sans-regular);
+  font-weight: 400;
+  position: static;
+  display: inline-block; /* or block */
+  font-size: 80px;
+  line-height: 1;
+  margin: 0; /* any extra space around if needed */
+  margin-top: 5px;
+}
+
+.insights .number {
+  color: var(--green-house);
+  font-family: var(--font-family-violet_sans-regular);
+  font-weight: 400;
+  position: static;
+  display: inline-block; /* or block */
+  font-size: 80px;
+  line-height: 1;
+  margin: 0; /* any extra space around if needed */
+  margin-top: 5px;
+}
+
+.insights .out-of-100 {
+  font-size: 20px; /* Reduced font size */
+  color: var(--green-house); /* Matches the number color for consistency */
+  letter-spacing: -0.56px;
+  line-height: 24px; /* Adjusted line height for smaller font */
+  white-space: nowrap;
+  text-align: right; /* Ensures text is aligned to the right */
+  position: static !important;
+  top: auto !important;
+  left: auto !important;
+  margin-top: 0 !important; /* Adjust spacing as you wish */
+}
+
+
+.insights .frame-9 {
+  align-items: center;
+  background-color: var(--reef);
+  border-radius: 10px;
+  display: flex;
+  gap: 10px;
+  margin-right: 1.0px;
+  margin-top: 20px; /* Further reduced margin */
+  overflow: hidden;
+  padding: 20px;
+  position: relative;
+  width: 354px;
+  z-index: 3;
+}
+
+.insights .highlights-your-di {
+  flex: 1;
+  letter-spacing: -0.36px;
+  line-height: 21.6px;
+  margin-top: -1.00px;
+  position: relative;
+}
+
+.insights .span0 {
+  letter-spacing: -0.06px;
+}
+
+.insights .span1 {
+  letter-spacing: -0.04px;
+  line-height: 16.8px;
+}
+
+.insights .span2 {
+  display: block;
+}
+
+.insights .frame-10 {
+  align-items: center;
+  background-color: var(--green-house);
+  border-radius: 10px;
+  display: flex;
+  gap: 10px;
+  margin-right: 1.0px;
+  margin-top: 10px; /* Further reduced margin */
+  overflow: hidden;
+  padding: 20px;
+  position: relative;
+  width: 354px;
+  z-index: 4;
+}
+
+.insights .areas-for-improvemen {
+  color: var(--reef);
+  flex: 1;
+  font-family: var(--font-family-violet_sans-regular);
+  font-size: var(--font-size-xl);
+  font-weight: 400;
+  letter-spacing: -0.36px;
+  line-height: 21.6px;
+  margin-top: -1.00px;
+  position: relative;
+}
+
+.insights .frame-46 {
+  align-items: center;
+  background-color: var(--reef);
+  border-radius: 2px;
+  cursor: pointer;
+  display: inline-flex;
+  gap: 10px;
+  justify-content: center;
+  overflow: hidden;
+  position: relative;
+  z-index: 5;
+  margin-top: 20px;
+}
+
+.insights .see-previous-scores {
+  letter-spacing: -0.28px;
+  line-height: normal;
+  margin-top: -1.00px;
+  position: relative;
+  white-space: nowrap;
+  width: fit-content;
+  padding: 20px;
+}
+
+.insights .trepo {
+  color: var(--green-house); /* Same color as .insights-1 */
+  letter-spacing: -0.40px;
+  line-height: normal;
+  min-height: 20px;
+  white-space: nowrap;
+  cursor: pointer; /* Add pointer cursor to indicate it's clickable */
+}
+
+
+/* screen - product-comparison */
+
+/* Overlay styling */
+.product-comparison {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  position: fixed; /* Fixed positioning for full viewport coverage */
+  top: 0;
+  left: 0;
+  width: 100%; /* Full width of the viewport */
+  height: 100%; /* Full height of the viewport */
+  background-color: rgba(0, 0, 0, 0.5); /* Semi-transparent dark background */
+  z-index: 9999; /* Ensure it's above all other elements */
+}
+
+/* Content box inside overlay */
+.product-comparison .product-comparison-1 {
+  background-color: var(--white);
+  border: 1px solid var(--green-house-4);
+  border-radius: 10px;
+  padding: 20px;
+  width: 90%;
+  height: 90%;
+  text-align: center;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2); /* Subtle shadow for depth */
+}
+
+
+.product-comparison .flex-row {
+  position: relative; /* Allows absolute positioning of child elements */
+  display: flex;
+  gap: 4px;
+  width: 100%;
+}
+
+.product-comparison .flex-col {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 60%; /* Adjusted for better layout */
+}
+
+.product-comparison .overlap-group1 {
+  position: relative; /* Ensures child elements are positioned relative to this container */
+  width: 120px; /* Adjusted container size */
+  height: 120px;
+  overflow: hidden; /* Prevents elements from overflowing the container */
+}
+
+.product-comparison .image-7 {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  object-fit: contain; /* Ensures the image scales proportionally */
+  top: 0;
+  left: 0;
+  z-index: 1; /* Ensures image stays below other elements like frame-67 */
+}
+.product-comparison .frame-67 {
+  position: absolute; /* Allows precise positioning within flex-row */
+  top: 0; /* Aligns to the top of flex-row */
+  right: 0; /* Aligns to the right of flex-row */
+  width: 40px; /* Diameter of the circular button */
+  height: 40px;
+  background-color: var(--reef); /* Circle background color */
+  border-radius: 50%; /* Makes the element circular */
+  cursor: pointer; /* Indicates the element is interactive */
+  z-index: 3; /* Ensures it appears above other elements */
+  display: flex; /* Centers the content inside */
+  justify-content: center;
+  align-items: center;
+}
+
+.product-comparison .rectangle {
+  position: absolute;
+  width: 24px; /* Length of each line in the cross */
+  height: 2px; /* Thickness of each line in the cross */
+  background-color: var(--green-house); /* Color for the cross */
+  transform-origin: center; /* Ensures rotation happens around the center */
+}
+
+.product-comparison .rectangle-1 {
+  transform: rotate(45deg); /* Rotates the line to form one part of the cross */
+}
+
+.product-comparison .rectangle-2 {
+  transform: rotate(-45deg); /* Rotates the line to form the other part of the cross */
+}
+
+
+.product-comparison .item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  border: 1px solid var(--green-house-4);
+  border-radius: 10px;
+  padding: 10px;
+  margin-top: 20px;
+  background-color: var(--white);
+}
+
+.product-comparison .image-15 {
+  width: 120px;
+  height: 120px;
+  object-fit: cover;
+}
+
+.product-comparison .frame {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: var(--reef);
+  border-radius: 2px;
+  padding: 10px;
+}
+
+.product-comparison .add-to-shopping-list {
+  cursor: pointer;
+  text-align: center;
+}
+
+.product-comparison .this-product-is-made {
+  text-align: left;
+  margin: 10px 0;
+}
+
+.product-comparison .healthier-alternative {
+  text-align: left;
+  padding-top: 20px;
+}
+
+.product-comparison .upf {
+  text-align: left;
+  padding-top: 20px;
+}
+
+.product-comparison .harmful-ingredients {
+  text-align: left;
+  padding-top: 20px;
+}
+.product-comparison-1 {
+  position:relative;
+  background-color: var(--reef);
+  border: 1px solid var(--green-house-4);
+  border-radius: 10px;
+  padding: 20px;
+  width: 80%;
+  height: 70%;
+  text-align: center;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2);
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  align-items: center;
+  overflow-y: auto;
+}
+
+.product-comparison-1 h3 {
+    margin-bottom: 20px;
+    font-size: 18px;
+    color: var(--green-house);
+}
+
+.product-comparison .bar-container div {
+    text-align: center;
+    font-size: 12px;
+    margin: 5px 0;
+}
+
+.bar {
+  width: 40px; /* Fixed width for all bars */
+  background-color: var(--green-house);
+  border-radius: 5px;
+}
+
+.bar-wrapper {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  height: 100%;
+}
+
+/* Make the UPF number clickable */
+.insights .upf-number {
+  cursor: pointer;
+  transition: color 0.3s ease-in-out;
+}
+
+.insights .upf-number:hover {
+  color: var(--reef); /* Slightly lighter on hover */
+}
+/* screen - product-comparison */
+
+.insights .harmful-number {
+  cursor: pointer;
+  transition: color 0.3s ease-in-out;
+}
+
+.insights .harmful-number:hover {
+  color: var(--reef); /* Slightly lighter on hover */
+}
+
+#product-comparison-overlay {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.6);
+    justify-content: center;
+    align-items: center;
+    z-index: 9999;
+}
+
+.product-comparison-1 {
+    background: white;
+    padding: 20px;
+    border-radius: 10px;
+    max-width: 400px;
+    width: 90%;
+    text-align: center;
+}
+
+.overlay-title {
+    font-size: 18px;
+    font-weight: bold;
+    margin-bottom: 10px;
+}
+
+#upf-item-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+#upf-item-list li {
+    padding: 10px;
+    border-bottom: 1px solid #ddd;
+    font-size: 16px;
+}
+
+.close-button {
+    position: absolute;
+    top: 10px;
+    right: 15px;
+    background: none;
+    border: none;
+    font-size: 18px;
+    cursor: pointer;
+}
+
+
+/* Chatbot styling */
+.chatbot-container {
+  margin-top: 140px;
+  padding: 10px;
+  width: 98%;
+  background-color: var(--reef);
+  border-radius: 10px;
+  font-family: var(--font-family-violet_sans-regular);
+  color: var(--green-house);
+}
+
+.chatbot-title {
+  margin-bottom: 10px;
+  font-size: 16px;
+  font-weight: bold;
+  color: var(--green-house);
+}
+
+.chatbot-title1 {
+  margin-bottom: 10px;
+  font-size: 22px;
+  font-weight: bold;
+  color: var(--reef);
+}
+
+.chat-interface {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 0px;
+}
+
+.chat-input {
+  flex: 1;
+  padding: 5px;
+  border: 1px solid var(--green-house-4);
+  border-radius: 6px;
+  font-size: 16px;
+  font-family: inherit;
+  resize: none;         /* Prevent manual resizing */
+  line-height: 1.5;     /* Better spacing */
+}
+
+
+.chat-button {
+  padding: 12px 16px;
+  background-color: var(--green-house);
+  color: var(--reef);
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+  font-family: inherit;
+  transition: background-color 0.3s ease;
+}
+
+.chat-button:hover {
+  background-color: #3f7c5e;
+}
+
+.chatbot-response-box {
+  background-color: var(--reef);
+  border-radius: 6px;
+  padding: 15px;
+  font-size: 18px;
+  white-space: pre-line;
+  border: 0px solid var(--green-house-4);
+  max-height: 500px;
+  overflow-y: auto;
+}
+
+.chatbot-response-box ul {
+  padding-left: 20px;
+  list-style-type: disc;
+  margin-top: 10px;
+}
+
+.chatbot-response-box li {
+  margin-bottom: 8px;
+  line-height: 1.5;
+}
+
+.chatbot-response-box strong {
+  font-weight: bold;
+  color: var(--green-house);
+}
+
+
+.spinner {
+  border: 4px solid var(--reef);
+  border-top: 4px solid var(--green-house);
+  border-radius: 50%;
+  width: 30px;
+  height: 30px;
+  animation: spin 1s linear infinite;
+  margin: auto;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+/* The row that holds all three columns (G1, G2, G3) */
+.metrics-row {
+  display: flex;               /* 3 columns side by side */
+  justify-content: space-around; /* Spread them horizontally */
+  align-items: flex-start;
+  width: 100%;
+  margin-top: 140px;           /* Adjust so it appears below the chatbot, etc. */
+  flex-wrap: wrap;            /* Let it wrap on smaller screens if needed */
+}
+
+/* Each column that holds a pair of overlap-groups */
+.metric-group {
+  display: flex;
+  flex-direction: column;  
+  gap: 20px;                  /* Spacing between the two overlap-groups in each column */
+  width: 110px;               /* Force narrower columns if you want them side by side on a small screen */
+  /* or flex: 1 if you want them to expand fluidly. Adjust as needed. */
+  position: relative;         /* If you need any absolute child elements, they'll be relative to this column */
+}
+
+
+.overlap-group1,
+.overlap-group2,
+.overlap-group3,
+.overlap-group4,
+.overlap-group5,
+.overlap-group6 {
+  margin: 0 !important;       /* Remove big default margins */
+  position: static !important;/* Let them flow inside .metric-group */
+  width: auto !important;
+  height: auto !important;
+}
+
+.overlap-group {
+  position: static !important;
+  margin: 0 !important;
+  top: auto !important;
+  left: auto !important;
+
+  /* New additions: stack number over text */
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important; /* if you want them centered */
+  justify-content: flex-start !important;
+}
+
+
+.well-done-this-is-a {
+  position: static !important;   /* or remove 'position:absolute' entirely */
+  top: auto !important;
+  left: auto !important;
+  margin-top: 10px;             /* Some spacing below the number */
+  display: block;               /* So it flows in normal order */
+}
+
+.overlap-group {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  justify-content: flex-start !important;
+  align-items: center;
+  text-align: center;   /* This will center all text inside the overlap-group */
+  /* any other overrides */
+}
+
+/* The row for the big number and its suffix (like “%” or “(out of 100)”) */
+.metric-line {
+  display: flex;
+  flex-direction: row;
+  align-items: baseline;  /* keeps text aligned with number's baseline */
+  gap: 4px;              /* small space between them */
+  justify-content: center; 
+}
+
+/* Optionally reduce the margin so paragraph is closer to the number row */
+.well-done-this-is-a {
+  margin-top: 2px;  /* e.g., smaller gap */
+  /* remove any ‘position:absolute’ from your old code, etc. */
+}
+
+
+.insights .frame-69 {
+  align-items: center;
+  background-color: white;
+  border: 2px solid var(--green-house);  /* include `solid` */
+  border-radius: 10px;
+  display: flex;
+  gap: 10px;
+  margin-right: 1.0px;
+  margin-top: 20px; /* Further reduced margin */
+  overflow: hidden;
+  padding: 20px;
+  position: relative;
+  width: 98%;
+  z-index: 3;
+}
+
+.frame-69.recipe-frame {
+  display: flex;            /* you already have this */
+  flex-direction: column;   /* force vertical stacking */
+  align-items: stretch;
+}
+
+.title0 {
+  margin-top: 20px;
+  text-align: center;
+}
+
+.frame-69.recipe-frame .span2 h4 {
+  margin-bottom: 15px !important;
+  font-size: 20px !important;
+  line-height: 1.2 !important; /* adjust for better spacing if you like */
+}
+
+.frame-69.recipe-frame .span2 h4,
+.frame-69.recipe-frame .span2 strong {
+  font-weight: 700 !important;
+}
+
+/* ─── Recipe-card fixes ─── */
+
+/* make sure the “span2” container is a clean block and left-aligned */
+.frame-69.recipe-frame .span2 {
+  display: block !important;
+  text-align: left !important;
+  padding: 0;           /* remove any weird horizontal padding */
+  margin: 0;            /* reset any margins the designer tool injected */
+}
+
+/* bump the title (h4) up a bit, give it breathing room */
+.frame-69.recipe-frame .span2 h4 {
+  font-size: 22px !important;
+  line-height: 1.2 !important;
+  margin: 0 0 8px !important;
+  font-weight: 700 !important;  /* ensure it’s really bold */
+}
+
+/* all other <strong> in your recipe should also render bold */
+.frame-69.recipe-frame .span2 strong {
+  font-weight: 700 !important;
+}
+
+/* clean up list and paragraph spacing */
+.frame-69.recipe-frame .span2 p,
+.frame-69.recipe-frame .span2 ul,
+.frame-69.recipe-frame .span2 ol {
+  margin: 0 0 12px !important;
+  padding-left: 1.2em;  /* indent lists nicely */
+}
+
+/* tighten up list items */
+.frame-69.recipe-frame .span2 li {
+  margin-bottom: 6px;
+}
+
+/* === LAST lines of insights.css – do NOT put anything after this ========== */
+
+/* single, global rule – identical to the one that works on Shopping page */
+.ai-loader{
+  height:4px;
+  width:100%;
+  background:linear-gradient(90deg,
+              transparent 0%,
+              var(--green-house) 50%,
+              transparent 100%);
+  background-size:200% 100%;
+  border-radius:3px;
+  animation:ai-slide 1.2s linear infinite;
+}
+
+@keyframes ai-slide {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+.hidden          { display:none; }        /* already in shopping.css  */
+.fade-in     { animation: fade 0.35s ease-in forwards; }
+@keyframes fade { from {opacity:0;} to {opacity:1;} }
+
+/* keeps the smooth dissolve */
+.fade-cycle{
+  transition: opacity .4s ease, transform .4s ease;
+  opacity: 1;
+  transform: translateY(0);          /* reset position */
+}
+
+/* fades AND lifts the text 8 px */
+.fade-out{
+  opacity: 0;
+  transform: translateY(-8px) scale(.96);
+}
+
+/* --- shimmer effect ------------------------------------------------- */
+@keyframes shimmer-scan {
+  /* move the 1st (streak) layer only */
+  from { background-position: 150% 0, 0 0; }   /* 1st, 2nd */
+  to   { background-position: -150% 0, 0 0; }
+}
+
+.loader-shimmer{
+  display:inline-block;
+
+  /* ➊ moving white streak   ➋ solid brand-green base  (order matters!) */
+  background:
+    /* 1 */ linear-gradient(90deg,
+            transparent 0%,
+            rgba(255,255,255,.75) 45%,
+            rgba(255,255,255,.75) 55%,
+            transparent 100%)                         no-repeat,
+    /* 2 */ linear-gradient(#1D4509 0 0)              no-repeat;
+
+  background-size:200% 100%, 100% 100%;   /* streak is wider so it can travel */
+  background-clip:text;            -webkit-background-clip:text;
+
+  color:transparent !important;      /* keep glyphs hollow */
+  -webkit-text-fill-color:transparent !important;
+
+  animation:shimmer-scan 1s linear infinite;
+}

@@ -1,0 +1,532 @@
+/* screen - week-overview-2 */
+
+.week-overview-2 {
+  background-color: var(--white);
+  height: 1086px;
+  overflow: hidden;
+  position: relative;
+  width: 393px;
+}
+
+.week-overview-2 .flex-col-1 {
+  left: 0;
+  min-height: 819px;
+  position: absolute;
+  top: 0;
+  width: 393px;
+}
+
+.week-overview-2 .frame-52 {
+  align-items: flex-end;
+  background-color: var(--white);
+  display: flex;
+  gap: 30px;
+  height: 138px;
+  padding: 22px 20px;
+  width: 393px;
+}
+
+.week-overview-2 .flex-col-2 {
+  gap: 44px;
+  min-height: 88px;
+  width: 72px;
+}
+
+.week-overview-2 .trepo {
+  letter-spacing: -0.40px;
+  line-height: normal;
+  min-height: 20px;
+  white-space: nowrap;
+}
+
+.week-overview-2 .insights {
+  cursor: pointer;
+  letter-spacing: -0.40px;
+  line-height: 24.0px;
+  white-space: nowrap;
+}
+
+.week-overview-2 .week {
+  letter-spacing: -0.40px;
+  line-height: 24.0px;
+  min-width: 50px;
+  white-space: nowrap;
+}
+
+.week-overview-2 .shopping {
+  cursor: pointer;
+  letter-spacing: -0.40px;
+  line-height: 24.0px;
+  min-width: 85px;
+  white-space: nowrap;
+}
+
+.week-overview-2 .title {
+  letter-spacing: -0.48px;
+  line-height: 28.8px;
+  margin-left: 16px;
+  margin-top: 22px;
+  min-height: 29px;
+  min-width: 212px;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.week-overview-2 .frame-60 {
+  align-items: flex-start;
+  align-self: center;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-right: 15.0px;
+  margin-top: 32px;
+  position: relative;
+  width: 338px;
+}
+
+.week-overview-2 .frame-41 {
+  height: 19px;
+  position: relative;
+  width: 167px;
+}
+
+.week-overview-2 .dairy {
+  left: 0;
+  letter-spacing: -0.28px;
+  line-height: 16.8px;
+  position: absolute;
+  top: -1px;
+  white-space: nowrap;
+}
+
+.week-overview-2 .frame-40 {
+  background-color: var(--green-house);
+  border-radius: 5px;
+  height: 15px;
+  left: 62px;
+  position: absolute;
+  top: 2px;
+  width: 105px;
+}
+
+.week-overview-2 .frame-42 {
+  height: 19px;
+  position: relative;
+  width: 95px;
+}
+
+.week-overview-2 .meat {
+  left: 0;
+  letter-spacing: -0.28px;
+  line-height: 16.8px;
+  position: absolute;
+  top: -1px;
+  white-space: nowrap;
+}
+
+.week-overview-2 .produce {
+  left: 0;
+  letter-spacing: -0.28px;
+  line-height: 16.8px;
+  position: absolute;
+  top: -1px;
+  white-space: nowrap;
+}
+
+.week-overview-2 .snacks {
+  left: 0;
+  letter-spacing: -0.28px;
+  line-height: 16.8px;
+  position: absolute;
+  top: -1px;
+  white-space: nowrap;
+}
+
+.week-overview-2 .frame-45 {
+  height: 19px;
+  position: relative;
+  width: 147px;
+}
+
+.week-overview-2 .other {
+  left: 0;
+  letter-spacing: -0.28px;
+  line-height: 16.8px;
+  position: absolute;
+  top: -1px;
+  white-space: nowrap;
+}
+
+.week-overview-2 .below-you-can-see-al {
+  align-self: center;
+  letter-spacing: -0.28px;
+  line-height: 16.8px;
+  margin-top: 34px;
+  min-height: 51px;
+  width: 353px;
+}
+
+.week-overview-2 .monday-26th-november {
+  letter-spacing: -0.36px;
+  line-height: 21.6px;
+  margin-left: 20px;
+  margin-top: 35px;
+  min-height: 22px;
+  min-width: 196px;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.week-overview-2 .item-container {
+  align-items: flex-start;
+  align-self: center;
+  display: flex;
+  gap: 19px;
+  margin-top: 23px;
+  min-width: 353px;
+}
+
+.week-overview-2 .item {
+  align-items: flex-end;
+  background-color: var(--white);
+  border: 1px solid;
+  border-color: var(--green-house-4);
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  height: 250px;
+  overflow: hidden;
+  width: 167px;
+}
+
+.week-overview-2 .flex-row {
+  gap: 7px;
+  height: 99px;
+  margin-right: 9px;
+  margin-top: 12px;
+  min-width: 125px;
+}
+
+.week-overview-2 .image-6 {
+  align-self: flex-end;
+  height: 94px;
+  object-fit: cover;
+  width: 94px;
+}
+
+.week-overview-2 .flex-row-1 {
+  align-self: center;
+  gap: 2px;
+  height: 56px;
+  margin-left: 3.5px;
+  margin-top: 22px;
+  min-width: 142px;
+}
+
+.week-overview-2 .flex-col {
+  flex-direction: column;
+  gap: 10px;
+  min-height: 56px;
+  width: 107px;
+}
+
+.week-overview-2 .chobani-greek-yoghurt {
+  letter-spacing: -0.28px;
+  line-height: 16.8px;
+  min-height: 34px;
+  width: 107px;
+}
+
+.week-overview-2 .x330ml {
+  letter-spacing: -0.20px;
+  line-height: 12.0px;
+  width: 50px;
+}
+
+.week-overview-2 .frame-62 {
+  align-items: center;
+  background-color: var(--reef);
+  border-radius: 2px;
+  display: inline-flex;
+  gap: 10px;
+  justify-content: center;
+  margin-top: 1px;
+  overflow: hidden;
+  padding: 8px;
+  position: relative;
+}
+
+.week-overview-2 .number {
+  letter-spacing: -0.28px;
+  line-height: normal;
+  margin-top: -1.00px;
+  position: relative;
+  white-space: nowrap;
+  width: fit-content;
+}
+
+.week-overview-2 .frame-46-1 {
+  background-color: var(--reef);
+  margin-top: 17px;
+  position: relative;
+  width: 167px;
+}
+
+.week-overview-2 .flex-row-2 {
+  height: 106px;
+  margin-right: 9px;
+  margin-top: 12px;
+  min-width: 125px;
+}
+
+.week-overview-2 .image-7 {
+  align-self: flex-end;
+  height: 101px;
+  object-fit: cover;
+  width: 101px;
+}
+
+.week-overview-2 .flex-row-3 {
+  align-self: center;
+  gap: 4px;
+  height: 56px;
+  margin-left: 2.0px;
+  margin-top: 15px;
+  min-width: 141px;
+}
+
+.week-overview-2 .graza-extra-virgin-olive-oil {
+  letter-spacing: -0.28px;
+  line-height: 16.8px;
+  min-height: 34px;
+  width: 107px;
+}
+
+.week-overview-2 .x500ml {
+  letter-spacing: -0.20px;
+  line-height: 12.0px;
+  width: 50px;
+}
+
+.week-overview-2 .frame-46-2 {
+  background-color: var(--green-house);
+  cursor: pointer;
+  margin-top: 17px;
+  position: relative;
+  width: 167px;
+}
+
+.week-overview-2 .added {
+  letter-spacing: -0.28px;
+  line-height: normal;
+  margin-top: -1.00px;
+  position: relative;
+  white-space: nowrap;
+  width: fit-content;
+}
+
+.week-overview-2 .group-1 {
+  height: 10.28px;
+  position: relative;
+  width: 14.19px;
+}
+
+.week-overview-2 .rectangle-1 {
+  height: 13px;
+  left: 8px;
+  top: -1px;
+  transform: rotate(45deg);
+}
+
+.week-overview-2 .rectangle-2 {
+  height: 6px;
+  left: 2px;
+  top: 3px;
+  transform: rotate(135deg);
+}
+
+.week-overview-2 .tuesday-27th-november {
+  letter-spacing: -0.36px;
+  line-height: 21.6px;
+  margin-left: 20px;
+  margin-top: 42px;
+  min-height: 22px;
+  min-width: 195px;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.week-overview-2 .item-1 {
+  align-items: flex-end;
+  background-color: var(--white);
+  border: 1px solid;
+  border-color: var(--green-house-4);
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  height: 250px;
+  left: 20px;
+  overflow: hidden;
+  position: absolute;
+  top: 842px;
+  width: 167px;
+}
+
+.week-overview-2 .flex-row-4 {
+  gap: 2px;
+  height: 109px;
+  margin-right: 9px;
+  margin-top: 12px;
+  min-width: 123px;
+}
+
+.week-overview-2 .flex-row-5 {
+  align-self: center;
+  gap: 2px;
+  height: 55px;
+  margin-left: 3.5px;
+  margin-top: 13px;
+  min-width: 142px;
+}
+
+.week-overview-2 .flex-col-3 {
+  align-self: flex-end;
+  gap: 14px;
+  min-height: 43px;
+  width: 107px;
+}
+
+.week-overview-2 .kale {
+  letter-spacing: -0.28px;
+  line-height: 16.8px;
+  min-height: 17px;
+  width: 107px;
+}
+
+.week-overview-2 .x400g {
+  letter-spacing: -0.20px;
+  line-height: 12.0px;
+  width: 50px;
+}
+
+.week-overview-2 .frame-46 {
+  align-items: center;
+  background-color: var(--reef);
+  border-radius: 2px;
+  cursor: pointer;
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  margin-top: 17px;
+  overflow: hidden;
+  padding: 15px 50px;
+  position: relative;
+  width: 167px;
+}
+
+.week-overview-2 .item-2 {
+  align-items: center;
+  background-color: var(--white);
+  border: 1px solid;
+  border-color: var(--green-house-4);
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  height: 250px;
+  left: 206px;
+  overflow: hidden;
+  position: absolute;
+  top: 842px;
+  width: 167px;
+}
+
+.week-overview-2 .overlap-group {
+  height: 105px;
+  margin-left: 17.0px;
+  margin-top: 12px;
+  position: relative;
+  width: 132px;
+}
+
+.week-overview-2 .image-9 {
+  height: 93px;
+  left: 0;
+  object-fit: cover;
+  position: absolute;
+  top: 12px;
+  width: 115px;
+}
+
+.week-overview-2 .swift-meats-rib-eye-steaks {
+  letter-spacing: -0.28px;
+  line-height: 16.8px;
+  min-height: 34px;
+  width: 107px;
+}
+
+.week-overview-2 .x500g {
+  letter-spacing: -0.20px;
+  line-height: 12.0px;
+  width: 50px;
+}
+
+.week-overview-2 .frame-62-2 {
+  margin-top: 1px;
+}
+
+.week-overview-2 .frame-46-3 {
+  background-color: var(--green-house);
+  left: 0;
+  position: fixed;
+  top: 1042px;
+  width: 393px;
+}
+
+.week-overview-2 .view-shopping-list-1-items {
+  letter-spacing: -0.28px;
+  line-height: normal;
+  margin-top: -1.00px;
+  position: relative;
+  white-space: nowrap;
+  width: fit-content;
+}
+
+.week-overview-2 .flex {
+  align-items: flex-start;
+  display: flex;
+}
+
+.week-overview-2 .flex-col-4 {
+  align-items: flex-start;
+  display: flex;
+  flex-direction: column;
+}
+
+.week-overview-2 .frame-46-4 {
+  align-items: center;
+  border-radius: 2px;
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  overflow: hidden;
+  padding: 15px 50px;
+}
+
+.week-overview-2 .frame-62-3 {
+  align-items: center;
+  background-color: var(--reef);
+  border-radius: 2px;
+  cursor: pointer;
+  display: inline-flex;
+  gap: 10px;
+  justify-content: center;
+  overflow: hidden;
+  padding: 8px;
+  position: relative;
+}
+
+.week-overview-2 .rectangle {
+  background-color: var(--reef);
+  position: absolute;
+  width: 2px;
+}

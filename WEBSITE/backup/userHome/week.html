@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <!-- Google tag (gtag.js) -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-Z6BZ81YYV5"></script>
+    <script>
+      window.dataLayer = window.dataLayer || [];
+      function gtag(){dataLayer.push(arguments);}
+      gtag('js', new Date());
+
+      gtag('config', 'G-Z6BZ81YYV5');
+    </script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Your Week of Eating</title>
+    <link rel="stylesheet" type="text/css" href="css/week-overview-1.css?v=20250129.1329">
+    <link rel="stylesheet" type="text/css" href="css/styleguide.css?v=20250112.1249">
+    <link rel="stylesheet" type="text/css" href="css/globals.css?v=20250112.1252">
+    <script src="js/points.js?v=20250108.1016"></script>
+    <script>
+      document.addEventListener("DOMContentLoaded", () => {
+        fetchAndDisplayPoints();
+      });
+    </script>
+</head>
+<body>
+    <div class="container-center-horizontal">
+        <div class="week-overview-1 screen">
+            <div class="frame-52">
+                <div class="flex-col-1 flex-col-3">
+                    <a href="index.html" class="trepo-link">
+                        <div class="trepo violetsans-regular-normal-green-house-20px">TREPO</div>
+                    </a>
+                    <a href="insights.html"
+                        ><div class="insights violetsans-regular-normal-green-house-20px-2">For You</div>
+                    </a>
+                </div>
+                <div class="week violetsans-regular-normal-green-house-20px">Week</div>
+                <a href="shopping.html"
+                    ><div class="shopping violetsans-regular-normal-green-house-20px-2">Shopping</div>
+                </a>
+                <a href="beeps.html">
+                  <div class="points-container">
+                    <strong class="user-points">0</strong>
+                  </div>
+                </a>
+            </div>
+            <h1 class="title violetsans-regular-normal-green-house-24px">Your Week of Eating</h1>
+            <div class="frame-60">
+                <div class="frame-41">
+                    <div class="dairy violetsans-regular-normal-green-house-14px">Dairy</div>
+                    <div class="frame-40 frame-40-5"></div>
+                </div>
+                <div class="frame-42">
+                    <div class="meat violetsans-regular-normal-green-house-14px">Protein</div>
+                    <div class="frame-40-1 frame-40-5"></div>
+                </div>
+                <div class="frame-43">
+                    <div class="produce violetsans-regular-normal-green-house-14px">Produce</div>
+                    <div class="frame-40-2 frame-40-5"></div>
+                </div>
+                <div class="frame-103">
+                    <div class="grains violetsans-regular-normal-green-house-14px">Grains</div>
+                    <div class="frame-40-3 frame-40-5"></div>
+                </div>
+                <div class="frame-44">
+                    <div class="snacks violetsans-regular-normal-green-house-14px">Snacks</div>
+                    <div class="frame-40-4 frame-40-5"></div>
+                </div>
+                <div class="frame-45">
+                    <div class="cooking violetsans-regular-normal-green-house-14px">Cooking</div>
+                    <div class="frame-40-6 frame-40-5"></div>
+                </div>
+                <div class="frame-101">
+                    <div class="beverages violetsans-regular-normal-green-house-14px">Beverage</div>
+                    <div class="frame-40-7 frame-40-5"></div>
+                </div>
+                <div class="frame-102">
+                    <div class="other violetsans-regular-normal-green-house-14px">Other</div>
+                    <div class="frame-40-8 frame-40-5"></div>
+                </div>
+            </div>
+            <p class="below-you-can-see-al violetsans-regular-normal-green-house-14px">
+              Below you can see all of the items you consumed this week, and choose which ones you’d like to add to the
+              shopping list for next week.
+            </p>
+            <br>
+            <p class="additional-info violetsans-regular-normal-green-house-14px">
+              Simply select your items and click submit!
+            </p>
+
+            <div id="content-container"></div>
+
+            <a href="shopping.html"
+                ><div class="frame-104">
+                    <div class="submit violetsans-regular-normal-green-house-14px">View Shopping List</div>
+                </div>
+            </a>
+        </div>
+    </div>
+
+    <div id="product-comparison-overlay" class="product-comparison screen" style="display: none;">
+        <div class="product-comparison-1">
+            <div class="flex-row flex">
+                <div class="flex-col flex">
+                    <p class="graza-extra-virgin-olive-oil violetsans-regular-normal-green-house-18px">
+                        Graza Extra Virgin Olive Oil
+                    </p>
+                    <div class="x500ml violetsans-regular-normal-green-house-12px" style="display: none;">500ml</div>
+                    <div class="flex-row flex">
+                        <div class="frame-52 frame">
+                            <div class="number violetsans-regular-normal-green-house-14px">71</div>
+                        </div>
+                        <div class="frame-53" style="display: none;">
+                            <a href="https://www.health.harvard.edu/blog/ultra-processed-foods-just-say-no-202406173051" target="_blank" class="upf-button">
+                                <div class="upf-number violetsans-regular-normal-green-house-14px">UPF</div>
+                            </a>
+                        </div>
+                    </div>
+                </div>
+                <div class="overlap-group1">
+                    <img class="image-7" src="img/image-7.png" alt="Image of olive oil" />
+                </div>
+                <button class="frame-67"onclick="toggleOverlay(false)">
+                    <div class="rectangle rectangle-1"></div>
+                    <div class="rectangle rectangle-2"></div>
+                </button>
+            </div>
+            <div class="harmful-ingredients violetsans-regular-normal-green-house-18px">Ingredients: </div>
+            <p class="ingredients-info violetsans-regular-normal-green-house-14px">
+                Harmful ingredients
+            </p>
+            <div class="harmful-ingredients violetsans-regular-normal-green-house-18px">Harmful Ingredients: </div>
+            <p class="harmful-ingredients-info violetsans-regular-normal-green-house-14px"
+               data-item-id="{{item._id}}">
+               No harmful ingredients detected
+            </p>
+            <div class="healthier-alternative violetsans-regular-normal-green-house-18px">Overview:</div>
+            <p class="this-product-is-made violetsans-regular-normal-green-house-14px">
+                This product is made with lower levels of saturated fat, important to prevent cholesterol build up.
+            </p>
+            <p class="product-recommendations violetsans-regular-normal-green-house-18px">
+                Product recommendations
+            </p>
+            <div class="supermarket-logo-container">
+                <img class="supermarket-logo" src="img/Whole.png" alt="Whole Foods Logo">
+            </div>
+            <div class="alternative-items-row">
+                <!-- Alternative items will be dynamically inserted here -->
+            </div>
+
+        </div>
+    </div>
+    <script src="js/week.js?v=2025029.1386"></script>
+</body>
+</html>
