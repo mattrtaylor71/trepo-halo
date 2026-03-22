@@ -1,0 +1,1306 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Trepo Grocery Logger - presign -> upload -> analyze (DDB + Rekognition + MySQL)
+
+Parameters:
+  Env:
+    Type: String
+    Default: dev
+  UploadsBucketName:
+    Type: String
+    Description: Existing S3 bucket for uploads
+  DiscardsBucketName:
+    Type: String
+    Description: Existing S3 bucket for discard uploads
+    Default: trepo-grocery-discards-dev
+  CreateResultsTable:
+    Type: String
+    Default: 'true'
+  IotDataEndpoint:
+    Type: String
+    Description: "IoT Data endpoint, e.g. abcd123-ats.iot.us-east-1.amazonaws.com"
+
+  # --- OpenAI ---
+  OpenAIApiKey:
+    Type: String
+    NoEcho: true
+    Description: "OpenAI API key for vision recognition"
+
+  StripeWebhookSecret:
+    Type: String
+    NoEcho: true
+    Default: ''
+    Description: "Stripe webhook signing secret (optional)"
+
+  StripeSecretKey:
+    Type: String
+    NoEcho: true
+    Default: ''
+    Description: "Stripe secret key for promo code creation"
+
+  # --- RDS (MySQL) ---
+  DBHost:
+    Type: String
+    Default: database-1.cvig8u6s25dz.us-east-1.rds.amazonaws.com
+  DBPort:
+    Type: Number
+    Default: 3306
+  DBUser:
+    Type: String
+    Default: admin
+  DBPass:
+    Type: String
+    NoEcho: true
+    Default: Nbmqyq17!
+  DBName:
+    Type: String
+    Default: mysqlTutorial
+  DBTable:
+    Type: String
+    Default: grocery_events
+
+  # --- Optional VPC for Lambda ↔ RDS ---
+  UseVpc:
+    Type: String
+    AllowedValues: ['true','false']
+    Default: 'false'
+  LambdaSecurityGroupId:
+    Type: String
+    Default: ''
+  LambdaSubnetIds:
+    Type: CommaDelimitedList
+    Default: ''
+
+Conditions:
+  HasResults: !Equals [ !Ref CreateResultsTable, 'true' ]
+  UseVpcCond: !Equals [ !Ref UseVpc, 'true' ]
+
+Globals:
+  Function:
+    Runtime: python3.9
+    Timeout: 30
+    MemorySize: 512
+    Tracing: Active
+    Environment:
+      Variables:
+        BUCKET_NAME: !Ref UploadsBucketName
+        JOBS_TABLE: !Ref JobsTable
+        RESULTS_TABLE: !If [HasResults, !Ref ResultsTable, !Ref AWS::NoValue]
+        KEY_PREFIX: images/
+        PRESIGN_TTL_SECONDS: 300
+        IOT_ENDPOINT: !Ref IotDataEndpoint
+        RESULT_TOPIC_TEMPLATE: "trepo/{user_id}/{device_id}/jobs/{job_id}/result"
+        DB_HOST:  !Ref DBHost
+        DB_PORT:  !Ref DBPort
+        DB_USER:  !Ref DBUser
+        DB_PASS:  !Ref DBPass
+        DB_NAME:  !Ref DBName
+        DB_TABLE: !Ref DBTable
+        OPENAI_API_KEY: !Ref OpenAIApiKey
+
+Resources:
+
+  Api:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      CorsConfiguration:
+        AllowOrigins: ['*']
+        AllowMethods: ['*']
+        AllowHeaders: ['content-type','authorization']
+
+  PresignFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: presign/
+      Handler: app.handler
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref JobsTable
+        - Statement:
+            Effect: Allow
+            Action: s3:PutObject
+            Resource: !Sub "arn:aws:s3:::${UploadsBucketName}/images/*"
+        - Statement:
+            Effect: Allow
+            Action: s3:PutObject
+            Resource: !Sub "arn:aws:s3:::${DiscardsBucketName}/images/*"
+        - !If
+          - UseVpcCond
+          - AWSLambdaVPCAccessExecutionRole
+          - !Ref AWS::NoValue
+      Environment:
+        Variables:
+          DISCARDS_BUCKET_NAME: !Ref DiscardsBucketName
+      Events:
+        PresignRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /presign
+            Method: POST
+        PresignDiscardRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /presign/discard
+            Method: POST
+      VpcConfig: !If
+        - UseVpcCond
+        - { SecurityGroupIds: [ !Ref LambdaSecurityGroupId ], SubnetIds: !Ref LambdaSubnetIds }
+        - !Ref AWS::NoValue
+
+  AnalyzeOnUpload:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: analyze_on_upload_nodejs/
+      Handler: app.handler
+      Runtime: nodejs20.x
+      Timeout: 300
+      MemorySize: 2048
+      Environment:
+        Variables:
+          BUCKET_NAME: !Ref UploadsBucketName
+          JOBS_TABLE: !Ref JobsTable
+          KEY_PREFIX: images/
+          IOT_ENDPOINT: !Ref IotDataEndpoint
+          RESULT_TOPIC_TEMPLATE: "trepo/{user_id}/{device_id}/jobs/{job_id}/result"
+          DB_HOST:  !Ref DBHost
+          DB_PORT:  !Ref DBPort
+          DB_USER:  !Ref DBUser
+          DB_PASS:  !Ref DBPass
+          DB_NAME:  !Ref DBName
+          OPENAI_API_KEY: !Ref OpenAIApiKey
+          OPENAI_MODEL: "gpt-5.4-2026-03-05"
+          OPENAI_IMAGE_VERIFY_MODEL: "gpt-5.4-2026-03-05"
+          EXPIRATION_MODEL: "gpt-5.4-2026-03-05"
+          FAST_DISH_MODEL: "gpt-5.4-2026-03-05"
+          FAST_DISH_MAX_TOKENS: "120"
+          FAST_DISH_TEMPERATURE: "0.0"
+          FAST_DISH_IMAGE_DETAIL: "low"
+          FULL_DISH_MODEL: "gpt-5.4-2026-03-05"
+          FULL_DISH_MAX_TOKENS: "2000"
+          FULL_DISH_TEMPERATURE: "0.3"
+          FULL_DISH_IMAGE_DETAIL: "high"
+          MEAL_PLAN_GENERATOR_ARN: !Ref MealPlanGeneratorFunction
+          RECIPES_GENERATOR_ARN: !Ref RecipesGeneratorFunction
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref JobsTable
+        - !If
+          - HasResults
+          - { DynamoDBCrudPolicy: { TableName: !Ref ResultsTable } }
+          - !Ref AWS::NoValue
+        - Statement:
+            Effect: Allow
+            Action: iot:Publish
+            Resource: "*"
+        - Statement:
+            Effect: Allow
+            Action: s3:GetObject
+            Resource: !Sub "arn:aws:s3:::${UploadsBucketName}/images/*"
+        - Statement:
+            Effect: Allow
+            Action: s3:PutObject
+            Resource: !Sub "arn:aws:s3:::${UploadsBucketName}/product-images/*"
+        - Statement:
+            Effect: Allow
+            Action: lambda:InvokeFunction
+            Resource: !GetAtt MealPlanGeneratorFunction.Arn
+        - Statement:
+            Effect: Allow
+            Action: lambda:InvokeFunction
+            Resource: !GetAtt RecipesGeneratorFunction.Arn
+        - !If
+          - UseVpcCond
+          - AWSLambdaVPCAccessExecutionRole
+          - !Ref AWS::NoValue
+      Events:
+        S3CreateViaEB:
+          Type: EventBridgeRule
+          Properties:
+            Pattern:
+              source: [aws.s3]
+              detail-type: ["Object Created"]
+              detail:
+                bucket:
+                  name: [!Ref UploadsBucketName]
+                object:
+                  key:
+                    - prefix: images/
+      VpcConfig: !If
+        - UseVpcCond
+        - { SecurityGroupIds: [ !Ref LambdaSecurityGroupId ], SubnetIds: !Ref LambdaSubnetIds }
+        - !Ref AWS::NoValue
+
+  AnalyzeDishOnUpload:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: analyze_dish_on_upload_nodejs/
+      Handler: app.handler
+      Runtime: nodejs20.x
+      Timeout: 300
+      MemorySize: 2048
+      Environment:
+        Variables:
+          BUCKET_NAME: !Ref UploadsBucketName
+          JOBS_TABLE: !Ref JobsTable
+          KEY_PREFIX: images/
+          IOT_ENDPOINT: !Ref IotDataEndpoint
+          RESULT_TOPIC_TEMPLATE: "trepo/{user_id}/{device_id}/jobs/{job_id}/result"
+          DB_HOST:  !Ref DBHost
+          DB_PORT:  !Ref DBPort
+          DB_USER:  !Ref DBUser
+          DB_PASS:  !Ref DBPass
+          DB_NAME:  !Ref DBName
+          OPENAI_API_KEY: !Ref OpenAIApiKey
+          OPENAI_MODEL: "gpt-5.4-2026-03-05"
+          FAST_DISH_MODEL: "gpt-5.4-2026-03-05"
+          FULL_DISH_MODEL: "gpt-5.4-2026-03-05"
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref JobsTable
+        - !If
+          - HasResults
+          - { DynamoDBCrudPolicy: { TableName: !Ref ResultsTable } }
+          - !Ref AWS::NoValue
+        - Statement:
+            Effect: Allow
+            Action: iot:Publish
+            Resource: "*"
+        - Statement:
+            Effect: Allow
+            Action: s3:GetObject
+            Resource: !Sub "arn:aws:s3:::${UploadsBucketName}/images/*"
+        - Statement:
+            Effect: Allow
+            Action: s3:PutObject
+            Resource: !Sub "arn:aws:s3:::${UploadsBucketName}/dish-images/*"
+        - !If
+          - UseVpcCond
+          - AWSLambdaVPCAccessExecutionRole
+          - !Ref AWS::NoValue
+      Events:
+        S3CreateViaEB:
+          Type: EventBridgeRule
+          Properties:
+            Pattern:
+              source: [aws.s3]
+              detail-type: ["Object Created"]
+              detail:
+                bucket:
+                  name: [!Ref UploadsBucketName]
+                object:
+                  key:
+                    - prefix: images/
+      VpcConfig: !If
+        - UseVpcCond
+        - { SecurityGroupIds: [ !Ref LambdaSecurityGroupId ], SubnetIds: !Ref LambdaSubnetIds }
+        - !Ref AWS::NoValue
+
+  RecharacterizeDishFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: analyze_dish_on_upload_nodejs/
+      Handler: recharacterize.handler
+      Runtime: nodejs20.x
+      Timeout: 120
+      MemorySize: 1024
+      Environment:
+        Variables:
+          BUCKET_NAME: !Ref UploadsBucketName
+          DB_HOST:  !Ref DBHost
+          DB_PORT:  !Ref DBPort
+          DB_USER:  !Ref DBUser
+          DB_PASS:  !Ref DBPass
+          DB_NAME:  !Ref DBName
+          OPENAI_API_KEY: !Ref OpenAIApiKey
+          OPENAI_MODEL: "gpt-5.4-2026-03-05"
+          FAST_DISH_MODEL: "gpt-5.4-2026-03-05"
+          FULL_DISH_MODEL: "gpt-5.4-2026-03-05"
+      Policies:
+        - Statement:
+            Effect: Allow
+            Action: s3:GetObject
+            Resource: !Sub "arn:aws:s3:::${UploadsBucketName}/images/*"
+        - Statement:
+            Effect: Allow
+            Action: s3:PutObject
+            Resource: !Sub "arn:aws:s3:::${UploadsBucketName}/dish-images/*"
+        - !If
+          - UseVpcCond
+          - AWSLambdaVPCAccessExecutionRole
+          - !Ref AWS::NoValue
+      Events:
+        RecharacterizeDishRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /dishes/{owner}/{item_id}/recharacterize
+            Method: POST
+        EditDishRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /dishes/{owner}/{item_id}/edit
+            Method: POST
+      VpcConfig: !If
+        - UseVpcCond
+        - { SecurityGroupIds: [ !Ref LambdaSecurityGroupId ], SubnetIds: !Ref LambdaSubnetIds }
+        - !Ref AWS::NoValue
+
+  AnalyzeDiscardOnUpload:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: analyze_discard_on_upload_nodejs/
+      Handler: app.handler
+      Runtime: nodejs20.x
+      Timeout: 300
+      MemorySize: 2048
+      Environment:
+        Variables:
+          BUCKET_NAME: !Ref DiscardsBucketName
+          PRODUCT_IMAGES_BUCKET: !Ref UploadsBucketName
+          JOBS_TABLE: !Ref JobsTable
+          KEY_PREFIX: images/
+          IOT_ENDPOINT: !Ref IotDataEndpoint
+          RESULT_TOPIC_TEMPLATE: "trepo/{user_id}/{device_id}/jobs/{job_id}/result"
+          DB_HOST:  !Ref DBHost
+          DB_PORT:  !Ref DBPort
+          DB_USER:  !Ref DBUser
+          DB_PASS:  !Ref DBPass
+          DB_NAME:  !Ref DBName
+          OPENAI_API_KEY: !Ref OpenAIApiKey
+          OPENAI_MODEL: "gpt-5.4-2026-03-05"
+          OPENAI_IMAGE_VERIFY_MODEL: "gpt-5.4-2026-03-05"
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref JobsTable
+        - !If
+          - HasResults
+          - { DynamoDBCrudPolicy: { TableName: !Ref ResultsTable } }
+          - !Ref AWS::NoValue
+        - Statement:
+            Effect: Allow
+            Action: iot:Publish
+            Resource: "*"
+        - Statement:
+            Effect: Allow
+            Action: s3:GetObject
+            Resource: !Sub "arn:aws:s3:::${DiscardsBucketName}/images/*"
+        - Statement:
+            Effect: Allow
+            Action: s3:PutObject
+            Resource: !Sub "arn:aws:s3:::${DiscardsBucketName}/discard-images/*"
+        - Statement:
+            Effect: Allow
+            Action: s3:PutObject
+            Resource: !Sub "arn:aws:s3:::${UploadsBucketName}/discard-images/*"
+        - !If
+          - UseVpcCond
+          - AWSLambdaVPCAccessExecutionRole
+          - !Ref AWS::NoValue
+      Events:
+        S3CreateViaEB:
+          Type: EventBridgeRule
+          Properties:
+            Pattern:
+              source: [aws.s3]
+              detail-type: ["Object Created"]
+              detail:
+                bucket:
+                  name: [!Ref DiscardsBucketName]
+                object:
+                  key:
+                    - prefix: images/
+      VpcConfig: !If
+        - UseVpcCond
+        - { SecurityGroupIds: [ !Ref LambdaSecurityGroupId ], SubnetIds: !Ref LambdaSubnetIds }
+        - !Ref AWS::NoValue
+
+  GetJobFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: get_job/
+      Handler: app.handler
+      Environment:
+        Variables:
+          BUCKET_NAME: !Ref UploadsBucketName
+          JOBS_TABLE: !Ref JobsTable
+          PRESIGN_TTL_SECONDS: 3600
+          DB_HOST:  !Ref DBHost
+          DB_PORT:  !Ref DBPort
+          DB_USER:  !Ref DBUser
+          DB_PASS:  !Ref DBPass
+          DB_NAME:  !Ref DBName
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref JobsTable
+        - Statement:
+            Effect: Allow
+            Action: s3:GetObject
+            Resource: !Sub "arn:aws:s3:::${UploadsBucketName}/*"
+        - !If
+          - UseVpcCond
+          - AWSLambdaVPCAccessExecutionRole
+          - !Ref AWS::NoValue
+      Events:
+        GetJobRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /job/{job_id}
+            Method: GET
+      VpcConfig: !If
+        - UseVpcCond
+        - { SecurityGroupIds: [ !Ref LambdaSecurityGroupId ], SubnetIds: !Ref LambdaSubnetIds }
+        - !Ref AWS::NoValue
+
+  DishResultFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: dish_result/
+      Handler: app.handler
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref JobsTable
+        - !If
+          - HasResults
+          - { DynamoDBReadPolicy: { TableName: !Ref ResultsTable } }
+          - !Ref AWS::NoValue
+      Events:
+        DishResultRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /dish/result
+            Method: GET
+
+  OtaScheduleApiFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ota_schedule_api/
+      Handler: app.handler
+      Timeout: 10
+      MemorySize: 256
+      Environment:
+        Variables:
+          OTA_SCHEDULES_TABLE: !Ref OtaSchedulesTable
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref OtaSchedulesTable
+      Events:
+        GetOtaScheduleRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /ota/schedule
+            Method: GET
+
+  OtaScheduleAdminApiFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ota_schedule_admin_api/
+      Handler: app.handler
+      Timeout: 10
+      MemorySize: 256
+      Environment:
+        Variables:
+          OTA_SCHEDULES_TABLE: !Ref OtaSchedulesTable
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref OtaSchedulesTable
+      Events:
+        GetOtaAdminScheduleRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /ota/admin/schedule
+            Method: GET
+        PostOtaAdminScheduleRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /ota/admin/schedule
+            Method: POST
+        PostOtaAdminScheduleClearRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /ota/admin/schedule/clear
+            Method: POST
+
+  OtaReportApiFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ota_report_api/
+      Handler: app.handler
+      Timeout: 10
+      MemorySize: 256
+      Environment:
+        Variables:
+          OTA_REPORT_EVENTS_TABLE: !Ref OtaReportEventsTable
+          OTA_DEVICE_LATEST_TABLE: !Ref OtaDeviceLatestTable
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref OtaReportEventsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref OtaDeviceLatestTable
+      Events:
+        PostOtaReportRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /ota/report
+            Method: POST
+        GetOtaReportLatestRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /ota/report/latest
+            Method: GET
+        GetOtaReportEventsRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /ota/report/events
+            Method: GET
+
+  KitchenApiFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: kitchen_api/
+      Handler: app.handler
+      Timeout: 30
+      MemorySize: 512
+      Environment:
+        Variables:
+          DB_HOST:  !Ref DBHost
+          DB_PORT:  !Ref DBPort
+          DB_USER:  !Ref DBUser
+          DB_PASS:  !Ref DBPass
+          DB_NAME:  !Ref DBName
+          MEAL_PLAN_GENERATOR_ARN: !Ref MealPlanGeneratorFunction
+          RECIPES_GENERATOR_ARN: !Ref RecipesGeneratorFunction
+      Policies:
+        - !If
+          - UseVpcCond
+          - AWSLambdaVPCAccessExecutionRole
+          - !Ref AWS::NoValue
+        - Statement:
+            Effect: Allow
+            Action: lambda:InvokeFunction
+            Resource: !GetAtt MealPlanGeneratorFunction.Arn
+        - Statement:
+            Effect: Allow
+            Action: lambda:InvokeFunction
+            Resource: !GetAtt RecipesGeneratorFunction.Arn
+      Events:
+        GetKitchenRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /kitchen/{owner}
+            Method: GET
+        UpdateKitchenItemRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /kitchen/{owner}/{item_id}
+            Method: PUT
+        PatchKitchenItemRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /kitchen/{owner}/{item_id}
+            Method: PATCH
+        DeleteKitchenItemRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /kitchen/{owner}/{item_id}
+            Method: DELETE
+        OptionsKitchenRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /kitchen/{owner}
+            Method: OPTIONS
+        OptionsKitchenItemRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /kitchen/{owner}/{item_id}
+            Method: OPTIONS
+      VpcConfig: !If
+        - UseVpcCond
+        - { SecurityGroupIds: [ !Ref LambdaSecurityGroupId ], SubnetIds: !Ref LambdaSubnetIds }
+        - !Ref AWS::NoValue
+
+  DishesApiFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: dishes_api/
+      Handler: app.handler
+      Timeout: 30
+      MemorySize: 512
+      Environment:
+        Variables:
+          DB_HOST:  !Ref DBHost
+          DB_PORT:  !Ref DBPort
+          DB_USER:  !Ref DBUser
+          DB_PASS:  !Ref DBPass
+          DB_NAME:  !Ref DBName
+      Policies:
+        - !If
+          - UseVpcCond
+          - AWSLambdaVPCAccessExecutionRole
+          - !Ref AWS::NoValue
+      Events:
+        GetDishesRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /dishes/{owner}
+            Method: GET
+        GetDishByIdRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /dishes/{owner}/{item_id}
+            Method: GET
+        UpdateDishRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /dishes/{owner}/{item_id}
+            Method: PUT
+        PatchDishRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /dishes/{owner}/{item_id}
+            Method: PATCH
+        DeleteDishRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /dishes/{owner}/{item_id}
+            Method: DELETE
+        OptionsDishesRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /dishes/{owner}
+            Method: OPTIONS
+        OptionsDishItemRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /dishes/{owner}/{item_id}
+            Method: OPTIONS
+      VpcConfig: !If
+        - UseVpcCond
+        - { SecurityGroupIds: [ !Ref LambdaSecurityGroupId ], SubnetIds: !Ref LambdaSubnetIds }
+        - !Ref AWS::NoValue
+
+  # Bucket policy to make product-images and dish-images publicly readable
+  ProductImagesBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref UploadsBucketName
+      PolicyDocument:
+        Statement:
+          - Sid: PublicReadProductImages
+            Effect: Allow
+            Principal: '*'
+            Action: 's3:GetObject'
+            Resource: !Sub "arn:aws:s3:::${UploadsBucketName}/product-images/*"
+          - Sid: PublicReadDishImages
+            Effect: Allow
+            Principal: '*'
+            Action: 's3:GetObject'
+            Resource: !Sub "arn:aws:s3:::${UploadsBucketName}/dish-images/*"
+          - Sid: PublicReadDiscardImages
+            Effect: Allow
+            Principal: '*'
+            Action: 's3:GetObject'
+            Resource: !Sub "arn:aws:s3:::${UploadsBucketName}/discard-images/*"
+          - Sid: PublicReadMealPlanImages
+            Effect: Allow
+            Principal: '*'
+            Action: 's3:GetObject'
+            Resource: !Sub "arn:aws:s3:::${UploadsBucketName}/meal-plan-images/*"
+          - Sid: PublicReadRecipeImages
+            Effect: Allow
+            Principal: '*'
+            Action: 's3:GetObject'
+            Resource: !Sub "arn:aws:s3:::${UploadsBucketName}/recipe-images/*"
+
+
+  DiscardsApiFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: discards_api/
+      Handler: app.handler
+      Timeout: 30
+      MemorySize: 512
+      Environment:
+        Variables:
+          DB_HOST:  !Ref DBHost
+          DB_PORT:  !Ref DBPort
+          DB_USER:  !Ref DBUser
+          DB_PASS:  !Ref DBPass
+          DB_NAME:  !Ref DBName
+      Policies:
+        - !If
+          - UseVpcCond
+          - AWSLambdaVPCAccessExecutionRole
+          - !Ref AWS::NoValue
+      Events:
+        GetDiscardsRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /discards/{owner}
+            Method: GET
+        UpdateDiscardRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /discards/{owner}/{item_id}
+            Method: PUT
+        PatchDiscardRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /discards/{owner}/{item_id}
+            Method: PATCH
+        DeleteDiscardRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /discards/{owner}/{item_id}
+            Method: DELETE
+        OptionsDiscardsRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /discards/{owner}
+            Method: OPTIONS
+        OptionsDiscardItemRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /discards/{owner}/{item_id}
+            Method: OPTIONS
+      VpcConfig: !If
+        - UseVpcCond
+        - { SecurityGroupIds: [ !Ref LambdaSecurityGroupId ], SubnetIds: !Ref LambdaSubnetIds }
+        - !Ref AWS::NoValue
+
+  MetricsApiFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: metrics_api/
+      Handler: app.handler
+      Timeout: 30
+      MemorySize: 512
+      Environment:
+        Variables:
+          DB_HOST:  !Ref DBHost
+          DB_PORT:  !Ref DBPort
+          DB_USER:  !Ref DBUser
+          DB_PASS:  !Ref DBPass
+          DB_NAME:  !Ref DBName
+      Policies:
+        - !If
+          - UseVpcCond
+          - AWSLambdaVPCAccessExecutionRole
+          - !Ref AWS::NoValue
+      Events:
+        GetMetricsRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /metrics/{owner}
+            Method: GET
+        CreateMetricsRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /metrics/{owner}
+            Method: POST
+        UpdateMetricsRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /metrics/{owner}
+            Method: PUT
+        OptionsMetricsRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /metrics/{owner}
+            Method: OPTIONS
+      VpcConfig: !If
+        - UseVpcCond
+        - { SecurityGroupIds: [ !Ref LambdaSecurityGroupId ], SubnetIds: !Ref LambdaSubnetIds }
+        - !Ref AWS::NoValue
+
+  RedemptionsApiFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: redemptions_api/
+      Handler: app.handler
+      Timeout: 30
+      MemorySize: 512
+      Environment:
+        Variables:
+          DB_HOST:  !Ref DBHost
+          DB_PORT:  !Ref DBPort
+          DB_USER:  !Ref DBUser
+          DB_PASS:  !Ref DBPass
+          DB_NAME:  !Ref DBName
+          STRIPE_WEBHOOK_SECRET: !Ref StripeWebhookSecret
+          STRIPE_SECRET_KEY: !Ref StripeSecretKey
+      Policies:
+        - !If
+          - UseVpcCond
+          - AWSLambdaVPCAccessExecutionRole
+          - !Ref AWS::NoValue
+      Events:
+        GetRewardsRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /rewards
+            Method: GET
+        OptionsRewardsRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /rewards
+            Method: OPTIONS
+        GetRedemptionsRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /redemptions/{owner}
+            Method: GET
+        PostRedemptionsRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /redemptions/{owner}
+            Method: POST
+        OptionsRedemptionsRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /redemptions/{owner}
+            Method: OPTIONS
+        GetRedemptionByIdRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /redemptions/{owner}/{redemption_id}
+            Method: GET
+        PatchRedemptionRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /redemptions/{owner}/{redemption_id}
+            Method: PATCH
+        OptionsRedemptionItemRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /redemptions/{owner}/{redemption_id}
+            Method: OPTIONS
+        StripeWebhookRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /stripe/webhook
+            Method: POST
+        OptionsStripeWebhookRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /stripe/webhook
+            Method: OPTIONS
+      VpcConfig: !If
+        - UseVpcCond
+        - { SecurityGroupIds: [ !Ref LambdaSecurityGroupId ], SubnetIds: !Ref LambdaSubnetIds }
+        - !Ref AWS::NoValue
+
+  MealPlanApiFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: meal_plan_api/
+      Handler: app.handler
+      Timeout: 30
+      MemorySize: 512
+      Environment:
+        Variables:
+          DB_HOST:  !Ref DBHost
+          DB_PORT:  !Ref DBPort
+          DB_USER:  !Ref DBUser
+          DB_PASS:  !Ref DBPass
+          DB_NAME:  !Ref DBName
+          MEAL_PLAN_GENERATOR_ARN: !Ref MealPlanGeneratorFunction
+      Policies:
+        - !If
+          - UseVpcCond
+          - AWSLambdaVPCAccessExecutionRole
+          - !Ref AWS::NoValue
+        - Statement:
+            Effect: Allow
+            Action: lambda:InvokeFunction
+            Resource: !GetAtt MealPlanGeneratorFunction.Arn
+      Events:
+        GetMealPlanRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /meal-plan/{owner}
+            Method: GET
+        PostMealPlanRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /meal-plan/{owner}
+            Method: POST
+        OptionsMealPlanRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /meal-plan/{owner}
+            Method: OPTIONS
+      VpcConfig: !If
+        - UseVpcCond
+        - { SecurityGroupIds: [ !Ref LambdaSecurityGroupId ], SubnetIds: !Ref LambdaSubnetIds }
+        - !Ref AWS::NoValue
+
+  MealPlanGeneratorFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: meal_plan_generator/
+      Handler: app.handler
+      Runtime: python3.12
+      Timeout: 300
+      MemorySize: 1024
+      Environment:
+        Variables:
+          BUCKET_NAME: !Ref UploadsBucketName
+          DB_HOST:  !Ref DBHost
+          DB_PORT:  !Ref DBPort
+          DB_USER:  !Ref DBUser
+          DB_PASS:  !Ref DBPass
+          DB_NAME:  !Ref DBName
+          OPENAI_API_KEY: !Ref OpenAIApiKey
+          OPENAI_MODEL: gpt-4o
+      Policies:
+        - Statement:
+            Effect: Allow
+            Action: s3:PutObject
+            Resource: !Sub "arn:aws:s3:::${UploadsBucketName}/meal-plan-images/*"
+        - !If
+          - UseVpcCond
+          - AWSLambdaVPCAccessExecutionRole
+          - !Ref AWS::NoValue
+      VpcConfig: !If
+        - UseVpcCond
+        - { SecurityGroupIds: [ !Ref LambdaSecurityGroupId ], SubnetIds: !Ref LambdaSubnetIds }
+        - !Ref AWS::NoValue
+
+  RecipesApiFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: recipes_api/
+      Handler: app.handler
+      Timeout: 30
+      MemorySize: 512
+      Environment:
+        Variables:
+          DB_HOST:  !Ref DBHost
+          DB_PORT:  !Ref DBPort
+          DB_USER:  !Ref DBUser
+          DB_PASS:  !Ref DBPass
+          DB_NAME:  !Ref DBName
+      Policies:
+        - !If
+          - UseVpcCond
+          - AWSLambdaVPCAccessExecutionRole
+          - !Ref AWS::NoValue
+      Events:
+        GetRecipesRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /recipes/{owner}
+            Method: GET
+        OptionsRecipesRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /recipes/{owner}
+            Method: OPTIONS
+      VpcConfig: !If
+        - UseVpcCond
+        - { SecurityGroupIds: [ !Ref LambdaSecurityGroupId ], SubnetIds: !Ref LambdaSubnetIds }
+        - !Ref AWS::NoValue
+
+  SavedRecipesApiFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: saved_recipes_api/
+      Handler: app.handler
+      Timeout: 120
+      MemorySize: 1024
+      Environment:
+        Variables:
+          DB_HOST:  !Ref DBHost
+          DB_PORT:  !Ref DBPort
+          DB_USER:  !Ref DBUser
+          DB_PASS:  !Ref DBPass
+          DB_NAME:  !Ref DBName
+          OPENAI_API_KEY: !Ref OpenAIApiKey
+          OPENAI_MODEL: gpt-4.1-mini
+          OPENAI_TRANSCRIPTION_MODEL: whisper-1
+      Policies:
+        - !If
+          - UseVpcCond
+          - AWSLambdaVPCAccessExecutionRole
+          - !Ref AWS::NoValue
+      Events:
+        ExtractCaptionRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /extract-caption
+            Method: POST
+        ExtractContentRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /extract-content
+            Method: POST
+        RecipeFromCaptionRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /recipe-from-caption
+            Method: POST
+        RecipeFromContentRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /recipe-from-content
+            Method: POST
+        AnalyzeTikTokRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /analyze-tiktok
+            Method: POST
+        AnalyzeUrlRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /analyze-url
+            Method: POST
+        GetSavedRecipesRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /saved-recipes/{owner}
+            Method: GET
+        PostSavedRecipesRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /saved-recipes/{owner}
+            Method: POST
+        DeleteSavedRecipeRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /saved-recipes/{owner}/{item_id}
+            Method: DELETE
+        OptionsSavedRecipesRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /saved-recipes/{owner}
+            Method: OPTIONS
+        OptionsSavedRecipeItemRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /saved-recipes/{owner}/{item_id}
+            Method: OPTIONS
+        OptionsExtractCaptionRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /extract-caption
+            Method: OPTIONS
+        OptionsExtractContentRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /extract-content
+            Method: OPTIONS
+        OptionsRecipeFromCaptionRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /recipe-from-caption
+            Method: OPTIONS
+        OptionsRecipeFromContentRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /recipe-from-content
+            Method: OPTIONS
+        OptionsAnalyzeTikTokRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /analyze-tiktok
+            Method: OPTIONS
+        OptionsAnalyzeUrlRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /analyze-url
+            Method: OPTIONS
+      VpcConfig: !If
+        - UseVpcCond
+        - { SecurityGroupIds: [ !Ref LambdaSecurityGroupId ], SubnetIds: !Ref LambdaSubnetIds }
+        - !Ref AWS::NoValue
+
+  RecipesGeneratorFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: recipes_generator/
+      Handler: app.handler
+      Runtime: python3.12
+      Timeout: 120
+      MemorySize: 512
+      Environment:
+        Variables:
+          DB_HOST:  !Ref DBHost
+          DB_PORT:  !Ref DBPort
+          DB_USER:  !Ref DBUser
+          DB_PASS:  !Ref DBPass
+          DB_NAME:  !Ref DBName
+          OPENAI_API_KEY: !Ref OpenAIApiKey
+          OPENAI_MODEL: gpt-4o
+      Policies:
+        - !If
+          - UseVpcCond
+          - AWSLambdaVPCAccessExecutionRole
+          - !Ref AWS::NoValue
+      VpcConfig: !If
+        - UseVpcCond
+        - { SecurityGroupIds: [ !Ref LambdaSecurityGroupId ], SubnetIds: !Ref LambdaSubnetIds }
+        - !Ref AWS::NoValue
+
+  JobsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "TrepoJobs-${Env}"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - { AttributeName: job_id, AttributeType: S }
+      KeySchema:
+        - { AttributeName: job_id, KeyType: HASH }
+
+  ResultsTable:
+    Condition: HasResults
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "TrepoResults-${Env}"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - { AttributeName: job_id, AttributeType: S }
+      KeySchema:
+        - { AttributeName: job_id, KeyType: HASH }
+
+  OtaSchedulesTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "TrepoOtaSchedules-${Env}"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - { AttributeName: device_id, AttributeType: S }
+        - { AttributeName: request_id, AttributeType: S }
+      KeySchema:
+        - { AttributeName: device_id, KeyType: HASH }
+        - { AttributeName: request_id, KeyType: RANGE }
+
+  OtaReportEventsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "TrepoOtaReportEvents-${Env}"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - { AttributeName: device_id, AttributeType: S }
+        - { AttributeName: event_ts_key, AttributeType: S }
+        - { AttributeName: request_id, AttributeType: S }
+        - { AttributeName: ts_epoch, AttributeType: N }
+        - { AttributeName: report_type, AttributeType: S }
+      KeySchema:
+        - { AttributeName: device_id, KeyType: HASH }
+        - { AttributeName: event_ts_key, KeyType: RANGE }
+      GlobalSecondaryIndexes:
+        - IndexName: RequestIdTsIndex
+          KeySchema:
+            - { AttributeName: request_id, KeyType: HASH }
+            - { AttributeName: ts_epoch, KeyType: RANGE }
+          Projection:
+            ProjectionType: ALL
+        - IndexName: ReportTypeTsIndex
+          KeySchema:
+            - { AttributeName: report_type, KeyType: HASH }
+            - { AttributeName: ts_epoch, KeyType: RANGE }
+          Projection:
+            ProjectionType: ALL
+
+  OtaDeviceLatestTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "TrepoOtaDeviceLatest-${Env}"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - { AttributeName: device_id, AttributeType: S }
+        - { AttributeName: owner_id, AttributeType: S }
+        - { AttributeName: last_seen_epoch, AttributeType: N }
+      KeySchema:
+        - { AttributeName: device_id, KeyType: HASH }
+      GlobalSecondaryIndexes:
+        - IndexName: OwnerLatestIndex
+          KeySchema:
+            - { AttributeName: owner_id, KeyType: HASH }
+            - { AttributeName: last_seen_epoch, KeyType: RANGE }
+          Projection:
+            ProjectionType: ALL
+
+Outputs:
+  ApiUrl:
+    Value: !Sub "https://${Api}.execute-api.${AWS::Region}.amazonaws.com"
+  BucketName:
+    Value: !Ref UploadsBucketName
+  JobsTableName:
+    Value: !Ref JobsTable
+  ResultsTableName:
+    Condition: HasResults
+    Value: !Ref ResultsTable
+  OtaSchedulesTableName:
+    Value: !Ref OtaSchedulesTable
+  OtaReportEventsTableName:
+    Value: !Ref OtaReportEventsTable
+  OtaDeviceLatestTableName:
+    Value: !Ref OtaDeviceLatestTable
