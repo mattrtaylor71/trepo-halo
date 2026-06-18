@@ -1,0 +1,424 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: HALO quick-ack voice assistant - SAM managed HTTP Lambda
+
+Parameters:
+  Env:
+    Type: String
+    Default: dev
+  OpenAIApiKey:
+    Type: String
+    NoEcho: true
+    Description: OpenAI API key for transcription and tool-enabled assistant turns
+  DBHost:
+    Type: String
+    Default: database-1.cvig8u6s25dz.us-east-1.rds.amazonaws.com
+  DBPort:
+    Type: Number
+    Default: 3306
+  DBUser:
+    Type: String
+    Default: admin
+  DBPass:
+    Type: String
+    NoEcho: true
+    Description: MySQL password for Trepo household data
+  DBName:
+    Type: String
+    Default: mysqlTutorial
+  ActionMode:
+    Type: String
+    Default: real
+    AllowedValues:
+      - mock
+      - real
+  OpenAIModel:
+    Type: String
+    Default: gpt-5.4-2026-03-05
+  TranscriptionModel:
+    Type: String
+    Default: gpt-4o-mini-transcribe
+  TranscriptionLanguage:
+    Type: String
+    Default: en
+  AudioSampleRate:
+    Type: Number
+    Default: 24000
+  DishEnrichmentMode:
+    Type: String
+    Default: sync
+    AllowedValues:
+      - sync
+      - hybrid
+  DishEditFunctionName:
+    Type: String
+    Default: unused-dish-edit-function
+  MealPlanGeneratorArn:
+    Type: String
+    Default: ""
+  RecipesGeneratorArn:
+    Type: String
+    Default: ""
+  HouseholdApiBaseUrl:
+    Type: String
+    Default: https://7tn3gvwvh7.execute-api.us-east-1.amazonaws.com
+  AssetBucketName:
+    Type: String
+    Default: ""
+  SerpApiKey:
+    Type: String
+    Default: ""
+    NoEcho: true
+  QuickAckReservedConcurrency:
+    Type: Number
+    Default: 12
+  VoiceAsyncWorkerReservedConcurrency:
+    Type: Number
+    Default: 8
+  VoiceImagePostprocessReservedConcurrency:
+    Type: Number
+    Default: 4
+
+Conditions:
+  HasMealPlanGeneratorArn: !Not [!Equals [!Ref MealPlanGeneratorArn, ""]]
+  HasRecipesGeneratorArn: !Not [!Equals [!Ref RecipesGeneratorArn, ""]]
+  HasAssetBucketName: !Not [!Equals [!Ref AssetBucketName, ""]]
+
+Globals:
+  Function:
+    Runtime: nodejs22.x
+    Timeout: 150
+    MemorySize: 512
+    Architectures:
+      - x86_64
+    Environment:
+      Variables:
+        OPENAI_API_KEY: !Ref OpenAIApiKey
+        OPENAI_MODEL: !Ref OpenAIModel
+        TRANSCRIPTION_MODEL: !Ref TranscriptionModel
+        TRANSCRIPTION_LANGUAGE: !Ref TranscriptionLanguage
+        AUDIO_SAMPLE_RATE: !Ref AudioSampleRate
+        DB_HOST: !Ref DBHost
+        DB_PORT: !Ref DBPort
+        DB_USER: !Ref DBUser
+        DB_PASS: !Ref DBPass
+        DB_NAME: !Ref DBName
+        ACTION_MODE: !Ref ActionMode
+        KITCHEN_API_BASE_URL: "https://7tn3gvwvh7.execute-api.us-east-1.amazonaws.com"
+        DISH_ENRICHMENT_MODE: !Ref DishEnrichmentMode
+        DISH_EDIT_FUNCTION_NAME: !Ref DishEditFunctionName
+        MEAL_PLAN_GENERATOR_ARN: !Ref MealPlanGeneratorArn
+        RECIPES_GENERATOR_ARN: !Ref RecipesGeneratorArn
+        HOUSEHOLD_API_BASE_URL: !Ref HouseholdApiBaseUrl
+        ASSET_BUCKET_NAME: !Ref AssetBucketName
+        SERPAPI_API_KEY: !Ref SerpApiKey
+        SESSION_TABLE_NAME: !Ref SessionMemoryTable
+        SESSION_MEMORY_MAX_MESSAGES: "12"
+        SESSION_MEMORY_TTL_DAYS: "30"
+        OPENAI_TIMEOUT_MS: "35000"
+        OPENAI_MAX_RETRIES: "1"
+        WRITE_SHARED_ONLY: "true"
+        OPENAI_RETRY_BASE_MS: "1000"
+        DB_POOL_CONNECTION_LIMIT: "2"
+        DB_POOL_QUEUE_LIMIT: "100"
+        DB_CONNECT_TIMEOUT_MS: "5000"
+        NODE_ENV: production
+
+Resources:
+  Api:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      CorsConfiguration:
+        AllowOrigins:
+          - "*"
+        AllowMethods:
+          - POST
+          - OPTIONS
+        AllowHeaders:
+          - content-type
+          - authorization
+          - x-owner-id
+          - x-device-id
+          - x-session-id
+          - x-client-surface
+          - x-request-id
+          - x-audio-sample-rate
+          - x-audio-format
+
+  SessionMemoryTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub trepo-quick-ack-sessions-${Env}
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: owner_id
+          AttributeType: S
+        - AttributeName: session_entry_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: owner_id
+          KeyType: HASH
+        - AttributeName: session_entry_id
+          KeyType: RANGE
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+
+  VoiceAsyncJobTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub trepo-quick-ack-voice-jobs-${Env}
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: job_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: job_id
+          KeyType: HASH
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+
+  VoiceAsyncBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub trepo-quick-ack-voice-async-${Env}-${AWS::AccountId}
+      LifecycleConfiguration:
+        Rules:
+          - Id: ExpireVoiceUploads
+            Status: Enabled
+            ExpirationInDays: 7
+
+  QuickAckFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub trepo-quick-ack-sam-${Env}
+      CodeUri: .sam-src
+      Handler: playground12_voice_ack/trepo-quick-ack/index.handler
+      Description: HALO device quick-ack assistant managed by SAM
+      ReservedConcurrentExecutions: !Ref QuickAckReservedConcurrency
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref SessionMemoryTable
+        - Statement:
+            Effect: Allow
+            Action:
+              - lambda:InvokeFunction
+            Resource: !Sub arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${DishEditFunctionName}
+        - !If
+          - HasMealPlanGeneratorArn
+          - Statement:
+              Effect: Allow
+              Action:
+                - lambda:InvokeFunction
+              Resource: !Ref MealPlanGeneratorArn
+          - !Ref AWS::NoValue
+        - !If
+          - HasRecipesGeneratorArn
+          - Statement:
+              Effect: Allow
+              Action:
+                - lambda:InvokeFunction
+              Resource: !Ref RecipesGeneratorArn
+          - !Ref AWS::NoValue
+        - Statement:
+            Effect: Allow
+            Action:
+              - lambda:InvokeFunction
+            Resource: !GetAtt VoiceImagePostprocessFunction.Arn
+      Environment:
+        Variables:
+          VOICE_IMAGE_POSTPROCESS_FUNCTION_NAME: !Ref VoiceImagePostprocessFunction
+      Events:
+        VoiceAckRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /voice-ack
+            Method: POST
+
+  QuickAckStreamFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub trepo-quick-ack-stream-${Env}
+      CodeUri: .sam-src
+      Handler: playground12_voice_ack/trepo-quick-ack/index-stream.handler
+      Description: Streaming voice assistant for iOS app (Lambda Function URL)
+      ReservedConcurrentExecutions: !Ref QuickAckReservedConcurrency
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref SessionMemoryTable
+        - Statement:
+            Effect: Allow
+            Action:
+              - lambda:InvokeFunction
+            Resource: !Sub arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${DishEditFunctionName}
+        - !If
+          - HasMealPlanGeneratorArn
+          - Statement:
+              Effect: Allow
+              Action:
+                - lambda:InvokeFunction
+              Resource: !Ref MealPlanGeneratorArn
+          - !Ref AWS::NoValue
+        - !If
+          - HasRecipesGeneratorArn
+          - Statement:
+              Effect: Allow
+              Action:
+                - lambda:InvokeFunction
+              Resource: !Ref RecipesGeneratorArn
+          - !Ref AWS::NoValue
+        - Statement:
+            Effect: Allow
+            Action:
+              - lambda:InvokeFunction
+            Resource: !GetAtt VoiceImagePostprocessFunction.Arn
+      Environment:
+        Variables:
+          VOICE_IMAGE_POSTPROCESS_FUNCTION_NAME: !Ref VoiceImagePostprocessFunction
+      FunctionUrlConfig:
+        AuthType: NONE
+        InvokeMode: RESPONSE_STREAM
+        Cors:
+          AllowOrigins:
+            - "*"
+          AllowMethods:
+            - POST
+          AllowHeaders:
+            - content-type
+            - x-owner-id
+            - x-device-id
+            - x-session-id
+            - x-client-surface
+
+  VoiceAckAsyncIngestFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub trepo-quick-ack-async-ingest-${Env}
+      CodeUri: .sam-src
+      Handler: playground12_voice_ack/trepo-quick-ack/async_ingest.handler
+      Description: HALO async voice ingest endpoint for fire-and-forget uploads
+      Timeout: 10
+      MemorySize: 256
+      Environment:
+        Variables:
+          VOICE_ASYNC_BUCKET_NAME: !Ref VoiceAsyncBucket
+          VOICE_ASYNC_JOB_TABLE_NAME: !Ref VoiceAsyncJobTable
+          VOICE_ASYNC_WORKER_FUNCTION_NAME: !Ref VoiceAckAsyncWorkerFunction
+          VOICE_ASYNC_JOB_TTL_DAYS: "14"
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref VoiceAsyncJobTable
+        - S3CrudPolicy:
+            BucketName: !Ref VoiceAsyncBucket
+        - Statement:
+            Effect: Allow
+            Action:
+              - lambda:InvokeFunction
+            Resource: !GetAtt VoiceAckAsyncWorkerFunction.Arn
+      Events:
+        VoiceAckAsyncRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /voice-ack-async
+            Method: POST
+
+  VoiceAckAsyncWorkerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub trepo-quick-ack-async-worker-${Env}
+      CodeUri: .sam-src
+      Handler: playground12_voice_ack/trepo-quick-ack/async_worker.handler
+      Description: HALO async voice worker for queued assistant execution
+      Timeout: 180
+      MemorySize: 512
+      ReservedConcurrentExecutions: !Ref VoiceAsyncWorkerReservedConcurrency
+      Environment:
+        Variables:
+          VOICE_ASYNC_BUCKET_NAME: !Ref VoiceAsyncBucket
+          VOICE_ASYNC_JOB_TABLE_NAME: !Ref VoiceAsyncJobTable
+          VOICE_ASYNC_JOB_TTL_DAYS: "14"
+          VOICE_IMAGE_POSTPROCESS_FUNCTION_NAME: !Ref VoiceImagePostprocessFunction
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref VoiceAsyncJobTable
+        - S3CrudPolicy:
+            BucketName: !Ref VoiceAsyncBucket
+        - DynamoDBCrudPolicy:
+            TableName: !Ref SessionMemoryTable
+        - Statement:
+            Effect: Allow
+            Action:
+              - lambda:InvokeFunction
+            Resource: !Sub arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${DishEditFunctionName}
+        - !If
+          - HasMealPlanGeneratorArn
+          - Statement:
+              Effect: Allow
+              Action:
+                - lambda:InvokeFunction
+              Resource: !Ref MealPlanGeneratorArn
+          - !Ref AWS::NoValue
+        - !If
+          - HasRecipesGeneratorArn
+          - Statement:
+              Effect: Allow
+              Action:
+                - lambda:InvokeFunction
+              Resource: !Ref RecipesGeneratorArn
+          - !Ref AWS::NoValue
+        - Statement:
+            Effect: Allow
+            Action:
+              - lambda:InvokeFunction
+            Resource: !GetAtt VoiceImagePostprocessFunction.Arn
+
+  VoiceImagePostprocessFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub trepo-quick-ack-image-postprocess-${Env}
+      CodeUri: .sam-src
+      Handler: playground12_voice_ack/trepo-quick-ack/image_postprocess.handler
+      Description: Async post-response image generation for voice-created kitchen items and dishes
+      Timeout: 120
+      MemorySize: 512
+      ReservedConcurrentExecutions: !Ref VoiceImagePostprocessReservedConcurrency
+      Policies:
+        - !If
+          - HasAssetBucketName
+          - S3CrudPolicy:
+              BucketName: !Ref AssetBucketName
+          - !Ref AWS::NoValue
+Outputs:
+  ApiUrl:
+    Description: Base URL for the SAM-managed quick-ack API
+    Value: !Sub https://${Api}.execute-api.${AWS::Region}.amazonaws.com
+  VoiceAckUrl:
+    Description: Device-compatible quick-ack route
+    Value: !Sub https://${Api}.execute-api.${AWS::Region}.amazonaws.com/voice-ack
+  VoiceAckAsyncUrl:
+    Description: Device fire-and-forget async voice ingest route
+    Value: !Sub https://${Api}.execute-api.${AWS::Region}.amazonaws.com/voice-ack-async
+  QuickAckStreamUrl:
+    Description: Streaming Function URL for iOS app
+    Value: !GetAtt QuickAckStreamFunctionUrl.FunctionUrl
+  QuickAckFunctionName:
+    Description: Lambda function name for quick-ack
+    Value: !Ref QuickAckFunction
+  VoiceAckAsyncIngestFunctionName:
+    Description: Lambda function name for async voice ingest
+    Value: !Ref VoiceAckAsyncIngestFunction
+  VoiceAckAsyncWorkerFunctionName:
+    Description: Lambda function name for async voice worker
+    Value: !Ref VoiceAckAsyncWorkerFunction
+  VoiceImagePostprocessFunctionName:
+    Description: Lambda function name for voice image postprocess jobs
+    Value: !Ref VoiceImagePostprocessFunction
+  SessionMemoryTableName:
+    Description: DynamoDB table used for app session memory
+    Value: !Ref SessionMemoryTable
+  VoiceAsyncJobTableName:
+    Description: DynamoDB table used for async voice job tracking
+    Value: !Ref VoiceAsyncJobTable
