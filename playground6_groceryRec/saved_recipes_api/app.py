@@ -73,6 +73,13 @@ _OPENAI_MAX_RETRIES = int(os.getenv('OPENAI_MAX_RETRIES', '2'))
 _YTDLP_MAX_ATTEMPTS = max(1, int(os.getenv('YTDLP_MAX_ATTEMPTS', '3')))
 _YTDLP_RETRY_SLEEP_SECONDS = max(0.0, float(os.getenv('YTDLP_RETRY_SLEEP_SECONDS', '0.75')))
 _APIFY_TOKEN_ENV = 'APIFY_TOKEN'
+# ScrapeCreators — the only provider that handles TikTok PHOTO/slideshow posts
+# (yt-dlp/oembed/html all 502 on /photo/ URLs). Returns caption (desc) + the full
+# carousel of slide image URLs.
+_SCRAPECREATORS_API_KEY_ENV = 'SCRAPECREATORS_API_KEY'
+_SCRAPECREATORS_VIDEO_ENDPOINT = 'https://api.scrapecreators.com/v2/tiktok/video'
+# Cap slide OCR to bound latency/cost within the 120s Lambda timeout.
+_SLIDESHOW_OCR_MAX_SLIDES = max(1, int(os.getenv('SLIDESHOW_OCR_MAX_SLIDES', '10')))
 _APIFY_INSTAGRAM_ACTOR_ENV = 'APIFY_INSTAGRAM_ACTOR'
 _APIFY_INSTAGRAM_ACTOR = os.getenv(_APIFY_INSTAGRAM_ACTOR_ENV, 'apify~instagram-scraper')
 _APIFY_RUN_TIMEOUT_SECONDS = max(1, int(os.getenv('APIFY_RUN_TIMEOUT_SECONDS', '45')))
@@ -2400,6 +2407,98 @@ def _extract_ytdlp(resolved_url):
     }
 
 
+def _extract_tiktok_scrapecreators(resolved_url):
+    """TikTok provider that handles PHOTO/slideshow posts (aweme_type 150) as well
+    as videos. Returns the caption (desc) plus EVERY carousel slide image URL, so
+    the downstream OCR fallback can read recipes that live in the slide images."""
+    api_key = _safe_text(os.getenv(_SCRAPECREATORS_API_KEY_ENV))
+    if not api_key:
+        raise ServiceError(f'{_SCRAPECREATORS_API_KEY_ENV} is not set.', status_code=502)
+    try:
+        response = requests.get(
+            _SCRAPECREATORS_VIDEO_ENDPOINT,
+            params={'url': resolved_url},
+            timeout=_REQUEST_TIMEOUT_SECONDS,
+            headers={'x-api-key': api_key, 'Accept': 'application/json'},
+        )
+        response.raise_for_status()
+        payload = response.json()
+    except requests.RequestException as exc:
+        raise ServiceError(f'ScrapeCreators TikTok fetch failed: {exc}', status_code=502)
+
+    detail = payload.get('aweme_detail') if isinstance(payload, dict) else None
+    if not isinstance(detail, dict):
+        detail = payload if isinstance(payload, dict) else {}
+
+    caption = _safe_text(detail.get('desc'))
+
+    # Carousel slide image URLs (present on photo/slideshow posts).
+    image_urls = []
+    image_post_info = detail.get('image_post_info') or {}
+    for img in (image_post_info.get('images') or []):
+        if not isinstance(img, dict):
+            continue
+        url_list = (img.get('display_image') or {}).get('url_list') or []
+        if url_list:
+            image_urls.append(url_list[0])
+    image_urls = _unique_texts(image_urls)
+    # For plain videos there's no carousel — fall back to the cover thumbnail.
+    if not image_urls:
+        cover = (detail.get('video') or {}).get('cover') or {}
+        image_urls = _unique_texts((cover.get('url_list') or [])[:1])
+
+    if not caption and not image_urls:
+        raise ServiceError('ScrapeCreators returned no caption or images.', status_code=502)
+
+    author = detail.get('author') or {}
+    author_name = _safe_text(author.get('nickname') or author.get('unique_id')) or None
+    is_slideshow = bool(image_post_info.get('images'))
+    # The pipeline rejects empty content; for a caption-less slideshow use a neutral
+    # placeholder so the request proceeds to the slide-OCR fallback.
+    content = caption or ('TikTok photo slideshow (recipe is in the slide images).' if is_slideshow else '')
+    if not content:
+        raise ServiceError('ScrapeCreators returned no usable text.', status_code=502)
+    return {
+        'content': content,
+        'title': (caption[:80] if caption else ''),
+        'image_url': image_urls[0] if image_urls else '',
+        'image_urls': image_urls,
+        'source': 'scrapecreators',
+        'author_name': author_name,
+        'caption_field': 'desc',
+        'warnings': [],
+    }
+
+
+def _extract_recipe_text_via_rekognition(image_urls, request_id=None):
+    """Fast/cheap OCR over carousel slide images via AWS Rekognition DetectText.
+    Used for TikTok photo slideshows whose recipe lives in the slide text (not the
+    caption). ~10x faster than the VLM preview path. Returns concatenated per-slide
+    text in carousel order; HEIC slides are converted to JPEG first."""
+    if not image_urls:
+        return ''
+    client = boto3.client('rekognition')
+    slides = []
+    for idx, url in enumerate(image_urls[:_SLIDESHOW_OCR_MAX_SLIDES]):
+        try:
+            image_bytes, content_type, _ = _load_remote_image(url)
+            if _normalize_image_content_type(content_type) not in {'image/jpeg', 'image/png'}:
+                image_bytes, _ = _convert_image_bytes_to_jpeg(image_bytes, content_type=content_type)
+            resp = client.detect_text(Image={'Bytes': image_bytes})
+            lines = [
+                _safe_text(d.get('DetectedText'))
+                for d in (resp.get('TextDetections') or [])
+                if d.get('Type') == 'LINE' and _safe_text(d.get('DetectedText'))
+            ]
+            text = '\n'.join(lines).strip()
+            if text:
+                slides.append(f'[Slide {idx + 1}]\n{text}')
+        except Exception as exc:
+            _log_event(request_id, 'slide_ocr_skip', slide_index=idx, error=str(exc))
+            continue
+    return '\n\n'.join(slides)
+
+
 def _extract_first_apify_post(items, fallback_url=''):
     if not isinstance(items, list):
         raise RuntimeError(f'Unexpected Apify response type: {type(items).__name__}')
@@ -2733,6 +2832,10 @@ def _extract_content(url, request_id=None):
         'tiktok': [
             ('yt-dlp', _extract_ytdlp),
             ('oembed', _extract_tiktok_oembed),
+            # ScrapeCreators handles photo/slideshow posts (and videos) — the only
+            # provider that doesn't 502 on /photo/ URLs. After the cheaper providers
+            # so existing video behavior is unchanged.
+            ('scrapecreators', _extract_tiktok_scrapecreators),
             ('html', _extract_html_metadata),
         ],
         'instagram': [
@@ -3013,6 +3116,34 @@ def _analyze_extraction(extraction, request_id=None):
     if not _audio_fallback_supported(extraction.get('platform')):
         result['warnings'] = warnings
         return result, structured_recipe
+
+    # Fast slide-OCR fallback (Rekognition) — for photo slideshows whose recipe
+    # lives in the slide images, not the caption. Runs BEFORE the slower VLM
+    # preview path below; only when we actually have carousel image URLs.
+    if extraction.get('image_urls'):
+        try:
+            slide_ocr_text = _extract_recipe_text_via_rekognition(
+                extraction.get('image_urls'), request_id=request_id
+            )
+            if slide_ocr_text:
+                merged_ocr_content = _merge_recipe_source_chunks([
+                    ('Caption or description', extraction.get('content')),
+                    ('Slide OCR', slide_ocr_text),
+                ])
+                refined_with_ocr, structured_with_ocr = _recipe_response_from_content(
+                    merged_ocr_content,
+                    request_id=request_id,
+                    source_context={**extraction, 'content': merged_ocr_content},
+                )
+                if not _recipe_is_incomplete(refined_with_ocr.get('recipe')):
+                    result.update(refined_with_ocr)
+                    result['recipe_source_used'] = 'content+slide_ocr'
+                    result['warnings'] = warnings + [
+                        'Caption text was insufficient, so slide-image OCR was used as a fallback.'
+                    ]
+                    return result, structured_with_ocr
+        except Exception as exc:
+            warnings.append(str(exc))
 
     try:
         preview_fallback = _extract_recipe_from_social_preview_images(extraction, request_id=request_id)

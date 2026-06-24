@@ -56,6 +56,12 @@ Parameters:
     Default: ''
     Description: "Optional Apify token for Instagram extraction fallback"
 
+  ScrapeCreatorsApiKey:
+    Type: String
+    NoEcho: true
+    Default: ''
+    Description: "ScrapeCreators API key for TikTok photo/slideshow extraction"
+
   StripeWebhookSecret:
     Type: String
     NoEcho: true
@@ -1518,6 +1524,7 @@ Resources:
           OPENAI_API_KEY: !Ref OpenAIApiKey
           YTDLP_COOKIEFILE_B64: !Ref YtdlpCookieFileB64
           APIFY_TOKEN: !Ref ApifyToken
+          SCRAPECREATORS_API_KEY: !Ref ScrapeCreatorsApiKey
           OPENAI_MODEL: gpt-4.1-mini
           ENABLE_LLM_INVENTORY_MATCHING: !Ref EnableLlmInventoryMatching
           OPENAI_INVENTORY_MODEL: !Ref OpenAIInventoryModel
@@ -1544,6 +1551,10 @@ Resources:
             Effect: Allow
             Action: ssm:GetParameter
             Resource: !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/trepo/ytdlp-cookiefile-b64"
+        - Statement:
+            Effect: Allow
+            Action: rekognition:DetectText
+            Resource: "*"
         - !If
           - UseVpcCond
           - AWSLambdaVPCAccessExecutionRole
