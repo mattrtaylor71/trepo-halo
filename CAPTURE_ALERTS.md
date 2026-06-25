@@ -26,18 +26,26 @@ error"` (logged only in the `.catch` that also marks the job `failed`):
 - `trepo-capture-bulk-identify-job-failed` ← filter `bulk-identify-analysis-failed` on identify-async → `Trepo/Capture:BulkIdentifyAnalysisFailed`
 - `trepo-capture-bulk-commit-job-failed` ← filter `bulk-commit-failed` on bulk-commit → `Trepo/Capture:BulkCommitFailed`
 
-## Coverage & the one gap
-- **Bulk**: hard + soft (job marked failed) ✅ fully covered.
-- **Receipt / Leftovers / Discard**: **hard failures covered** (Lambda Errors). **Soft failures
-  NOT yet covered** — these S3-triggered analyze functions catch errors and return 200 (e.g. the
-  dish `imageUrl` TDZ bug returned 200 while the preliminary write silently failed). They have no
-  single clean failure-marker today, so a low-noise log filter isn't possible without a code
-  change.
-- **To close the gap** (recommended follow-up): add a structured `{"evt":"analysis_failed",
-  "kind":"dish|grocery|receipt|discard",...}` log line in each analyze function's main
-  failure/catch branch (same pattern as `list_fanout_miss`), then one metric filter
-  `"analysis_failed"` across those log groups + an alarm. Small, testable, but touches 3 live
-  capture functions → deploy via surgical update-function-code with the usual verification.
+## Soft-failure alarms (gap now CLOSED 2026-06-24)
+The 3 S3 analyze functions now emit a structured `{"evt":"analysis_failed","kind":...,"stage":...}`
+log in their **non-throwing** failure paths (the swallowed catches that return 200 — e.g. the dish
+`imageUrl` TDZ bug, which failed the preliminary write silently). Helper `reportAnalysisFailed()`
+added to each; instrumented at the preliminary/primary result-write swallowed catch + the
+`owner_missing` non-throwing FAILED (+ discard shopping-list add). The noisy `fast_status:FAILED`
+paths are intentionally NOT instrumented (deep analysis recovers from those).
+
+Metric filters `"analysis_failed"` → metrics + alarms:
+- `trepo-capture-dish-analysis-soft-failed` ← AnalyzeDishOnUpload → `Trepo/Capture:DishAnalysisFailed`
+- `trepo-capture-grocery-receipt-analysis-soft-failed` ← AnalyzeOnUpload → `GroceryAnalysisFailed`
+- `trepo-capture-discard-analysis-soft-failed` ← AnalyzeDiscardOnUpload → `DiscardAnalysisFailed`
+
+Verified live: triggered the dish owner_missing path → marker logged → `DishAnalysisFailed`=1.0.
+
+## Coverage summary
+- **Bulk**: hard (Lambda Errors) + soft (job marked failed) ✅
+- **Receipt / Leftovers / Discard**: hard (Lambda Errors) + soft (`analysis_failed` on the
+  swallowed result-loss paths) ✅. Note: only the *instrumented* swallowed catches are covered;
+  if a brand-new silent-failure path is added later, instrument it the same way.
 
 ## Action required
 Confirm the SNS email subscription — AWS emailed a link to matt@trepo.ai (status

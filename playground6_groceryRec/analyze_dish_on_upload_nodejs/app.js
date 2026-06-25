@@ -874,6 +874,22 @@ async function publishFastResult(userId, deviceId, jobId, fastPayload, action, l
   }).promise();
 }
 
+// Emits a structured marker for silent (non-throwing) analysis failures so a
+// CloudWatch metric filter on "analysis_failed" can alert. Hard failures rethrow
+// and are caught by the Lambda Errors alarm; this covers the swallowed/degraded
+// paths that return 200 (e.g. the preliminary Dish-Log write failing).
+function reportAnalysisFailed(kind, stage, jobId, err) {
+  try {
+    console.error(JSON.stringify({
+      evt: 'analysis_failed',
+      kind,
+      stage,
+      job_id: jobId || null,
+      error: (err && (err.message || String(err))) || stage,
+    }));
+  } catch (_) { /* never let logging throw */ }
+}
+
 exports.handler = async (event) => {
   console.log('[handler] Event received:', JSON.stringify(event).substring(0, 500));
 
@@ -931,6 +947,7 @@ exports.handler = async (event) => {
         status: 'FAILED',
         error_msg: 'owner parameter required',
       });
+      reportAnalysisFailed('dish', 'owner_missing', jobId, 'owner parameter required');
       return {
         statusCode: 400,
         body: JSON.stringify({ ok: false, error: 'owner parameter required' }),
@@ -1004,6 +1021,7 @@ exports.handler = async (event) => {
         console.log('[fast] Preliminary dish written to MySQL dishes table');
       } catch (fastWriteError) {
         console.error('[fast] Failed to write preliminary dish to MySQL (non-fatal):', fastWriteError);
+        reportAnalysisFailed('dish', 'preliminary_write', jobId, fastWriteError);
       }
     } catch (fastError) {
       console.error('[fast] Failed fast estimate/publish (non-fatal):', fastError);
