@@ -607,6 +607,40 @@ async function persistConfirmedBulkItems({ owner, userId, deviceId, jobId, sourc
     }
   );
 
+  // Final resweep: never give up on a CONFIRMED item after a single pass. If any
+  // still failed (despite createKitchenItem's own 5x backoff), pause to let a
+  // transient throttle drain, then re-attempt ONLY those once more at low
+  // concurrency. Items recovered here flip back to ok and count as persisted.
+  const stillFailed = writeResults.filter((r) => !r.ok);
+  if (stillFailed.length > 0) {
+    console.warn(`[BulkKitchenWriter] ${stillFailed.length} item(s) failed first pass; resweeping after delay.`);
+    await sleep(2000);
+    const reswept = await mapWithConcurrency(
+      stillFailed,
+      Math.min(CREATE_CONCURRENCY, 3),
+      async (failedResult) => {
+        try {
+          const response = await createKitchenItem(owner, failedResult.payload);
+          return { result: failedResult, ok: true, response };
+        } catch (error) {
+          return { result: failedResult, ok: false, error };
+        }
+      }
+    );
+    let recovered = 0;
+    for (const r of reswept) {
+      if (r.ok) {
+        r.result.ok = true;          // same object reference held in writeResults
+        r.result.response = r.response;
+        r.result.error = undefined;
+        recovered += 1;
+      } else {
+        r.result.error = r.error;
+      }
+    }
+    console.warn(`[BulkKitchenWriter] Resweep recovered ${recovered} of ${stillFailed.length} item(s).`);
+  }
+
   const enrichmentQueue = [];
   for (const writeResult of writeResults) {
     if (!writeResult.ok) {
