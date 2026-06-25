@@ -1016,6 +1016,12 @@ exports.handler = async (event, context) => {
   let provisionalKitchenInserted = false;
   let provisionalKitchenResolved = false;
   let provisionalKitchenOwner = null;
+  // Function-scoped so the top-level catch can reference it for cleanup
+  // (clearPendingSwapReviewPrompts / markKitchenRowsFailed). Previously `let
+  // quantity` was declared inside the try, so a deep-analysis failure threw
+  // `ReferenceError: quantity is not defined` in the catch, aborting the
+  // provisional-row + job-FAILED cleanup.
+  let quantity = 1;
   try {
     const ids = extractIdsFromKey(key);
     if (!ids) {
@@ -1046,7 +1052,7 @@ exports.handler = async (event, context) => {
     const action = job.action || 'IN';
     let productExpiration = job.product_expiration || null;
     const expirationExpected = !!(job.expiration_expected || job.expiration_s3_key);
-    let quantity = normalizeQuantity(job.quantity);
+    quantity = normalizeQuantity(job.quantity);
 
     if (!owner) {
       console.error('[error] owner parameter required in job');
