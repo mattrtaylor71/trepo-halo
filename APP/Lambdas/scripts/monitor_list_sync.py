@@ -14,9 +14,13 @@ Exit code 1 if anything is found (divergence rows or fan-out misses), so it can 
 cron'd locally and piped to a notifier:
     */30 * * * * python3 monitor_list_sync.py --hours 1 || mail -s 'list sync drift' you@x
 
-NOTE: the *native* CloudWatch path (metric filter + alarm + SNS) is preferable but
-needs IAM perms matt-cli lacks (logs:PutMetricFilter, cloudwatch:PutMetricData,
-sns:*). Drop-in commands for an admin profile are at the bottom of this file.
+NOTE: the *native* CloudWatch path IS NOW LIVE (2026-06-24) — metric filter
+`list-fanout-miss` on this log group -> Trepo/ListSync:ListFanoutMiss -> alarm
+`trepo-list-fanout-miss` -> SNS topic trepo-list-sync-alerts (email matt@trepo.ai).
+matt-cli was granted the needed actions via the managed policy
+`TrepoListSyncMonitoring` (it already had IAMFullAccess). This script remains the
+secondary/local check (divergence sweep, which the native alarm does NOT cover) and
+an ad-hoc log scanner. The provisioning commands are in the footer for reference.
 """
 import pymysql, subprocess, json, argparse, sys
 from collections import Counter, defaultdict
