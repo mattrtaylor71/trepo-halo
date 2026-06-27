@@ -3099,7 +3099,8 @@ async function updateShoppingFieldsAcrossHousehold(connection, context, target, 
         );
       }
     }
-    return;
+    // Fall through (no early return): ALSO update the per-user {member}_new_list
+    // tables the app/device read (check/uncheck, store, rename).
   }
 
   const shoppingOwnerId = resolveShoppingOwnerId(context);
@@ -4755,7 +4756,10 @@ export async function addShoppingItem(context, itemName, requestedStore = null, 
         household_item_uuid: householdItemUuid,
         shopping_id: primaryInsertId
       }));
-      return shoppingResult;
+      // Fall through (no early return): ALSO write the per-user {member}_new_list
+      // tables below. Those are the canonical store the iOS app + HALO device list
+      // read from — without this, voice adds land only in shared_shopping_list and
+      // never appear anywhere the user looks.
     }
 
     const memberIds = getShoppingHouseholdMemberIds(context);
@@ -4868,7 +4872,9 @@ export async function removeShoppingItem(context, itemName, options = {}) {
         shopping_id: target.shopping_id,
         household_item_uuid: target.household_item_uuid || null
       }));
-      return target;
+      // Fall through (no early return): ALSO delete from the per-user
+      // {member}_new_list tables the app/device read, so a voice removal is
+      // reflected everywhere.
     }
 
     const shoppingOwnerId = resolveShoppingOwnerId(context);
@@ -4940,7 +4946,8 @@ export async function clearShoppingList(context, options = {}) {
         count: items.length,
         item_names: items.slice(0, 25).map((item) => item.item_name)
       }));
-      return { items, count: items.length };
+      // Fall through (no early return): ALSO clear the per-user {member}_new_list
+      // tables the app/device read.
     }
 
     const memberIds = getShoppingHouseholdMemberIds(context);
