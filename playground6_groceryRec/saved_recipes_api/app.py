@@ -373,6 +373,15 @@ def _fan_out_saved_recipe_to_household(conn, primary_owner, recipe_id, request_i
     row = _fetch_saved_recipe_by_id(conn, primary_owner, recipe_id)
     if not row:
         return
+    # _SAVED_RECIPE_SELECT_FIELDS doesn't carry resolved_url_hash, so recompute it
+    # the same way the owner's row was hashed (_sha256(resolved_url)) — reproduces
+    # the identical hash so the dedup-by-hash check still matches. resolved_url_hash
+    # is NOT NULL in the member table; without this the fan-out INSERT threw
+    # (1048, "Column 'resolved_url_hash' cannot be null") and household members
+    # silently never received the shared recipe.
+    member_hash = row.get('resolved_url_hash') or _sha256(
+        row.get('resolved_url') or row.get('source_url') or recipe_id
+    )
     for member_id in other_members:
         try:
             _ensure_saved_recipes_table(conn, member_id)
@@ -381,7 +390,7 @@ def _fan_out_saved_recipe_to_household(conn, primary_owner, recipe_id, request_i
             with conn.cursor() as cur:
                 cur.execute(
                     f"SELECT _id FROM `{member_table}` WHERE _id = %s OR resolved_url_hash = %s LIMIT 1",
-                    [recipe_id, row.get('resolved_url_hash') or ''],
+                    [recipe_id, member_hash],
                 )
                 if cur.fetchone():
                     continue  # Already exists, skip
@@ -398,7 +407,7 @@ def _fan_out_saved_recipe_to_household(conn, primary_owner, recipe_id, request_i
                         row.get('source_type'),
                         row.get('source_url'),
                         row.get('resolved_url'),
-                        row.get('resolved_url_hash'),
+                        member_hash,
                         row.get('title'),
                         row.get('image_url'),
                         json.dumps(row.get('image_urls') or []) if isinstance(row.get('image_urls'), list) else row.get('image_urls'),
