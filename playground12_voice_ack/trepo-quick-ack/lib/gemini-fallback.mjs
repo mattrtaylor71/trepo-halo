@@ -49,15 +49,16 @@ export async function geminiChatFallbackResponse(bodyString, env) {
   return res;
 }
 
-// Native Gemini transcription of a WAV buffer → plain text. Needs a durable AIza key (the native
-// generateContent endpoint rejects ephemeral AQ. tokens).
+// Native Gemini transcription of a WAV buffer → plain text. The native generateContent endpoint
+// authenticates with the x-goog-api-key header (an API key is NOT an OAuth Bearer token — Bearer
+// 401s here), unlike the OpenAI-compat endpoint which does use Bearer.
 export async function geminiTranscribe(wavBuffer, env) {
   const model = env.GEMINI_TRANSCRIBE_MODEL || "gemini-2.5-flash";
   const b64 = Buffer.from(wavBuffer).toString("base64");
   const res = await fetch(`${GEMINI_NATIVE_BASE}/models/${model}:generateContent`, {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${env.GEMINI_API_KEY}`,
+      "x-goog-api-key": env.GEMINI_API_KEY,
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
