@@ -28,6 +28,11 @@ import yt_dlp
 
 USE_SHARED_TABLES = os.getenv('USE_SHARED_TABLES', 'false').lower() == 'true'
 
+# Saved recipes are PER-USER (private) by default. When this is off (the default), a save is
+# NOT copied to other household members, a delete does not remove it from other members, and an
+# edit only touches the acting user's own copy. Set to 'true' only to restore household sharing.
+SAVED_RECIPE_HOUSEHOLD_FANOUT = os.getenv('SAVED_RECIPE_HOUSEHOLD_FANOUT', 'false').lower() == 'true'
+
 _LAYER_PYTHON = Path(__file__).resolve().parents[1] / 'recipe_inventory_layer' / 'python'
 if _LAYER_PYTHON.exists() and str(_LAYER_PYTHON) not in sys.path:
     sys.path.insert(0, str(_LAYER_PYTHON))
@@ -365,6 +370,8 @@ def _get_household_member_ids(conn, acting_user_id):
 
 def _fan_out_saved_recipe_to_household(conn, primary_owner, recipe_id, request_id=None):
     """Copy a saved recipe from the primary owner's table to all other household members."""
+    if not SAVED_RECIPE_HOUSEHOLD_FANOUT:
+        return  # saved recipes are per-user; do not copy to other household members
     members = _get_household_member_ids(conn, primary_owner)
     other_members = [m for m in members if m != _safe_owner_token(primary_owner)]
     if not other_members:
@@ -446,6 +453,8 @@ def _fan_out_saved_recipe_to_household(conn, primary_owner, recipe_id, request_i
 
 def _fan_out_delete_to_household(conn, primary_owner, recipe_id, request_id=None):
     """Delete a saved recipe from all other household members' tables."""
+    if not SAVED_RECIPE_HOUSEHOLD_FANOUT:
+        return  # saved recipes are per-user; a delete only affects the acting user
     members = _get_household_member_ids(conn, primary_owner)
     other_members = [m for m in members if m != _safe_owner_token(primary_owner)]
     if not other_members:
@@ -4138,11 +4147,14 @@ def _update_saved_recipe(owner, item_id, body, request_id=None):
     if not _fetch_saved_recipe_by_id(conn, owner, item_id):
         return _error(404, 'Saved recipe not found')
 
-    # Apply to the owner + every household member table (no-op where the recipe is absent).
-    try:
-        targets = set(_get_household_member_ids(conn, owner) or [])
-    except Exception:
-        targets = set()
+    # Per-user by default: an edit only touches the acting user's own copy. Household
+    # propagation happens only when saved-recipe sharing is explicitly enabled.
+    targets = set()
+    if SAVED_RECIPE_HOUSEHOLD_FANOUT:
+        try:
+            targets = set(_get_household_member_ids(conn, owner) or [])
+        except Exception:
+            targets = set()
     targets.add(_safe_owner_token(owner))
     set_clause = ', '.join(f"`{col}` = %s" for col in updates) + ", `_updatedDate` = NOW()"
     vals = list(updates.values())
