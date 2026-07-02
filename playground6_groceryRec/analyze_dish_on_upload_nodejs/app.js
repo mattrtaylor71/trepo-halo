@@ -249,13 +249,22 @@ async function getDbConnection() {
   if (!DB_HOST || !DB_USER || !DB_PASS || !DB_NAME) {
     throw new Error('Missing MySQL environment variables for metrics snapshot');
   }
-  return mysql.createConnection({
+  const conn = await mysql.createConnection({
     host: DB_HOST,
     port: DB_PORT ? parseInt(DB_PORT, 10) : 3306,
     user: DB_USER,
     password: DB_PASS,
     database: DB_NAME,
+    connectTimeout: 10000,
   });
+  // Bound metadata-lock waits (default is 1 year) so metrics-snapshot DDL can't ride the
+  // 300s Lambda ceiling on a lock held by a concurrent writer. Best-effort.
+  try {
+    await conn.query('SET SESSION lock_wait_timeout = 15, innodb_lock_wait_timeout = 15');
+  } catch (e) {
+    console.warn('[getDbConnection] could not set lock timeouts (non-fatal):', e && e.message ? e.message : e);
+  }
+  return conn;
 }
 
 async function tableExists(conn, tableName) {

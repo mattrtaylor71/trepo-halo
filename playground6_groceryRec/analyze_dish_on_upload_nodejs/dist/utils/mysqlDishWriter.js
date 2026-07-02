@@ -65,8 +65,20 @@ async function writeToDishesTable(record) {
         password: DB_PASS,
         database: DB_NAME,
         charset: 'utf8mb4',
+        connectTimeout: 10000,
     });
     try {
+        // Bound metadata-lock waits. MySQL's default lock_wait_timeout is 1 year, so a
+        // CREATE TABLE / ALTER TABLE (schema ensure) that contends with a concurrent dish
+        // write's DDL blocks until this Lambda hits its 300s ceiling and is killed with no
+        // error — a silent hang that never marks the job failed. Capping it here converts
+        // that into a fast, logged, retryable error. (Best-effort: ignore if it can't be set.)
+        try {
+            await connection.query('SET SESSION lock_wait_timeout = 15, innodb_lock_wait_timeout = 15');
+        }
+        catch (e) {
+            console.warn('[mysqlDishWriter] could not set lock timeouts (non-fatal):', e?.message || e);
+        }
         // Dishes are user-specific — no household sync
         const memberIds = [record.owner];
         const entryId = (0, householdSync_1.stableHouseholdRowId)('dishes', record.job_id);
