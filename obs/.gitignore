@@ -1,0 +1,3 @@
+harness/node_modules/
+harness/results-*.json
+forwarder/.aws-sam/

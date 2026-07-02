@@ -324,6 +324,27 @@ def _log_event(request_id, event_name, **fields):
     print(json.dumps(payload, default=json_serial))
 
 
+def _report_backend_error(op, owner_id=None, code=None, error=None, job_id=None, service='recipes'):
+    """Emit a metric-filterable marker (evt=backend_error) for a swallowed soft failure. Never throws."""
+    try:
+        msg = ''
+        if error is not None:
+            msg = error if isinstance(error, str) else str(error)
+            if len(msg) > 500:
+                msg = msg[:500]
+        print(json.dumps({
+            'evt': 'backend_error',
+            'service': service,
+            'op': op,
+            'owner_id': str(owner_id) if owner_id is not None else None,
+            'code': code or 'error',
+            'error': msg,
+            'job_id': str(job_id) if job_id is not None else None,
+        }), file=sys.stderr)
+    except Exception:
+        pass
+
+
 def _cors_headers():
     return {
         'Content-Type': 'application/json',
@@ -2839,6 +2860,8 @@ def _run_provider_pipeline(normalized_url, resolved_url, platform, providers, re
         failure_reason=' | '.join([attempt.get('error') or attempt.get('source') for attempt in attempts]),
         attempts=attempts,
     )
+    _report_backend_error('extract_url', code='all_providers_failed',
+                          error=f"{platform}: " + ' | '.join([attempt.get('error') or attempt.get('source') for attempt in attempts]))
     raise ServiceError(f'Could not extract content from this {platform} URL.', status_code=502, extra={'warnings': warnings})
 
 
@@ -3348,6 +3371,8 @@ def _handle_async_saved_recipe_text_task(event, request_id=None):
                 cur.execute(f"UPDATE `{table}` SET status = 'failed' WHERE _id = %s AND _owner = %s", (recipe_id, owner))
             conn.commit()
             _log_event(request_id, 'saved_recipe_async_text_failed', owner=owner, recipe_id=recipe_id, reason='not_enough_info')
+            _report_backend_error('save_recipe_text', owner_id=owner, code='not_enough_info',
+                                  error='extraction returned Not enough recipe information.', job_id=recipe_id)
             return {'statusCode': 200}
         table = _saved_recipes_table(owner)
         with conn.cursor() as cur:
@@ -3379,8 +3404,9 @@ def _handle_async_saved_recipe_text_task(event, request_id=None):
             _persist_owner_recipe_availability_rows(conn, [overlay_row])
             try:
                 _fan_out_saved_recipe_to_household(conn, owner, recipe_id, request_id=request_id)
-            except Exception:
-                pass
+            except Exception as fan_exc:
+                _report_backend_error('household_fanout', owner_id=owner, code='fanout_failed',
+                                      error=fan_exc, job_id=recipe_id)
         _log_event(request_id, 'saved_recipe_async_text_complete', owner=owner, recipe_id=recipe_id,
                    latency_ms=int((time.time() - started) * 1000))
         return {'statusCode': 200}
@@ -3388,6 +3414,7 @@ def _handle_async_saved_recipe_text_task(event, request_id=None):
         print(f"[async-text-refine] Error: {exc}")
         import traceback
         traceback.print_exc()
+        _report_backend_error('save_recipe_text', owner_id=owner, code='refine_error', error=exc, job_id=recipe_id)
         try:
             table = _saved_recipes_table(owner)
             with conn.cursor() as cur:
@@ -4293,6 +4320,8 @@ def _handle_async_saved_recipe_batch_task(event, request_id):
             failure_reason=str(exc),
             partial_error_count=len(failed_job.get('partial_errors') or []),
         )
+        _report_backend_error('save_recipe_image_batch', owner_id=owner, code='batch_failed',
+                              error=exc, job_id=job_id)
         return {
             'ok': False,
             'owner': owner,
@@ -4319,6 +4348,8 @@ def _handle_async_saved_recipe_batch_task(event, request_id):
             failure_reason=str(exc),
             partial_error_count=0,
         )
+        _report_backend_error('save_recipe_image_batch', owner_id=owner, code='batch_error',
+                              error=exc, job_id=job_id)
         return {
             'ok': False,
             'owner': owner,

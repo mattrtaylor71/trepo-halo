@@ -1,0 +1,16 @@
+{
+  "name": "trepo-obs-harness",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Trepo observability verification harness: proves every backend flow's failure/success signal is readable.",
+  "scripts": {
+    "verify": "node verify.mjs"
+  },
+  "dependencies": {
+    "@aws-sdk/client-cloudwatch": "^3.1079.0",
+    "@aws-sdk/client-cloudwatch-logs": "^3.1079.0",
+    "@aws-sdk/client-dynamodb": "^3.1079.0",
+    "@aws-sdk/lib-dynamodb": "^3.1079.0"
+  }
+}

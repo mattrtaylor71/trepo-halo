@@ -31,6 +31,27 @@ DB_CONNECT_TIMEOUT = int(os.getenv('DB_CONNECT_TIMEOUT_SECONDS', '5'))
 DB_READ_TIMEOUT = int(os.getenv('DB_READ_TIMEOUT_SECONDS', '10'))
 DB_WRITE_TIMEOUT = int(os.getenv('DB_WRITE_TIMEOUT_SECONDS', '10'))
 USE_SHARED_TABLES = os.getenv('USE_SHARED_TABLES', 'false').lower() == 'true'
+
+
+def _report_backend_error(op, owner_id=None, code=None, error=None, job_id=None, service='recipes'):
+    """Emit a metric-filterable marker (evt=backend_error) for a swallowed soft failure. Never throws."""
+    try:
+        msg = ''
+        if error is not None:
+            msg = error if isinstance(error, str) else str(error)
+            if len(msg) > 500:
+                msg = msg[:500]
+        print(json.dumps({
+            'evt': 'backend_error',
+            'service': service,
+            'op': op,
+            'owner_id': str(owner_id) if owner_id is not None else None,
+            'code': code or 'error',
+            'error': msg,
+            'job_id': str(job_id) if job_id is not None else None,
+        }), file=sys.stderr)
+    except Exception:
+        pass
 _INGREDIENT_NOISE_TOKENS = {
     'a', 'an', 'and', 'fresh', 'organic', 'large', 'small', 'medium', 'lean', 'extra', 'virgin',
     'boneless', 'skinless', 'shredded', 'chopped', 'diced', 'minced', 'sliced', 'ground',
@@ -891,6 +912,7 @@ def handler(event, context):
             mark_conn.commit()
         except Exception as e:
             print(f'[recipes_generator] Failed to mark refresh needed: {e}')
+            _report_backend_error('mark_refresh_needed', owner_id=owner, code='mark_failed', error=e)
         return
 
     conn = _mysql_conn()
@@ -979,6 +1001,8 @@ def handler(event, context):
         kitchen_only = _dedupe_recipes(new_kitchen)[:10]
         need_grocery = _dedupe_recipes(new_need)[:10]
         if len(kitchen_only) < 10 or len(need_grocery) < 10:
+            _report_backend_error('generate', owner_id=owner, code='incomplete_set',
+                                  error=f'kitchen_only={len(kitchen_only)} need_grocery={len(need_grocery)} has_existing={has_existing_recipes}')
             if not has_existing_recipes:
                 for target_owner in target_owners:
                     _set_status(conn, target_owner, 'failed', 'Could not build a full 10+10 recipe set after survivor backfill')
@@ -1024,6 +1048,7 @@ def handler(event, context):
         print(f'[recipes_generator] Error: {e}')
         import traceback
         traceback.print_exc()
+        _report_backend_error('generate', owner_id=owner, code='handler_error', error=e)
         if not has_existing_recipes:
             try:
                 for target_owner in target_owners:
