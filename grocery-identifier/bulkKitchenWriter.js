@@ -2,7 +2,7 @@ const { LambdaClient, InvokeCommand } = require("@aws-sdk/client-lambda");
 const fetch = require("node-fetch");
 const { buildCheckInLabel } = require("./quickIdentify/geminiBulk");
 const { maybeEnrichPersistedBulkItem } = require("./bulkEnrichmentEngine");
-const { estimateStorageGuidance } = require("./storageGuidance");
+const { estimateStorageGuidance, storageZoneToLocation } = require("./storageGuidance");
 
 const KITCHEN_API_BASE_URL =
   (process.env.KITCHEN_API_BASE_URL || "https://7tn3gvwvh7.execute-api.us-east-1.amazonaws.com").replace(/\/$/, "");
@@ -450,6 +450,10 @@ function buildKitchenPayload(item, context, index) {
     action: "IN",
     product_expiration: cleanNullable(item.expiration_date) || null,
     storage_guidance: storageGuidance,
+    // Real storage-location guess derived from the computed storage_zone so the
+    // app stops defaulting every checked-in item to "fridge". Respect an explicit
+    // incoming value if the caller already provided one; null means "unset".
+    storage_location: cleanNullable(item.storage_location) || storageZoneToLocation(storageGuidance && storageGuidance.storage_zone),
     product_image_url: `emoji:${assignEmojiFast(productName, cleanNullable(item.category))}`,
     product_image_key: null,
     analysis_stage: "preliminary",

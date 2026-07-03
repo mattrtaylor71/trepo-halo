@@ -168,13 +168,33 @@ def _shared_kitchen_insert(conn, owner, payload):
         conn.commit()
 
 
+class _CoalesceExisting:
+    """Sentinel value for _shared_kitchen_update: emit `col = COALESCE(col, %s)`
+    so the column is only filled when it's currently NULL. Used for server-side
+    storage_location backfill during enrichment so we never overwrite a value a
+    user (or an earlier write) already set."""
+    __slots__ = ("value",)
+
+    def __init__(self, value):
+        self.value = value
+
+
 def _shared_kitchen_update(conn, item_id, updates_dict):
     """Update a row in shared_kitchen."""
     with conn.cursor() as cur:
         if not updates_dict:
             return
-        set_clauses = ', '.join(f'`{k}` = %s' for k in updates_dict.keys())
-        values = list(updates_dict.values()) + [item_id]
+        set_parts = []
+        values = []
+        for k, v in updates_dict.items():
+            if isinstance(v, _CoalesceExisting):
+                set_parts.append(f'`{k}` = COALESCE(`{k}`, %s)')
+                values.append(v.value)
+            else:
+                set_parts.append(f'`{k}` = %s')
+                values.append(v)
+        set_clauses = ', '.join(set_parts)
+        values.append(item_id)
         cur.execute(
             f"UPDATE `shared_kitchen` SET {set_clauses}, `_updatedDate` = NOW() WHERE `_id` = %s",
             values
@@ -944,6 +964,14 @@ def _build_create_payload(owner, body):
     elif upf not in ['yes', 'no']:
         return None, _error_response(400, 'Invalid upf value. Must be "yes", "no", or null')
 
+    # Storage location: real guess from the writer (fridge/freezer/pantry). Normalize
+    # to the app's lowercase enum; anything else (incl. blank) stays null/unset.
+    storage_location = body.get('storage_location')
+    if storage_location is not None:
+        storage_location = str(storage_location).strip().lower() or None
+        if storage_location not in ('fridge', 'freezer', 'pantry'):
+            storage_location = None
+
     payload = {
         '_id': str(body.get('_id') or uuid.uuid4()),
         '_owner': owner,
@@ -975,6 +1003,7 @@ def _build_create_payload(owner, body):
         's3_key': body.get('s3_key'),
         'action': action,
         'product_expiration': expiration or None,
+        'storage_location': storage_location,
         'storage_guidance': _json_column_value(body.get('storage_guidance')),
         'resized_image_url': body.get('resized_image_url'),
         'resized_image_key': body.get('resized_image_key'),
@@ -1672,7 +1701,17 @@ def _update_kitchen_item(owner, item_id, body):
                 # Accumulate the VALIDATED/serialized value for the shared-table write.
                 update_dict[field] = value
 
-        if not updates:
+        # Conditional storage_location fill (server-side enrichment): only set it
+        # when the column is currently NULL so a user's explicit choice is never
+        # clobbered. Skipped entirely if the caller also sent an explicit
+        # `storage_location` (that direct field wins).
+        sl_if_empty = body.get('storage_location_if_empty')
+        if 'storage_location' not in body and sl_if_empty is not None:
+            sl_val = str(sl_if_empty).strip().lower() or None
+            if sl_val in ('fridge', 'freezer', 'pantry'):
+                update_dict['storage_location'] = _CoalesceExisting(sl_val)
+
+        if not update_dict:
             return _error_response(400, 'No valid fields to update.')
 
         # Stamp analysis_updated_at for parity with CREATE (which sets it in _build_create_payload).
