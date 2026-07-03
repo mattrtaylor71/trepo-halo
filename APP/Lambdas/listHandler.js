@@ -65,6 +65,41 @@ function rowRecency(r) {
   return t ? new Date(t).getTime() : 0;
 }
 
+// Self-heal: recreate a caller's missing `_new_list` table (purged/legacy
+// accounts hit ER_NO_SUCH_TABLE on their OWN write, which used to 500).
+// DDL mirrors the twilioAuth signup DDL plus `sort_order` (which signup
+// historically omitted — schema-drift bug backfilled 2026-07-03).
+async function ensureOwnListTable(ownerId) {
+  // ownerId is a UUID from the auth path, but never interpolate unvalidated.
+  if (!/^[0-9a-zA-Z-]{1,64}$/.test(ownerId)) throw new Error('invalid ownerId for table create');
+  await getPool().query(`
+    CREATE TABLE IF NOT EXISTS \`${ownerId}_new_list\` (
+      \`_id\` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+      \`_owner\` CHAR(36) NOT NULL,
+      \`_device\` VARCHAR(64) NOT NULL,
+      \`product_name\` VARCHAR(255) NOT NULL,
+      \`product_brand\` VARCHAR(255) DEFAULT NULL,
+      \`images\` TEXT,
+      \`product_barcode\` VARCHAR(64) DEFAULT NULL,
+      \`store\` VARCHAR(100) DEFAULT NULL,
+      \`action\` VARCHAR(32) NOT NULL,
+      \`_createdDate\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      \`created_at\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      \`updated_at\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      \`household_item_uuid\` CHAR(36) DEFAULT NULL,
+      \`sort_order\` INT DEFAULT NULL,
+      PRIMARY KEY (\`_id\`),
+      KEY \`idx_owner_device\` (\`_owner\`, \`_device\`),
+      KEY \`idx_created\` (\`_createdDate\`)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
+  `);
+  console.error(JSON.stringify({
+    evt: 'backend_error', service: 'list', op: 'own_table_recreated',
+    owner_id: ownerId, code: 'missing_new_list_table',
+    error: 'caller _new_list table was missing; recreated (purged/legacy account)',
+  }));
+}
+
 let pool;
 
 function getPool() {
@@ -290,6 +325,17 @@ exports.handler = async (event) => {
           ]);
           if (memberId === ownerId) result = insertResult;
         } catch (e) {
+          // Caller's own table missing (purged/legacy account): recreate and
+          // retry once instead of 500ing.
+          if (memberId === ownerId && e.code === 'ER_NO_SUCH_TABLE') {
+            await ensureOwnListTable(ownerId);
+            const [retryResult] = await pool.execute(sql.replace('${tableName}', tableName), [
+              memberId, device, product_name, product_brand || null, images || null,
+              product_barcode || null, effectiveAction, store || null, sharedUUID,
+            ]);
+            result = retryResult;
+            continue;
+          }
           // A sibling member's write failing must never abort the others (this is
           // exactly how items got orphaned). Log it loudly so misses stop being
           // silent; only re-throw if the caller's OWN write failed.
@@ -367,7 +413,20 @@ exports.handler = async (event) => {
               [memberId, itemDevice, itemName, itemBrand, itemImages, itemBarcode, itemAction, itemStore, sharedUUID]
             );
           } catch (err) {
-            if (err.code !== 'ER_NO_SUCH_TABLE') {
+            if (err.code === 'ER_NO_SUCH_TABLE') {
+              // Caller's OWN table missing: recreate + retry so the item isn't
+              // silently dropped while the response still claims success.
+              if (memberId === ownerId) {
+                await ensureOwnListTable(ownerId);
+                await pool.execute(
+                  `INSERT INTO \`${tableName}\`
+                    (_owner, _device, product_name, product_brand, images, product_barcode, action, store, household_item_uuid)
+                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                  [memberId, itemDevice, itemName, itemBrand, itemImages, itemBarcode, itemAction, itemStore, sharedUUID]
+                );
+              }
+              // sibling member never created a list: skip, same as before
+            } else {
               // Resilient fan-out: log the miss, keep writing the other members.
               console.error(JSON.stringify({
                 evt: 'list_fanout_miss', op: 'batch_add', ownerId, memberId,

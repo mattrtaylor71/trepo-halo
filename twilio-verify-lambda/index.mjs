@@ -514,6 +514,7 @@ async function ensureUserTables(conn, ownerId) {
         \`created_at\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
         \`updated_at\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
         \`household_item_uuid\` CHAR(36) DEFAULT NULL,
+        \`sort_order\` INT DEFAULT NULL,
         PRIMARY KEY (\`_id\`),
         KEY \`idx_owner_device\` (\`_owner\`, \`_device\`),
         KEY \`idx_created\` (\`_createdDate\`)
