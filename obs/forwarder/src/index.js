@@ -56,6 +56,19 @@ function markerFromLogEvent(message) {
       error: truncate(message.trim(), 500),
     };
   }
+  // Free-text fallback for the second worker failure path: "[IdentifyAsync] Job <id> failed:" / "[BulkCommit] Job <id> failed:".
+  if (typeof message === 'string') {
+    const m = message.match(/\[(IdentifyAsync|BulkCommit)\] Job (\S+) failed:/);
+    if (m) {
+      return {
+        evt: 'backend_error',
+        service: 'bulk',
+        op: m[1] === 'IdentifyAsync' ? 'identify_job_failed' : 'commit_job_failed',
+        job_id: m[2],
+        error: truncate(message.trim(), 500),
+      };
+    }
+  }
   return null;
 }
 

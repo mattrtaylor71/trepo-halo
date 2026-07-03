@@ -34,7 +34,7 @@ export const tests = [
     },
   },
   {
-    label: 'junk image upload -> job FAILED + "Background processing error" + BulkIdentifyAnalysisFailed',
+    label: 'junk image upload -> job FAILED + failure log line + BulkIdentifyAnalysisFailed',
     mode: 'e2e',
     slow: true, // NOT run in the safe subset — orchestrator runs this in the final pass.
     async run() {
@@ -59,7 +59,9 @@ export const tests = [
       if (!jobId) return { status: 'FAIL', mode: 'e2e', detail: `no job_id in response: ${post.body.slice(0, 160)}` };
 
       const job = await jobStatus({ baseUrl: API.identifier, jobId, want: ['FAILED', 'ERROR'], timeoutMs: 300_000 });
-      const log = await logLine({ logGroup: LOG_GROUPS.bulkIdentify, pattern: '"Background processing error"', sinceMs, timeoutMs: 120_000 });
+      // Two failure paths exist in identifyAsync: "Background processing error for job X"
+      // (dispatch .catch) and "[IdentifyAsync] Job X failed:" (processJob catch). Either counts.
+      const log = await logLine({ logGroup: LOG_GROUPS.bulkIdentify, pattern: '?"Background processing error" ?"failed:"', sinceMs, timeoutMs: 120_000 });
       const metric = await cloudwatchMetric({ namespace: CAPTURE_NS, metricName: 'BulkIdentifyAnalysisFailed', sinceMs, timeoutMs: 120_000 });
 
       const parts = [`job=${job.ok ? 'FAILED' : job.detail}`, `log=${log.ok ? 'seen' : 'MISSING'}`, `metric=${metric.ok ? 'seen' : 'MISSING'}`];

@@ -52,7 +52,7 @@ export const LOG_GROUPS = {
   list:          '/aws/lambda/trepo-list-handler',
   voiceWorker:   '/aws/lambda/trepo-quick-ack-async-worker-dev',
   savedRecipes:  '/aws/lambda/trepo-grocery-backend-dev-SavedRecipesApiFunction-a7aWuWlJvEF2',
-  notifications: '/aws/lambda/trepo-notifications-ListUsersFunction-xzjtxG14ctKa',
+  notifications: '/aws/lambda/trepo-notifications-SendFunction-mbwOf9XTzTmu',
 };
 
 // API Gateway ids (for AWS/ApiGateway 5xx metrics).
