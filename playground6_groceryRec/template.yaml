@@ -771,6 +771,7 @@ Resources:
           RECIPES_GENERATOR_ARN: !Ref RecipesGeneratorFunction
           KITCHEN_ANALYSIS_GENERATOR_ARN: !Ref KitchenAnalysisGeneratorFunction
           OPENAI_API_KEY: !Ref OpenAIApiKey
+          ENRICH_KITCHEN_ITEM_URL: https://6m9t6wosh9.execute-api.us-east-1.amazonaws.com/enrich-kitchen-item
       Policies:
         - !If
           - UseVpcCond
@@ -837,6 +838,18 @@ Resources:
             ApiId: !Ref Api
             Path: /kitchen/{owner}/items/{item_id}/correct
             Method: POST
+        TextAddKitchenRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /kitchen/{owner}/text-add
+            Method: POST
+        OptionsTextAddKitchenRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /kitchen/{owner}/text-add
+            Method: OPTIONS
       VpcConfig: !If
         - UseVpcCond
         - { SecurityGroupIds: [ !Ref LambdaSecurityGroupId ], SubnetIds: !Ref LambdaSubnetIds }

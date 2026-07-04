@@ -2,9 +2,11 @@
 # Force republish after dependency-layer restore.
 import os
 import json
+import time
 import boto3
 import uuid
 import base64
+import urllib.request
 try:
     import pymysql
 except ImportError as exc:
@@ -1116,6 +1118,227 @@ def _create_kitchen_item(owner, body):
         return _error_response(500, f'Failed to create item: {str(e)}')
 
 
+# ──────────────────────────── Text-add (free-text → structured items) ────────────────────────────
+# POST /kitchen/{owner}/text-add — parse ANY free text the user types (quantities,
+# brands, units, variants, sentences) into structured kitchen items via an LLM,
+# create each one, fire enrichment, and log every input as a searchable corpus.
+
+TEXT_ADD_PARSE_MODEL = os.getenv('KITCHEN_TEXT_PARSE_MODEL', 'gpt-4o-mini')
+TEXT_ADD_MAX_ITEMS = 25
+# Public enrich endpoint (grocery-identifier stack). KitchenApiFunction's IAM role
+# can only invoke the 3 generator lambdas, so we dispatch enrichment over HTTP.
+ENRICH_KITCHEN_ITEM_URL = os.getenv(
+    'ENRICH_KITCHEN_ITEM_URL',
+    'https://6m9t6wosh9.execute-api.us-east-1.amazonaws.com/enrich-kitchen-item',
+)
+
+_TEXT_ADD_SYSTEM_PROMPT = """You parse a user's free-text grocery/kitchen note into structured items for a kitchen inventory app. The user may type a single item, a comma / newline / "and"-separated list, or full sentences. Extract each DISTINCT product the user wants to add to their kitchen.
+
+Return JSON: {"items":[{fragment, product_name, brand, variant, quantity_value, quantity_unit}], "skipped":[{fragment, reason}]}.
+
+FIELD RULES
+- product_name: the canonical product name in Title Case, with NO brand, NO quantity, and NO unit embedded. Examples: "Eggs", "Whole Milk", "Chicken Breast", "Greek Yogurt", "Ground Beef".
+- brand: the brand/manufacturer ONLY when clearly present. These store brands ARE brands: 365, Kirkland, Trader Joe's, Good & Gather, Great Value, Siete. Otherwise null.
+- variant: descriptive qualifiers such as "organic", "2%", "low fat", "grain free", "unsalted", "extra virgin", "whole", "skim", "reduced fat". If several apply, join them with a space in natural reading order (e.g. "organic low fat"). null if none. Do NOT repeat in variant any word that is already part of product_name: color/descriptor words that belong to the item's common name (e.g. "Red Onion", "Green Bell Pepper", "White Bread") stay in product_name and are NOT also a variant - variant stays null unless there is an ADDITIONAL qualifier like "organic".
+- quantity_value: the numeric amount the user wants, or null if unspecified.
+- quantity_unit: exactly one of "count", "oz", "lb", "g", "kg", "gallon", "liter", or null. If quantity_value is null, quantity_unit MUST also be null. Normalize synonyms: lbs/pound/pounds -> lb; ounce/ounces -> oz; gram/grams -> g; kilogram/kilograms -> kg; gallons -> gallon; liter/litre/liters/litres -> liter. A bare number with no stated unit (e.g. "2 eggs") uses unit "count".
+
+CRITICAL - numbers that are PART OF A PRODUCT OR BRAND NAME are NOT quantities:
+- "2% milk" -> product_name "Milk", variant "2%", quantity_value null, quantity_unit null.
+- "5 hour energy" -> product_name "5 Hour Energy", quantity null.
+- "7up" -> "7UP", quantity null. "1893 cola" -> "1893 Cola", quantity null.
+- "365 whole milk" / "365 organic whole milk" -> brand "365", product_name "Whole Milk" (365 is a store brand), NOT quantity 365.
+Only treat a leading number as a quantity when it is clearly a count/measure of the item, not part of its name or brand.
+
+QUANTITY WORDS
+- A bare product with NO number and NO quantity word (e.g. "eggs", "milk", "bananas", including each side of "eggs and milk") has quantity_value null and quantity_unit null. Do NOT default a bare noun to 1.
+- "a" / "an" / "one" before an item -> quantity_value 1, unit "count" (e.g. "a red onion" -> "Red Onion", 1 count).
+- "a dozen" / "dozen" -> 12 count; "2 dozen" -> 24 count; "half a dozen" -> 6 count. NEVER output the unit "dozen" - always convert to count.
+- "a couple" -> 2 count; "a few" -> 3 count; "several" -> 3 count.
+- "some", "a bunch of", "a bag of", "a pack of", "a box of" with NO number -> quantity_value null (unit null).
+
+SPLITTING INTO SEPARATE ITEMS
+- Split on commas, on newlines, and on the word "and" when they separate DISTINCT products: "eggs and milk" -> 2 items; "2 apples and 3 bananas" -> Apples (2 count) + Bananas (3 count).
+- Do NOT split a product name that CONTAINS "and" or "&": "half and half", "mac and cheese", "salt and pepper", "sweet and sour sauce", "chips and salsa", "cookies and cream" are each a SINGLE product.
+- In full sentences, ignore filler/narration and extract only the products: "I bought 2 lbs of ground beef and a dozen eggs" -> Ground Beef (2 lb) + Eggs (12 count).
+
+SKIPPING
+- If a fragment is not plausibly a grocery/kitchen product (gibberish like "asdf", punctuation-only, or empty), put it in "skipped" with a short reason. Never invent a product for gibberish.
+
+For every returned item, set "fragment" to the portion of the user's text that produced it. Title-case product_name. Be consistent and precise. Return ONLY the JSON object."""
+
+_TEXT_ADD_SCHEMA = {
+    "name": "kitchen_text_parse",
+    "strict": True,
+    "schema": {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["items", "skipped"],
+        "properties": {
+            "items": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["fragment", "product_name", "brand", "variant", "quantity_value", "quantity_unit"],
+                    "properties": {
+                        "fragment": {"type": "string"},
+                        "product_name": {"type": "string"},
+                        "brand": {"type": ["string", "null"]},
+                        "variant": {"type": ["string", "null"]},
+                        "quantity_value": {"type": ["number", "null"]},
+                        "quantity_unit": {"type": ["string", "null"], "enum": ["count", "oz", "lb", "g", "kg", "gallon", "liter", None]},
+                    },
+                },
+            },
+            "skipped": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["fragment", "reason"],
+                    "properties": {"fragment": {"type": "string"}, "reason": {"type": "string"}},
+                },
+            },
+        },
+    },
+}
+
+
+def _parse_text_items_with_llm(text):
+    """Parse free text into (items, skipped) via OpenAI structured outputs. Raises on failure."""
+    client = _openai_client()
+    response = client.chat.completions.create(
+        model=TEXT_ADD_PARSE_MODEL,
+        temperature=0,
+        messages=[
+            {"role": "system", "content": _TEXT_ADD_SYSTEM_PROMPT},
+            {"role": "user", "content": text},
+        ],
+        response_format={"type": "json_schema", "json_schema": _TEXT_ADD_SCHEMA},
+    )
+    data = json.loads(response.choices[0].message.content)
+    items = data.get('items') or []
+    skipped = data.get('skipped') or []
+    return items, skipped
+
+
+def _fire_kitchen_enrichment(owner, item_id, product_name, brand, variant):
+    """Fire-and-forget enrichment dispatch (ingredients/nutrition/storage_location) over HTTP.
+    Never raises — enrichment is best-effort and must not fail the text-add request."""
+    try:
+        seed = {"product_name": product_name, "brand": brand, "variant": variant}
+        payload = {
+            "owner": owner,
+            "item_id": item_id,
+            "preliminary_item": {"product_name": product_name, "needs_review": False},
+            "initial_payload": seed,
+        }
+        req = urllib.request.Request(
+            ENRICH_KITCHEN_ITEM_URL,
+            data=json.dumps(payload).encode(),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=8) as r:
+            r.read()
+        return True
+    except Exception as e:
+        print(f"[WARN] text-add enrichment dispatch failed for item {item_id}: {e}")
+        return False
+
+
+def _handle_text_add(owner, body):
+    """POST /kitchen/{owner}/text-add — parse free text into items, create each, fire enrichment, log."""
+    t0 = time.time()
+    text = body.get('text')
+    if not isinstance(text, str) or not text.strip():
+        return _error_response(400, 'Missing required field: text')
+    text = text.strip()
+    device_id = str(body.get('device_id') or 'ios-app-text')
+    user_id = str(body.get('user_id') or owner)
+
+    # 1) LLM parse
+    try:
+        items, skipped = _parse_text_items_with_llm(text)
+    except Exception as e:
+        latency_ms = int((time.time() - t0) * 1000)
+        print(json.dumps({
+            'event': 'kitchen_text_add_parse_error', 'owner': owner, 'raw_text': text,
+            'error': str(e), 'latency_ms': latency_ms,
+        }))
+        return _error_response(502, f'Failed to parse text: {str(e)}')
+
+    skipped = [s for s in skipped if isinstance(s, dict)]
+
+    # 2) Enforce the 25-item cap (log + skip the overflow)
+    if len(items) > TEXT_ADD_MAX_ITEMS:
+        for extra in items[TEXT_ADD_MAX_ITEMS:]:
+            skipped.append({'fragment': (extra or {}).get('fragment') or (extra or {}).get('product_name'), 'reason': 'over_limit'})
+        items = items[:TEXT_ADD_MAX_ITEMS]
+
+    # 3) Nothing parseable → 422 (still return skipped for visibility)
+    if not items:
+        latency_ms = int((time.time() - t0) * 1000)
+        print(json.dumps({
+            'event': 'kitchen_text_add', 'owner': owner, 'raw_text': text,
+            'parse': [], 'created_ids': [], 'skipped': skipped, 'latency_ms': latency_ms,
+        }))
+        return _success_response({'created': [], 'count': 0, 'parse': [], 'skipped': skipped,
+                                  'error': 'No parseable items found in text'}, status_code=422)
+
+    # 4) Create each parsed item, then dispatch enrichment
+    parse_out = []
+    created = []
+    created_ids = []
+    for idx, it in enumerate(items):
+        pn = str((it.get('product_name') or '')).strip()
+        brand = it.get('brand')
+        variant = it.get('variant')
+        qv = it.get('quantity_value')
+        qu = it.get('quantity_unit')
+        fragment = it.get('fragment') or pn
+        parse_out.append({'fragment': fragment, 'product_name': pn, 'brand': brand,
+                          'variant': variant, 'quantity_value': qv, 'quantity_unit': qu})
+        if not pn:
+            skipped.append({'fragment': fragment, 'reason': 'empty_product_name'})
+            continue
+        is_last = (idx == len(items) - 1)
+        item_body = {
+            'product_name': pn, 'brand': brand, 'variant': variant,
+            'quantity_value': qv, 'quantity_unit': qu,
+            'action': 'IN', 'device_id': device_id, 'user_id': user_id,
+            'analysis_stage': 'preliminary', 'analysis_status': 'ready',
+            'analysis_source': 'kitchen_text_add', 'defer_recipes': not is_last,
+            'provisional_payload': {'source': 'text_add', 'raw_fragment': fragment, 'enrichment_status': 'pending'},
+        }
+        try:
+            resp = _create_kitchen_item(owner, item_body)
+            if resp.get('statusCode') not in (200, 201):
+                err = json.loads(resp.get('body') or '{}').get('error', 'create failed')
+                skipped.append({'fragment': fragment, 'reason': f'create_failed: {err}'})
+                continue
+            item = json.loads(resp['body']).get('item') or {}
+            created.append(item)
+            item_id = item.get('_id')
+            if item_id:
+                created_ids.append(item_id)
+                _fire_kitchen_enrichment(owner, item_id, pn, brand, variant)
+        except Exception as e:
+            skipped.append({'fragment': fragment, 'reason': f'create_error: {str(e)}'})
+
+    latency_ms = int((time.time() - t0) * 1000)
+    # 5) Structured corpus log: one line per request (CloudWatch-searchable)
+    print(json.dumps({
+        'event': 'kitchen_text_add', 'owner': owner, 'raw_text': text,
+        'parse': parse_out, 'created_ids': created_ids, 'skipped': skipped,
+        'latency_ms': latency_ms,
+    }))
+
+    return _success_response({'created': created, 'count': len(created),
+                              'parse': parse_out, 'skipped': skipped}, status_code=201)
+
+
 def _correct_kitchen_item_with_llm(item_dict, correction_text):
     """Call OpenAI to re-derive item fields based on a user correction."""
     system_prompt = (
@@ -1486,6 +1709,8 @@ def handler(event, context):
                 _invoke_meal_plan_generator(owner)
                 return _success_response({'message': 'Recipe and meal plan generation triggered', 'owner': owner})
             raw_path = event.get('rawPath') or event.get('requestContext', {}).get('http', {}).get('path', '')
+            if raw_path.rstrip('/').endswith('/text-add'):
+                return _handle_text_add(owner, body)
             if raw_path.rstrip('/').endswith('/correct') and item_id:
                 conn = _mysql_conn()
                 return _handle_correct_kitchen_item(owner, item_id, body, conn)
