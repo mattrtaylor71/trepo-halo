@@ -2185,10 +2185,11 @@ def _normalize_url(raw_url):
         raise ServiceError('URL is missing a hostname.', status_code=400)
     cleaned = parsed._replace(fragment='')
     normalized = urlunparse(cleaned)
-    host = (cleaned.netloc or '').lower()
-    path = (cleaned.path or '').lower()
-    if host in _VALID_INSTAGRAM_HOSTS and '/reel/' not in path and '/reels/' not in path:
-        raise ServiceError('Only public Instagram Reel URLs are supported.', status_code=400)
+    # NOTE: Instagram content-type validation is deliberately NOT done here.
+    # Instagram share-sheet links (instagram.com/share/...) are short-links that
+    # only reveal their real path (/reel/, /p/, ...) AFTER redirect resolution.
+    # We let every Instagram URL through normalization and validate the RESOLVED
+    # URL in _detect_platform (resolve-then-validate), so /share/ links work.
     return normalized
 
 
@@ -2208,16 +2209,33 @@ def _resolve_url(url):
     return urlunparse(parsed._replace(fragment=''))
 
 
-def _detect_platform(url):
+# Instagram paths that point at a specific piece of content we can attempt to
+# extract: reels, feed posts (/p/ — videos AND photo carousels), IGTV, and
+# unresolved share short-links (let the pipeline try). Everything else on an
+# Instagram host (profiles, /accounts/, /stories/, /explore/) is not a single
+# saveable post and is rejected with a clear, actionable message.
+_INSTAGRAM_CONTENT_MARKERS = ('/reel/', '/reels/', '/p/', '/tv/', '/share/')
+
+
+def _detect_platform(url, raw_url=None, request_id=None):
     parsed = urlparse(url)
     host = (parsed.netloc or '').lower()
     path = (parsed.path or '').lower()
     if host in _VALID_TIKTOK_HOSTS or host.endswith('.tiktok.com'):
         return 'tiktok'
     if host in _VALID_INSTAGRAM_HOSTS or host.endswith('.instagram.com'):
-        if '/reel/' not in path and '/reels/' not in path:
-            raise ServiceError('Only public Instagram Reel URLs are supported.', status_code=400)
-        return 'instagram'
+        if any(marker in path for marker in _INSTAGRAM_CONTENT_MARKERS):
+            return 'instagram'
+        # Non-content Instagram URL (profile / accounts / stories / explore).
+        # Log the offending URL so we build a corpus of what users actually share.
+        _log_event(
+            request_id,
+            'instagram_url_rejected',
+            raw_url=raw_url,
+            resolved_url=url,
+            reason='non_content_path',
+        )
+        raise ServiceError('Share a link to a specific Instagram post or reel.', status_code=400)
     return 'web_recipe'
 
 
@@ -2868,7 +2886,7 @@ def _run_provider_pipeline(normalized_url, resolved_url, platform, providers, re
 def _extract_content(url, request_id=None):
     normalized_url = _normalize_url(url)
     resolved_url = _resolve_url(normalized_url)
-    platform = _detect_platform(resolved_url)
+    platform = _detect_platform(resolved_url, raw_url=url, request_id=request_id)
     providers = {
         'tiktok': [
             ('yt-dlp', _extract_ytdlp),
