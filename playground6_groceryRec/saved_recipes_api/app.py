@@ -13,7 +13,7 @@ from decimal import Decimal
 from html import unescape
 from io import BytesIO
 from pathlib import Path
-from urllib.parse import urljoin, urlparse, urlunparse
+from urllib.parse import urljoin, urlparse, urlunparse, parse_qs, unquote
 
 import boto3
 import requests
@@ -2319,6 +2319,49 @@ def _resolve_url(url, request_id=None):
 _INSTAGRAM_CONTENT_MARKERS = ('/reel/', '/reels/', '/p/', '/tv/', '/share/')
 
 
+def _instagram_content_url_from(candidate):
+    """If `candidate` (a full URL or a bare path) points at Instagram content,
+    return a clean canonical https://www.instagram.com/<path> URL; else None."""
+    text = _safe_text(candidate)
+    if not text:
+        return None
+    if '://' not in text:
+        text = 'https://www.instagram.com' + (text if text.startswith('/') else '/' + text)
+    parsed = urlparse(text)
+    path = (parsed.path or '').lower()
+    if any(marker in path for marker in _INSTAGRAM_CONTENT_MARKERS):
+        return urlunparse(('https', 'www.instagram.com', parsed.path, '', '', ''))
+    return None
+
+
+def _recover_instagram_content_url(resolved_url, raw_url=None, normalized_url=None, request_id=None):
+    """Instagram now login-wall-redirects EVERY resolve fetch from datacenter IPs
+    (resolved_url becomes /accounts/login/?next=%2Freel%2F...). Recover the real
+    content URL from the login redirect's `next` param (or the raw/normalized
+    submission) so the gate passes and extraction (Apify) gets the canonical URL."""
+    parsed = urlparse(resolved_url)
+    host = (parsed.netloc or '').lower()
+    if not (host in _VALID_INSTAGRAM_HOSTS or host.endswith('.instagram.com')):
+        return resolved_url
+    if any(marker in (parsed.path or '').lower() for marker in _INSTAGRAM_CONTENT_MARKERS):
+        return resolved_url  # already a content URL — nothing to recover
+
+    next_param = None
+    qs = parse_qs(parsed.query or '')
+    if qs.get('next'):
+        next_param = unquote(qs['next'][0])
+    # Prefer the login redirect's next= (the canonical target IG was about to show),
+    # then the user's own submission.
+    for candidate in (next_param, normalized_url, raw_url):
+        canonical = _instagram_content_url_from(candidate)
+        if canonical:
+            _log_event(request_id, 'instagram_login_wall_fallback',
+                       raw_url=raw_url, resolved_url=resolved_url,
+                       next_param=next_param, canonical_url=canonical)
+            return canonical
+    return resolved_url  # genuine profile/login/etc. — _detect_platform will 400 it
+
+
 def _detect_platform(url, raw_url=None, request_id=None):
     parsed = urlparse(url)
     host = (parsed.netloc or '').lower()
@@ -2982,6 +3025,10 @@ def _run_provider_pipeline(normalized_url, resolved_url, platform, providers, re
 def _extract_content(url, request_id=None):
     normalized_url = _normalize_url(url)
     resolved_url = _resolve_url(normalized_url, request_id=request_id)
+    # Recover from Instagram's login-wall redirect before gating/extraction so a
+    # real reel/post isn't mis-rejected and Apify gets the canonical content URL.
+    resolved_url = _recover_instagram_content_url(
+        resolved_url, raw_url=url, normalized_url=normalized_url, request_id=request_id)
     platform = _detect_platform(resolved_url, raw_url=url, request_id=request_id)
     providers = {
         'tiktok': [
