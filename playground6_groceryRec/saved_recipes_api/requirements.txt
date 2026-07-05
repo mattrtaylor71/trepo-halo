@@ -1,0 +1,8 @@
+pymysql==1.1.0
+openai>=1.0.0
+requests
+beautifulsoup4
+yt-dlp
+Pillow>=11.1.0,<12
+pillow-heif==1.0.0
+curl_cffi

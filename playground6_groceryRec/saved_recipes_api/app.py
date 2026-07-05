@@ -2193,19 +2193,121 @@ def _normalize_url(raw_url):
     return normalized
 
 
-def _resolve_url(url):
+# Full modern-browser header set. Many recipe sites bot-block a bare requests
+# User-Agent but pass on a complete Chrome header profile. (No brotli in
+# Accept-Encoding — requests only decodes gzip/deflate without the brotli lib;
+# tier-2 curl_cffi handles br natively.)
+_BROWSER_HEADERS = {
+    'User-Agent': _USER_AGENT,
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+    'Accept-Language': 'en-US,en;q=0.9',
+    'Accept-Encoding': 'gzip, deflate',
+    'Referer': 'https://www.google.com/',
+    'Upgrade-Insecure-Requests': '1',
+    'Sec-Fetch-Dest': 'document',
+    'Sec-Fetch-Mode': 'navigate',
+    'Sec-Fetch-Site': 'cross-site',
+    'Sec-Fetch-User': '?1',
+    'Sec-Ch-Ua': '"Chromium";v="136", "Google Chrome";v="136", "Not.A/Brand";v="99"',
+    'Sec-Ch-Ua-Mobile': '?0',
+    'Sec-Ch-Ua-Platform': '"macOS"',
+}
+
+# Statuses that indicate a bot-wall / WAF block worth escalating to tier 2
+# (TLS-fingerprint impersonation). A plain 404/410 is NOT a block — fail fast.
+_FETCH_BLOCK_STATUSES = {401, 402, 403, 406, 429, 500, 502, 503, 520, 521, 522, 523, 524, 526}
+_CHALLENGE_MARKERS = (
+    'just a moment', 'attention required', 'cf-browser-verification', 'cf-challenge',
+    '/cdn-cgi/challenge-platform', 'access denied', 'enable javascript and cookies to continue',
+)
+
+
+class _FetchResult:
+    __slots__ = ('final_url', 'status_code', 'text', 'tier')
+
+    def __init__(self, final_url, status_code, text, tier):
+        self.final_url = final_url
+        self.status_code = status_code
+        self.text = text
+        self.tier = tier
+
+
+def _looks_like_challenge(text):
+    # Interstitial/challenge pages are small and carry tell-tale markers; real
+    # recipe pages are large. Only inspect a short prefix of smallish bodies.
+    if not text or len(text) > 200000:
+        return False
+    low = text[:5000].lower()
+    return any(marker in low for marker in _CHALLENGE_MARKERS)
+
+
+def _curl_cffi_fetch(url):
+    # Lazy import so the module still loads (degrading to tier 1) if the wheel is
+    # ever missing. curl_cffi impersonates a real Chrome TLS/JA3 fingerprint,
+    # which defeats most datacenter-IP bot walls that header spoofing cannot.
+    from curl_cffi import requests as _cffi_requests
+    return _cffi_requests.get(
+        url,
+        impersonate='chrome',
+        timeout=_REQUEST_TIMEOUT_SECONDS,
+        allow_redirects=True,
+    )
+
+
+def _fetch_page(url, request_id=None):
+    """Layered page fetch: cheap browser-header requests first, then Chrome
+    TLS-impersonation (curl_cffi) only if the first tier looks bot-blocked.
+    Returns a _FetchResult or raises a friendly ServiceError."""
+    # Social hosts (Instagram/TikTok) get the ORIGINAL minimal headers: the
+    # aggressive Referer/Sec-Fetch-Site=cross-site profile makes Instagram
+    # redirect public reels to a login wall from datacenter IPs. Web-recipe
+    # hosts get the full modern-browser header set (+ curl_cffi escalation).
+    host = (urlparse(url).netloc or '').lower()
+    is_social = (
+        host in _VALID_INSTAGRAM_HOSTS or host.endswith('.instagram.com')
+        or host in _VALID_TIKTOK_HOSTS or host.endswith('.tiktok.com')
+    )
+    tier1_headers = (
+        {'User-Agent': _USER_AGENT, 'Accept-Language': 'en-US,en;q=0.9'}
+        if is_social else _BROWSER_HEADERS
+    )
+    attempts = []
+    blocked = False
     try:
-        response = requests.get(
-            url,
-            timeout=_REQUEST_TIMEOUT_SECONDS,
-            allow_redirects=True,
-            headers={'User-Agent': _USER_AGENT, 'Accept-Language': 'en-US,en;q=0.9'}
-        )
-        response.raise_for_status()
-        resolved = response.url or url
+        r = requests.get(url, timeout=_REQUEST_TIMEOUT_SECONDS, allow_redirects=True, headers=tier1_headers)
+        attempts.append({'tier': 'requests', 'status': r.status_code})
+        if r.status_code < 400 and not _looks_like_challenge(r.text):
+            return _FetchResult(r.url or url, r.status_code, r.text, 'requests')
+        blocked = r.status_code in _FETCH_BLOCK_STATUSES or _looks_like_challenge(r.text)
+        if not blocked:
+            # Non-block 4xx (e.g. 404/410) — genuinely unreachable, don't escalate.
+            raise ServiceError(f'Could not reach URL (HTTP {r.status_code}).', status_code=502)
     except requests.RequestException as exc:
-        raise ServiceError(f'Could not reach URL: {exc}', status_code=502)
-    parsed = urlparse(resolved)
+        attempts.append({'tier': 'requests', 'status': f'error: {exc}'})
+        blocked = True
+
+    # Tier 2: TLS-fingerprint impersonation, only when tier 1 looked blocked.
+    if blocked:
+        try:
+            cr = _curl_cffi_fetch(url)
+            attempts.append({'tier': 'curl_cffi', 'status': cr.status_code})
+            if cr.status_code < 400 and not _looks_like_challenge(cr.text):
+                # Corpus: record which sites required TLS-impersonation to get past
+                # a bot wall (tier-1 requests was blocked, tier-2 curl_cffi won).
+                _log_event(request_id, 'web_fetch_recovered', url=url,
+                           tier1_status=attempts[0]['status'], status=cr.status_code)
+                return _FetchResult(str(cr.url) or url, cr.status_code, cr.text, 'curl_cffi')
+        except Exception as exc:
+            attempts.append({'tier': 'curl_cffi', 'status': f'error: {exc}'})
+
+    _log_event(request_id, 'web_fetch_blocked', url=url,
+               tiers_tried=[a['tier'] for a in attempts], statuses=attempts)
+    raise ServiceError('This site is blocking us — try copying the recipe text instead.', status_code=502)
+
+
+def _resolve_url(url, request_id=None):
+    result = _fetch_page(url, request_id=request_id)
+    parsed = urlparse(result.final_url or url)
     return urlunparse(parsed._replace(fragment=''))
 
 
@@ -2260,17 +2362,11 @@ def _normalize_image_values(value, base_url=None):
     return _unique_texts(items)
 
 
-def _fetch_html_soup(url):
-    try:
-        response = requests.get(
-            url,
-            timeout=_REQUEST_TIMEOUT_SECONDS,
-            headers={'User-Agent': _USER_AGENT, 'Accept-Language': 'en-US,en;q=0.9'}
-        )
-        response.raise_for_status()
-    except requests.RequestException as exc:
-        raise ServiceError(f'HTML fetch failed: {exc}', status_code=502)
-    return BeautifulSoup(response.text, 'html.parser')
+def _fetch_html_soup(url, request_id=None):
+    # Uses the same layered fetch as _resolve_url so the extraction re-fetch also
+    # gets past bot walls (a site that blocks resolve would otherwise block here).
+    result = _fetch_page(url, request_id=request_id)
+    return BeautifulSoup(result.text, 'html.parser')
 
 
 def _meta_content(soup, *names):
@@ -2885,7 +2981,7 @@ def _run_provider_pipeline(normalized_url, resolved_url, platform, providers, re
 
 def _extract_content(url, request_id=None):
     normalized_url = _normalize_url(url)
-    resolved_url = _resolve_url(normalized_url)
+    resolved_url = _resolve_url(normalized_url, request_id=request_id)
     platform = _detect_platform(resolved_url, raw_url=url, request_id=request_id)
     providers = {
         'tiktok': [
