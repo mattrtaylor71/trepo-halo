@@ -1,0 +1,4 @@
+{"Version":"2012-10-17","Statement":[
+  {"Sid":"OwnLogs","Effect":"Allow","Action":["logs:CreateLogGroup","logs:CreateLogStream","logs:PutLogEvents"],"Resource":"arn:aws:logs:us-east-1:566667681926:log-group:/aws/lambda/trepo-voice-dualwrite-canary:*"},
+  {"Sid":"PutMetric","Effect":"Allow","Action":"cloudwatch:PutMetricData","Resource":"*","Condition":{"StringEquals":{"cloudwatch:namespace":"Trepo/Capture"}}}
+]}

@@ -1,3 +1,9 @@
+// DO NOT deploy this stack from a stale bundle. template.yaml uses CodeUri:
+// .sam-src, so `sam build/deploy` ships .sam-src/…/lib/*.mjs — NOT this repo lib/.
+// Keep .sam-src/ (and any .aws-sam/build/) copies of the lib/ files IN SYNC with
+// these, or a deploy will silently revert the WRITE_SHARED_ONLY dual-write fixes
+// (voice dishes/discards/shopping go invisible again — regressions 07-02 / 07-06).
+// The trepo-voice-dualwrite-canary + alarm VoiceDualWriteMiss will catch a revert.
 import crypto from "node:crypto";
 import { InvokeCommand, LambdaClient } from "@aws-sdk/client-lambda";
 import {
@@ -2641,6 +2647,25 @@ async function insertDiscardRowAcrossHousehold(connection, context, kitchenRow, 
         tableOwnerId
       ]
     );
+
+    // ALSO write every household member's per-user {member}_discards table. The
+    // Discard log (discards_api) reads ONLY {user}_discards and iterates household
+    // members (app.py:436/:498) — without this, voice discards are invisible in the
+    // app. Discards are HOUSEHOLD-VISIBLE, so fan out to all members (like the
+    // shopping fix); per-user tables have no owner_id column.
+    for (const memberId of getTableHouseholdMemberIds(context)) {
+      const tableName = discardTableName(memberId);
+      await ensureDiscardTable(connection, tableName);
+      const columns = await getTableColumns(connection, tableName);
+      const fieldNames = ["_id", "_owner", "_device", "_createdDate", "product_name", "brand", "category", "images", "action", "product_expiration", "job_id", "user_id"];
+      const values = [discardId, memberId, "voice-assistant", kitchenRow.product_name || null, kitchenRow.brand || null, kitchenRow.category || null, kitchenRow.images || null, "IN", kitchenRow.product_expiration || null, kitchenRow.job_id || `voice-discard-${discardId}`, context.userId];
+      if (columns.has("_updatedDate")) fieldNames.push("_updatedDate");
+      if (columns.has("source_kitchen_id")) { fieldNames.push("source_kitchen_id"); values.push(kitchenRow._id); }
+      if (columns.has("discard_reason")) { fieldNames.push("discard_reason"); values.push(reason || null); }
+      const sqlFields = fieldNames.map((field) => `\`${field}\``).join(", ");
+      const sqlValues = fieldNames.map((field) => (field === "_createdDate" || field === "_updatedDate" ? "NOW()" : "?")).join(", ");
+      await connection.execute(`INSERT INTO \`${tableName}\` (${sqlFields}) VALUES (${sqlValues})`, values);
+    }
     return discardId;
   }
 
@@ -3866,6 +3891,20 @@ async function updateDiscardRowAcrossHousehold(connection, context, rowId, field
       `UPDATE \`${SHARED_DISCARDS_TABLE}\` SET ${assignments.join(", ")} WHERE _id = ?`,
       values
     );
+
+    // ALSO apply to every household member's {member}_discards table — the app's
+    // Discard log reads ONLY those. Household-visible → fan out to all members;
+    // tolerate missing table/row (pre-fix rows live only in shared). Covers
+    // deleteRecentDiscard, which routes through here with action=OUT.
+    for (const memberId of getTableHouseholdMemberIds(context)) {
+      const tableName = discardTableName(memberId);
+      if (!(await tableExists(connection, tableName))) continue;
+      await ensureDiscardColumns(connection, tableName);
+      await connection.execute(
+        `UPDATE \`${tableName}\` SET ${assignments.join(", ")} WHERE _id = ?`,
+        values
+      );
+    }
     return;
   }
 
@@ -3942,6 +3981,16 @@ export async function clearRecentDiscards(context, options = {}) {
           `UPDATE \`${SHARED_DISCARDS_TABLE}\` SET action = 'OUT', _updatedDate = NOW() WHERE \`owner_id\` = ? AND action = 'IN'`,
           [ownerId]
         );
+        // ALSO clear every household member's {member}_discards — the app's Discard
+        // log reads ONLY those. Household-visible → fan out; tolerate missing table.
+        for (const memberId of getTableHouseholdMemberIds(context)) {
+          const tableName = discardTableName(memberId);
+          if (!(await tableExists(connection, tableName))) continue;
+          await ensureDiscardColumns(connection, tableName);
+          await connection.execute(
+            `UPDATE \`${tableName}\` SET action = 'OUT', _updatedDate = NOW() WHERE action = 'IN'`
+          );
+        }
       }
       console.log("[DEBUG] discard history cleared (shared):", JSON.stringify({
         ownerId: context?.ownerId || null,

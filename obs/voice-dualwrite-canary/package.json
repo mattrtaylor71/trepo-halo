@@ -1,0 +1,9 @@
+{
+  "name": "trepo-voice-dualwrite-canary",
+  "version": "1.0.0",
+  "description": "Every 6h: detect voice writes whose per-user (app-visible) copy is missing across shopping/dishes/discards. Emits Trepo/Capture:VoiceDualWriteMiss.",
+  "type": "module",
+  "main": "index.mjs",
+  "engines": { "node": ">=22" },
+  "dependencies": { "mysql2": "^3.11.0" }
+}
