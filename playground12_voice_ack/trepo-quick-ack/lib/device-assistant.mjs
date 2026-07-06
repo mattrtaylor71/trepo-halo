@@ -717,22 +717,67 @@ function detectWriteIntent(transcript) {
 }
 
 // ── Hallucination guard ────────────────────────────────────────────────
-// Detects when the model claims to have performed a write action but
-// didn't call any tools. Returns true if the response is suspicious.
-const HALLUCINATED_ACTION_PATTERNS = [
-  /\badded\b.{0,30}\b(to|on)\b.{0,20}\b(list|shopping|cart)/i,
-  /\bremoved\b.{0,20}\b(from)\b.{0,20}\b(list|shopping|kitchen)/i,
-  /\bdiscarded\b/i,
-  /\bchecked.?in\b/i,
-  /\blogged\b.{0,20}\b(meal|dish|food|breakfast|lunch|dinner|snack)/i,
-  /\bmarked\b.{0,20}\b(as |)(opened|bought|consumed)/i,
-  /\bcleared\b.{0,20}\b(list|shopping|kitchen|discard)/i,
-  /\bupdated\b.{0,20}\b(expir|location|quantity)/i,
-  /\bsaved\b.{0,20}\b(recipe)/i,
+// FALSE-CONFIRMATION GUARD. Detects when the model CLAIMS it performed a write
+// action but did not actually call the tool this turn (a hallucinated "logged/
+// added" confirmation). Table-driven claim -> expected-tool map so we can (a)
+// tell the model exactly which tool to call on the corrective retry and (b) show
+// an honest, domain-appropriate failure if it still won't. Patterns match BOTH
+// word orders — "logged your lunch" AND "your lunch has been logged" (the latter
+// slipped the old regex, which is how Matt's 07-06 lunch turn produced a green
+// confirmation with no DB write).
+const ACTION_CLAIM_RULES = [
+  {
+    domain: "dishes",
+    expectedTool: "log_dish_ingredients",
+    okTools: new Set(["log_dish_ingredients", "log_dish_from_voice", "update_recent_dish", "append_to_recent_dish", "delete_dish_log", "mark_dish_consumed"]),
+    failText: "I wasn't able to log that just now — please try again.",
+    patterns: [
+      /\b(meal|dish|food|breakfast|lunch|dinner|brunch|snack)\b[^.?!\n]{0,40}\blogged\b/i,
+      /\blogged\b[^.?!\n]{0,40}\b(meal|dish|food|breakfast|lunch|dinner|brunch|snack|it|that|your)\b/i,
+      /\bi(?:'ve| have)\s+logged\b/i,
+      /\b(has|have|had|is|was|were|been)\s+logged\b/i,
+      /\badded\b[^.?!\n]{0,30}\bto\s+your\s+(?:dish|meal)\s+log\b/i,
+    ],
+  },
+  {
+    domain: "shopping_add",
+    expectedTool: "add_to_shopping_list",
+    okTools: new Set(["add_to_shopping_list", "add_many_to_shopping_list", "add_dish_ingredients_to_shopping_list", "add_recipe_ingredients_to_shopping_list", "add_saved_recipe_ingredients_to_shopping_list"]),
+    failText: "I wasn't able to add that to your shopping list just now — please try again.",
+    patterns: [
+      /\badded\b[^.?!\n]{0,40}\bto\s+your\s+(?:shopping\s+)?(?:list|cart)\b/i,
+      /\bput\b[^.?!\n]{0,30}\bon\s+your\s+(?:shopping\s+)?list\b/i,
+    ],
+  },
+  {
+    domain: "kitchen_add",
+    expectedTool: "check_in_item",
+    okTools: new Set(["check_in_item", "check_in_many_items"]),
+    failText: "I wasn't able to add that to your kitchen just now — please try again.",
+    patterns: [
+      /\badded\b[^.?!\n]{0,40}\bto\s+your\s+kitchen\b/i,
+      /\bchecked[\s-]*in\b[^.?!\n]{0,30}\b(kitchen|item|it|that)\b/i,
+    ],
+  },
 ];
 
+// Every write tool across the claim rules — used to detect whether ANY write
+// succeeded this turn (recovery signal).
+const WRITE_TOOL_NAMES = new Set(ACTION_CLAIM_RULES.flatMap((r) => [...r.okTools]));
+
+// Returns the matching claim rule (domain + expected tool) or null.
+function detectActionClaim(text) {
+  const value = String(text || "");
+  for (const rule of ACTION_CLAIM_RULES) {
+    if (rule.patterns.some((pattern) => pattern.test(value))) {
+      return rule;
+    }
+  }
+  return null;
+}
+
 function looksLikeHallucinatedAction(text) {
-  return HALLUCINATED_ACTION_PATTERNS.some(p => p.test(text));
+  return detectActionClaim(text) !== null;
 }
 
 async function* createChatCompletionStream(messages, env, { deadline = null, toolChoice = "auto" } = {}) {
@@ -811,6 +856,8 @@ export async function* runDeviceAssistantStreaming({ transcript, userContext, en
   const toolEvents = [];
   const quickItems = [];
   let fullText = "";
+  let falseConfirmCorrections = 0;
+  let falseConfirmRecovered = false;
 
   for (let turn = 0; turn < 6; turn += 1) {
     const stream = createChatCompletionStream(messages, env, { deadline });
@@ -854,18 +901,29 @@ export async function* runDeviceAssistantStreaming({ transcript, userContext, en
 
     // No tool calls — assistant is done
     if (assembledToolCalls.length === 0) {
-      // Hallucination guard: if model claims a write action but called no tools,
-      // inject a correction and retry once (matches sync handler behavior)
-      if (turn === 0 && toolTrace.length === 0 && looksLikeHallucinatedAction(fullText)) {
-        console.warn("[GUARD][STREAM] hallucinated action detected — retrying with correction:", fullText);
-        messages.push({ role: "assistant", content: fullText });
-        messages.push({
-          role: "user",
-          content: "You said you performed an action but you did not call any tool. If you have a tool that can do this, actually call it. If you do not have a tool for this action, be honest and tell the user you cannot do it, and suggest something you can do instead."
-        });
-        fullText = "";
-        yield { type: "text_delta", delta: "\n" };
-        continue;
+      // FALSE-CONFIRMATION GUARD: the model claims a write action but the tool
+      // for that claim did not succeed this turn. Correct once; if it still
+      // won't call the tool, replace the confirmation with an honest failure —
+      // NEVER let an unbacked confirmation reach the user.
+      const claim = detectActionClaim(fullText);
+      const backed = claim && toolTrace.some((t) => t.ok && claim.okTools.has(t.toolName));
+      if (claim && !backed) {
+        if (falseConfirmCorrections < 1) {
+          falseConfirmCorrections += 1;
+          console.log(JSON.stringify({ evt: "assistant_false_confirm", tool: claim.expectedTool, domain: claim.domain, userId: userContext?.userId || null, recovered: null, phase: "retrying" }));
+          messages.push({ role: "assistant", content: fullText });
+          messages.push({
+            role: "user",
+            content: `You stated the action was completed but you did not call ${claim.expectedTool}. Call it now with the details from the user's message, then confirm. If you genuinely cannot do it, say so honestly instead of claiming success.`
+          });
+          fullText = "";
+          yield { type: "text_delta", delta: "\n" };
+          continue;
+        }
+        // Retry already happened and it STILL produced an unbacked claim.
+        console.log(JSON.stringify({ evt: "assistant_false_confirm", tool: claim.expectedTool, domain: claim.domain, userId: userContext?.userId || null, recovered: false }));
+        fullText = claim.failText;
+        yield { type: "text_delta", delta: `\n${claim.failText}` };
       }
 
       const uiResponse = buildVoiceUiResponse({
@@ -928,6 +986,13 @@ export async function* runDeviceAssistantStreaming({ transcript, userContext, en
         tool_call_id: toolCall.id,
         content: JSON.stringify(result)
       });
+    }
+
+    // If a corrective retry (false-confirmation guard) produced a successful
+    // write, record the recovery for the corpus/metric.
+    if (falseConfirmCorrections > 0 && !falseConfirmRecovered && toolTrace.some((t) => t.ok && WRITE_TOOL_NAMES.has(t.toolName))) {
+      falseConfirmRecovered = true;
+      console.log(JSON.stringify({ evt: "assistant_false_confirm", userId: userContext?.userId || null, recovered: true }));
     }
 
     // If the model produced no visible text this turn (went straight to tools),
@@ -1076,6 +1141,8 @@ export async function runDeviceAssistant({ transcript, userContext, env, session
   const toolEvents = [];
   const quickItems = [];
   let lastAssistantText = "";
+  let falseConfirmCorrections = 0;
+  let falseConfirmRecovered = false;
 
   // On the first turn, detect write intent and force tool_choice if appropriate
   const initialToolChoice = detectWriteIntent(transcript);
@@ -1096,16 +1163,24 @@ export async function runDeviceAssistant({ transcript, userContext, env, session
     lastAssistantText = getTextContent(message) || lastAssistantText;
 
     if (!Array.isArray(message.tool_calls) || message.tool_calls.length === 0) {
-      // Hallucination guard: if model claims a write action but called no tools,
-      // inject a correction and retry once
-      if (turn === 0 && toolTrace.length === 0 && looksLikeHallucinatedAction(lastAssistantText)) {
-        console.warn("[GUARD] hallucinated action detected — retrying with correction:", lastAssistantText);
-        messages.push({ role: "assistant", content: lastAssistantText });
-        messages.push({
-          role: "user",
-          content: "You said you performed an action but you did not call any tool. Please actually call the appropriate tool to carry out the request."
-        });
-        continue; // retry this turn
+      // FALSE-CONFIRMATION GUARD (see runDeviceAssistantStreaming for the full
+      // rationale): claim of a write action whose tool did not succeed this turn.
+      // Correct once, then honest failure — never surface an unbacked confirmation.
+      const claim = detectActionClaim(lastAssistantText);
+      const backed = claim && toolTrace.some((t) => t.ok && claim.okTools.has(t.toolName));
+      if (claim && !backed) {
+        if (falseConfirmCorrections < 1) {
+          falseConfirmCorrections += 1;
+          console.log(JSON.stringify({ evt: "assistant_false_confirm", tool: claim.expectedTool, domain: claim.domain, userId: userContext?.userId || null, recovered: null, phase: "retrying" }));
+          messages.push({ role: "assistant", content: lastAssistantText });
+          messages.push({
+            role: "user",
+            content: `You stated the action was completed but you did not call ${claim.expectedTool}. Call it now with the details from the user's message, then confirm. If you genuinely cannot do it, say so honestly instead of claiming success.`
+          });
+          continue; // retry this turn
+        }
+        console.log(JSON.stringify({ evt: "assistant_false_confirm", tool: claim.expectedTool, domain: claim.domain, userId: userContext?.userId || null, recovered: false }));
+        lastAssistantText = claim.failText;
       }
 
       const uiResponse = buildVoiceUiResponse({
@@ -1184,6 +1259,12 @@ export async function runDeviceAssistant({ transcript, userContext, env, session
         tool_call_id: toolCall.id,
         content: JSON.stringify(result)
       });
+    }
+
+    // Corrective retry produced a successful write -> record the recovery.
+    if (falseConfirmCorrections > 0 && !falseConfirmRecovered && toolTrace.some((t) => t.ok && WRITE_TOOL_NAMES.has(t.toolName))) {
+      falseConfirmRecovered = true;
+      console.log(JSON.stringify({ evt: "assistant_false_confirm", userId: userContext?.userId || null, recovered: true }));
     }
   }
 
