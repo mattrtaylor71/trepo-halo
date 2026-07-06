@@ -1,4 +1,5 @@
 import { buildChatTools, buildSystemPrompt } from "./realtime-config.mjs";
+import { buildOuraGroundingMessage } from "./oura-context.mjs";
 import {
   getKitchenItems,
   getMealPlan,
@@ -828,12 +829,14 @@ export async function* runDeviceAssistantStreaming({ transcript, userContext, en
     shoppingGroundingMessage,
     kitchenGroundingMessage,
     foodGroundingMessage,
-    recipeGroundingMessage
+    recipeGroundingMessage,
+    ouraGroundingMessage
   ] = await Promise.all([
     buildShoppingGroundingMessage(userContext, env),
     buildKitchenGroundingMessage(userContext, env),
     buildFoodGroundingMessage(userContext, env, transcript),
-    buildRecipeGroundingMessage(userContext, env, transcript, normalizedSessionMessages)
+    buildRecipeGroundingMessage(userContext, env, transcript, normalizedSessionMessages),
+    buildOuraGroundingMessage(userContext, env)
   ]);
   const readOnlyIntentMessage = buildReadOnlyIntentMessage(transcript, normalizedSessionMessages);
   const messages = [
@@ -842,6 +845,7 @@ export async function* runDeviceAssistantStreaming({ transcript, userContext, en
     ...(kitchenGroundingMessage ? [{ role: "system", content: kitchenGroundingMessage }] : []),
     ...(foodGroundingMessage ? [{ role: "system", content: foodGroundingMessage }] : []),
     ...(recipeGroundingMessage ? [{ role: "system", content: recipeGroundingMessage }] : []),
+    ...(ouraGroundingMessage ? [{ role: "system", content: ouraGroundingMessage }] : []),
     ...(readOnlyIntentMessage ? [{ role: "system", content: readOnlyIntentMessage }] : []),
     ...(normalizedSessionMessages.length > 0
       ? [{
@@ -1113,12 +1117,14 @@ export async function runDeviceAssistant({ transcript, userContext, env, session
     shoppingGroundingMessage,
     kitchenGroundingMessage,
     foodGroundingMessage,
-    recipeGroundingMessage
+    recipeGroundingMessage,
+    ouraGroundingMessage
   ] = await Promise.all([
     buildShoppingGroundingMessage(userContext, env),
     buildKitchenGroundingMessage(userContext, env),
     buildFoodGroundingMessage(userContext, env, transcript),
-    buildRecipeGroundingMessage(userContext, env, transcript, normalizedSessionMessages)
+    buildRecipeGroundingMessage(userContext, env, transcript, normalizedSessionMessages),
+    buildOuraGroundingMessage(userContext, env)
   ]);
   const readOnlyIntentMessage = buildReadOnlyIntentMessage(transcript, normalizedSessionMessages);
   const messages = [
@@ -1127,6 +1133,7 @@ export async function runDeviceAssistant({ transcript, userContext, env, session
     ...(kitchenGroundingMessage ? [{ role: "system", content: kitchenGroundingMessage }] : []),
     ...(foodGroundingMessage ? [{ role: "system", content: foodGroundingMessage }] : []),
     ...(recipeGroundingMessage ? [{ role: "system", content: recipeGroundingMessage }] : []),
+    ...(ouraGroundingMessage ? [{ role: "system", content: ouraGroundingMessage }] : []),
     ...(readOnlyIntentMessage ? [{ role: "system", content: readOnlyIntentMessage }] : []),
     ...(normalizedSessionMessages.length > 0
       ? [{

@@ -68,6 +68,9 @@ def _mysql_conn():
         password=config['password'],
         database=config['database'],
         cursorclass=pymysql.cursors.DictCursor,
+        # autocommit=True: fresh read snapshot per statement (cached global _conn
+        # otherwise freezes a REPEATABLE READ view on GET-only warm containers).
+        autocommit=True,
         connect_timeout=int(os.getenv('DB_CONNECT_TIMEOUT_SECONDS', '5')),
         read_timeout=int(os.getenv('DB_READ_TIMEOUT_SECONDS', '30')),
         write_timeout=int(os.getenv('DB_WRITE_TIMEOUT_SECONDS', '30')),

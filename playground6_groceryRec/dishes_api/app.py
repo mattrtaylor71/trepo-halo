@@ -73,6 +73,11 @@ def _mysql_conn():
         connect_timeout=int(os.getenv('DB_CONNECT_TIMEOUT_SECONDS', '5')),
         read_timeout=int(os.getenv('DB_READ_TIMEOUT_SECONDS', '30')),
         write_timeout=int(os.getenv('DB_WRITE_TIMEOUT_SECONDS', '30')),
+        # autocommit=True so each statement gets a FRESH read snapshot. Without it,
+        # the cached module-global _conn opens a REPEATABLE READ transaction on the
+        # first SELECT that never advances on a GET-only warm container, so freshly
+        # committed rows (e.g. a just-logged dish) stay invisible indefinitely.
+        autocommit=True,
     )
     return _conn
 
