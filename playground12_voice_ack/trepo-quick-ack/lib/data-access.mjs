@@ -4256,6 +4256,21 @@ async function updateDishRowAcrossHousehold(connection, context, rowId, fields) 
       `UPDATE \`${SHARED_DISHES_TABLE}\` SET ${assignments.join(", ")} WHERE _id = ?`,
       values
     );
+
+    // ALSO apply to the acting user's per-user dish table. The Dish Log (dishes_api)
+    // reads ONLY {user}_dishes — without this, edits to a voice dish (including the
+    // async image patch via setDishGeneratedImage -> here, and markDishConsumed) never
+    // reach the app. User-private: acting user only. Tolerate missing table/row
+    // (pre-fix rows exist only in shared).
+    const perUserOwner = context.userId || resolveTableOwnerId(context);
+    const userDishTable = dishTableName(perUserOwner);
+    if (await tableExists(connection, userDishTable)) {
+      await ensureDishVoiceColumns(connection, userDishTable);
+      await connection.execute(
+        `UPDATE \`${userDishTable}\` SET ${assignments.join(", ")} WHERE _id = ?`,
+        values
+      );
+    }
     return;
   }
 
@@ -4295,6 +4310,15 @@ async function updateDishRowAcrossHousehold(connection, context, rowId, fields) 
 async function deleteDishRowAcrossHousehold(connection, context, rowId) {
   if (WRITE_SHARED_ONLY) {
     await connection.execute(`DELETE FROM \`${SHARED_DISHES_TABLE}\` WHERE _id = ?`, [rowId]);
+
+    // ALSO delete from the acting user's per-user dish table. The Dish Log (dishes_api)
+    // reads ONLY {user}_dishes — without this, a voice-deleted dish stays visible in the
+    // app. User-private: acting user only. Tolerate missing table/row.
+    const perUserOwner = context.userId || resolveTableOwnerId(context);
+    const userDishTable = dishTableName(perUserOwner);
+    if (await tableExists(connection, userDishTable)) {
+      await connection.execute(`DELETE FROM \`${userDishTable}\` WHERE _id = ?`, [rowId]);
+    }
     return;
   }
 
@@ -4355,6 +4379,47 @@ async function insertDishRowAcrossHousehold(connection, context, payload) {
         payload.analysis_status || "complete",
         payload.analysis_error || null,
         tableOwnerId
+      ]
+    );
+
+    // ALSO write the acting user's per-user dish table. The Dish Log (dishes_api)
+    // reads ONLY {user}_dishes (dishes are USER-PRIVATE per dishes_api app.py:203-205)
+    // — without this, voice-logged dishes are invisible in the app (same early-return
+    // class as the shopping dual-write bug). Target the acting user only, NOT the whole
+    // household; the per-user table has NO owner_id column.
+    const perUserOwner = context.userId || tableOwnerId;
+    const userDishTable = dishTableName(perUserOwner);
+    await ensureDishTable(connection, userDishTable);
+    await connection.execute(
+      `INSERT INTO \`${userDishTable}\` (
+        _id, _owner, _device, _createdDate, _updatedDate,
+        dish_name, confidence, explanation, serving_size,
+        calories, total_fat, total_carbohydrates, protein,
+        ingredients, components, allergens, images, s3_key, action, dish_image_url, dish_image_key, job_id, user_id, analysis_status, analysis_error
+      ) VALUES (?, ?, ?, NOW(), NOW(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'IN', ?, ?, ?, ?, ?, ?)`,
+      [
+        rowId,
+        perUserOwner,
+        "voice-assistant",
+        dishName,
+        payload.confidence ?? null,
+        payload.explanation || "Logged from voice assistant",
+        payload.serving_size || null,
+        payload.calories ?? null,
+        payload.total_fat ?? null,
+        payload.total_carbohydrates ?? null,
+        payload.protein ?? null,
+        JSON.stringify(ingredients),
+        JSON.stringify(components),
+        JSON.stringify(allergens),
+        null,
+        null,
+        null,
+        null,
+        jobId,
+        context.userId || null,
+        payload.analysis_status || "complete",
+        payload.analysis_error || null
       ]
     );
     return rowId;
