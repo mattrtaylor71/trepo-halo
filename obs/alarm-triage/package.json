@@ -1,0 +1,9 @@
+{
+  "name": "trepo-alarm-triage",
+  "version": "1.0.0",
+  "description": "Tier-1 real-time CloudWatch alarm triage: pull evidence, ask Claude, email an enriched alert.",
+  "type": "module",
+  "main": "index.mjs",
+  "engines": { "node": ">=22" },
+  "dependencies": { "@anthropic-ai/sdk": "^0.110.0" }
+}
