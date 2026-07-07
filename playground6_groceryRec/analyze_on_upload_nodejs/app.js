@@ -1242,7 +1242,7 @@ exports.handler = async (event, context) => {
 
     try {
       console.log('[fast-identify] Starting provisional legacy fast scan...', userNote ? `(user note: ${userNote})` : '');
-      const fastScan = await identifyItemFastLegacy({ imageBuffer: fastImageBuffer, userHint: userNote });
+      const fastScan = await identifyItemFastLegacy({ imageBuffer: fastImageBuffer, userHint: userNote, leftovers: isLeftovers });
       const fastCandidate = selectBestFastItem(fastScan);
       if (fastCandidate) {
         if (isLeftovers) fastCandidate.category = 'leftovers';
@@ -1390,7 +1390,7 @@ exports.handler = async (event, context) => {
     console.log('[identify] Starting modern grocery analysis...', userNote ? `(user note: ${userNote})` : '');
     const modernAnalysis = await analyzeProduct(
       { imageUrl: analysisImageUrl },
-      { stockImageMode: 'deep', userHint: userNote }
+      { stockImageMode: 'deep', userHint: userNote, leftovers: isLeftovers }
     );
     console.log('[identify] Modern analysis complete:', {
       product_name: modernAnalysis.groceryItem?.product_name || null,
