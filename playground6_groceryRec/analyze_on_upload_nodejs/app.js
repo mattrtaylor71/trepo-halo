@@ -1016,6 +1016,10 @@ exports.handler = async (event, context) => {
   let provisionalKitchenInserted = false;
   let provisionalKitchenResolved = false;
   let provisionalKitchenOwner = null;
+  // True once the finalized kitchen row actually lands. Stays false when the user
+  // deleted the item mid-analysis (tombstoned) so we skip the feed check-in and
+  // don't emit a phantom "checked in X" for an item that isn't in the kitchen.
+  let kitchenRowLanded = false;
   // Function-scoped so the top-level catch can reference it for cleanup
   // (clearPendingSwapReviewPrompts / markKitchenRowsFailed). Previously `let
   // quantity` was declared inside the try, so a deep-analysis failure threw
@@ -1647,7 +1651,7 @@ exports.handler = async (event, context) => {
         console.warn('[swap-suggestions] Deep ranking failed (non-fatal):', swapError);
       }
       console.log('[mysql] Finalizing kitchen table row(s)...');
-      await finalizeKitchenRow({
+      kitchenRowLanded = await finalizeKitchenRow({
         owner: owner,
         device_id: device_id,
         user_id: user_id,
@@ -1665,18 +1669,24 @@ exports.handler = async (event, context) => {
         swaps: deepSwaps,
         groceryItem: groceryItem,
         storeAvailability: storeAvailability || undefined,
-      });
-      await syncSwapReviewPrompts({
-        owner,
-        job_id: jobId,
-        quantity,
-        swaps: deepSwaps,
-      });
+      }) !== false;
+      if (kitchenRowLanded) {
+        await syncSwapReviewPrompts({
+          owner,
+          job_id: jobId,
+          quantity,
+          swaps: deepSwaps,
+        });
+      } else {
+        // Item was deleted by the user while this job was still retrying. Do NOT
+        // emit a feed check-in — that would be a phantom (feed event, no kitchen row).
+        console.log('[mysql] Finalize skipped (item deleted by user); suppressing feed check-in to avoid a phantom.');
+      }
       provisionalKitchenResolved = true;
     }
     console.log('[mysql] Write complete');
 
-    try {
+    if (isUnknownArchivedItem || kitchenRowLanded) try {
       const escapedOwner = owner.replace(/[^a-zA-Z0-9_-]/g, '');
       const eventType = action === 'OUT' ? 'checkout' : 'checkin';
       await writeFeedEvent({
@@ -1734,11 +1744,11 @@ exports.handler = async (event, context) => {
       console.error('[feed] Error (non-fatal):', feedError);
     }
 
-    if (!isUnknownArchivedItem) {
+    if (!isUnknownArchivedItem && kitchenRowLanded) {
       await invokeKitchenAnalysisGenerator(owner, getScanPointsDelta());
       console.log('[kitchen-analysis] Regeneration requested');
     } else {
-      console.log('[metrics] Unknown placeholder archived immediately; metrics unchanged.');
+      console.log('[metrics] Unknown placeholder or user-deleted item; metrics unchanged.');
     }
 
     // Recipe and meal plan generation for single items is triggered at fast analysis stage (above).
