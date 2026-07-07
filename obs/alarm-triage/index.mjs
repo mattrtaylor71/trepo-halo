@@ -46,6 +46,14 @@ const STATIC_METRIC_LOG_GROUPS = {
   DiscardAnalysisFailed: ["/aws/lambda/trepo-grocery-backend-dev-AnalyzeDiscardOnUpload-BnUyRpHHwaOx"],
   GroceryAnalysisFailed: ["/aws/lambda/trepo-grocery-backend-dev-AnalyzeOnUpload-bpWcKEif3Gq7"],
   AnalyticsIngestFailed: ["/aws/lambda/trepo-analytics-IngestFunction-HjM0blGGSDKn"],
+  // Emitted by PutMetricData from the canary (no metric filter -> DescribeMetricFilters
+  // can't find it), so it MUST be mapped statically to the canary's own log group.
+  VoiceDualWriteMiss: ["/aws/lambda/trepo-voice-dualwrite-canary"],
+  AssistantFalseConfirm: [
+    "/aws/lambda/trepo-quick-ack-stream-dev",
+    "/aws/lambda/trepo-quick-ack-async-worker-dev",
+    "/aws/lambda/trepo-quick-ack-sam-dev",
+  ],
   // OpenAIQuotaExceeded is emitted by many services -> sweep the OpenAI-dependent set.
   OpenAIQuotaExceeded: [
     "/aws/lambda/grocery-identifier-dev-identify-async",
@@ -110,6 +118,7 @@ KNOWN FAILURE CLASSES (match the logs to these)
 - SavedRecipes 502 web_fetch_blocked -> a recipe site bot-walled our fetch. Graceful, per-URL, not systemic. noise/degraded.
 - SavedRecipes instagram_url_rejected -> user shared a non-content IG URL (profile/login). Gate working as intended. noise.
 - enrich "No structured output" -> transient OpenAI response; Lambda async retries usually heal it. self_healed/noise.
+- trepo-capture-voice-dualwrite-miss (VoiceDualWriteMiss metric, from trepo-voice-dualwrite-canary): fires when a voice write's per-user app-visible copy is missing. BUT any row/_id/household_item_uuid prefixed 'canary-fault-test-' is a SYNTHETIC fault-injection self-test, NOT a real miss — if the canary logs / missing rows are only these prefixed ids, the verdict is noise/validation (the canary is testing itself) and the recommended_action is "none — synthetic self-test". NEVER recommend a data backfill for canary-fault-test- rows. Only genuine (non-prefixed) missing rows are a real dual-write regression worth acting on.
 
 INSTRUCTIONS
 - Decide whether the incident ALREADY self-healed (async Lambda retries, recipe refresh flags, job re-drive) — set self_healed accordingly.
@@ -128,6 +137,35 @@ function clampSubject(s) {
   return out.slice(0, 100) || "Trepo alarm";
 }
 
+// Extract the underlying metric(s) from an alarm Trigger. Handles BOTH a simple
+// alarm (top-level Namespace/MetricName) AND a metric-math/expression alarm, where
+// the real metrics live in Trigger.Metrics[] (each with MetricStat.Metric or an
+// Expression). Without this, math alarms render "undefined/undefined" and resolve
+// to no log group.
+function describeMetrics(trigger) {
+  trigger = trigger || {};
+  const dimStr = (dims) => (dims || []).map((d) => d.value || d.Value).filter(Boolean).join(",");
+  if (trigger.MetricName) {
+    return {
+      label: `${trigger.Namespace || "?"}/${trigger.MetricName}${(trigger.Dimensions || []).length ? `[${dimStr(trigger.Dimensions)}]` : ""}`,
+      metrics: [{ namespace: trigger.Namespace, metricName: trigger.MetricName, dimensions: trigger.Dimensions || [] }],
+    };
+  }
+  const arr = Array.isArray(trigger.Metrics) ? trigger.Metrics : [];
+  const metrics = [];
+  const parts = [];
+  for (const m of arr) {
+    const met = m && m.MetricStat && m.MetricStat.Metric;
+    if (met) {
+      metrics.push({ namespace: met.Namespace, metricName: met.MetricName, dimensions: met.Dimensions || [] });
+      parts.push(`${met.Namespace || "?"}/${met.MetricName || "?"}${(met.Dimensions || []).length ? `[${dimStr(met.Dimensions)}]` : ""}`);
+    } else if (m && m.Expression) {
+      parts.push(`expr(${m.Id || "?"})=${m.Expression}`);
+    }
+  }
+  return { label: parts.length ? parts.join(" ; ") : "(no parseable metric)", metrics };
+}
+
 async function resolveLogGroups(alarm) {
   const trigger = alarm.Trigger || {};
   const dims = trigger.Dimensions || [];
@@ -135,20 +173,25 @@ async function resolveLogGroups(alarm) {
   const fnName = fnDim && (fnDim.value || fnDim.Value);
   if (fnName) return { groups: [`/aws/lambda/${fnName}`], mode: "function_dimension" };
 
-  const ns = trigger.Namespace || "";
-  const metric = trigger.MetricName || "";
-  if (ns === "Trepo/Capture") {
-    if (STATIC_METRIC_LOG_GROUPS[metric]) {
-      return { groups: STATIC_METRIC_LOG_GROUPS[metric], mode: "static_metric_map" };
+  // Works for simple AND metric-math alarms (Metrics[] may hold several metrics).
+  const { metrics } = describeMetrics(trigger);
+  const capMetrics = metrics.filter((m) => m.namespace === "Trepo/Capture" && m.metricName);
+  if (capMetrics.length) {
+    const groups = new Set();
+    for (const m of capMetrics) {
+      if (STATIC_METRIC_LOG_GROUPS[m.metricName]) {
+        STATIC_METRIC_LOG_GROUPS[m.metricName].forEach((g) => groups.add(g));
+        continue;
+      }
+      // Authoritative: which log group's metric filter emits this metric?
+      try {
+        const r = await logs.send(new DescribeMetricFiltersCommand({ metricName: m.metricName, metricNamespace: m.namespace }));
+        (r.metricFilters || []).map((f) => f.logGroupName).filter(Boolean).forEach((g) => groups.add(g));
+      } catch (e) {
+        console.warn("[triage] DescribeMetricFilters failed:", e && e.message);
+      }
     }
-    // Authoritative: which log group's metric filter emits this metric?
-    try {
-      const r = await logs.send(new DescribeMetricFiltersCommand({ metricName: metric, metricNamespace: ns }));
-      const groups = [...new Set((r.metricFilters || []).map((f) => f.logGroupName).filter(Boolean))];
-      if (groups.length) return { groups, mode: "describe_metric_filters" };
-    } catch (e) {
-      console.warn("[triage] DescribeMetricFilters failed:", e && e.message);
-    }
+    if (groups.size) return { groups: [...groups], mode: capMetrics.length > 1 ? "math_metric_map" : "metric_map" };
   }
   // Account-wide / 5xx / unmapped -> sweep the core fleet for error lines.
   return { groups: CORE_LOG_GROUPS, mode: "core_sweep" };
@@ -239,7 +282,7 @@ severity: ${diag.severity}   self-healed: ${diag.self_healed ? "yes" : "no"}   c
 WHAT FIRED
 ${alarm.AlarmDescription || "(no description)"}
 reason: ${alarm.NewStateReason || "(none)"}
-at: ${alarm.StateChangeTime || "(unknown)"}   metric: ${(alarm.Trigger || {}).Namespace}/${(alarm.Trigger || {}).MetricName}
+at: ${alarm.StateChangeTime || "(unknown)"}   metric: ${describeMetrics(alarm.Trigger).label}
 
 DIAGNOSIS
 ${diag.root_cause_hypothesis}

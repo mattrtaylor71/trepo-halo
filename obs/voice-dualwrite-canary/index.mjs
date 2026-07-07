@@ -15,6 +15,10 @@ import { CloudWatchClient, PutMetricDataCommand } from "@aws-sdk/client-cloudwat
 const cw = new CloudWatchClient({ region: process.env.AWS_REGION || "us-east-1" });
 const LOOKBACK_HOURS = 48;
 const MAX_ROWS_LOGGED = 25;
+// Synthetic fault-injection rows (validation self-tests) use this _id prefix and
+// must NEVER count as real misses — otherwise the canary alarms on its own test.
+// Keep using this prefix when fault-injecting; the prod alarm ignores these rows.
+const SELF_TEST_PREFIX = "canary-fault-test-";
 
 async function tableExists(conn, name) {
   const [r] = await conn.execute(
@@ -35,7 +39,8 @@ async function householdMembers(conn, userId) {
 
 async function checkDishes(conn) {
   const [rows] = await conn.execute(
-    `SELECT _id, user_id, owner_id FROM shared_dishes WHERE _device = 'voice-assistant' AND _createdDate > NOW() - INTERVAL ${LOOKBACK_HOURS} HOUR`
+    `SELECT _id, user_id, owner_id FROM shared_dishes WHERE _device = 'voice-assistant' AND _createdDate > NOW() - INTERVAL ${LOOKBACK_HOURS} HOUR AND _id NOT LIKE ?`,
+    [`${SELF_TEST_PREFIX}%`]
   );
   const misses = [];
   for (const r of rows) {
@@ -50,7 +55,8 @@ async function checkDishes(conn) {
 
 async function checkDiscards(conn) {
   const [rows] = await conn.execute(
-    `SELECT _id, user_id, owner_id FROM shared_discards WHERE _device LIKE 'voice%' AND _createdDate > NOW() - INTERVAL ${LOOKBACK_HOURS} HOUR`
+    `SELECT _id, user_id, owner_id FROM shared_discards WHERE _device LIKE 'voice%' AND _createdDate > NOW() - INTERVAL ${LOOKBACK_HOURS} HOUR AND _id NOT LIKE ?`,
+    [`${SELF_TEST_PREFIX}%`]
   );
   const misses = [];
   for (const r of rows) {
@@ -65,7 +71,8 @@ async function checkDiscards(conn) {
 
 async function checkShopping(conn) {
   const [rows] = await conn.execute(
-    `SELECT household_item_uuid, owner_id, _owner FROM shared_shopping_list WHERE _device = 'voice-assistant' AND _createdDate > NOW() - INTERVAL ${LOOKBACK_HOURS} HOUR`
+    `SELECT household_item_uuid, owner_id, _owner FROM shared_shopping_list WHERE _device = 'voice-assistant' AND _createdDate > NOW() - INTERVAL ${LOOKBACK_HOURS} HOUR AND _id NOT LIKE ? AND COALESCE(household_item_uuid, '') NOT LIKE ?`,
+    [`${SELF_TEST_PREFIX}%`, `${SELF_TEST_PREFIX}%`]
   );
   const misses = [];
   for (const r of rows) {
