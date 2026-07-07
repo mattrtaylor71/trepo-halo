@@ -25,6 +25,14 @@ OWNER_LOCK_TIMEOUT_SECONDS = 5
 _OWNER_KITCHEN_STATE_TABLE = 'owner_kitchen_state'
 OPENAI_TIMEOUT_SECONDS = int(os.getenv('OPENAI_TIMEOUT_SECONDS', '45'))
 OPENAI_MAX_RETRIES = int(os.getenv('OPENAI_MAX_RETRIES', '2'))
+# Large kitchens (e.g. 195 items) made the single 20-recipe generation call exceed
+# the 45s OpenAI client timeout ("Request timed out" -> handler_error, gutting the
+# refresh). Cap the ingredient CONTEXT for generation to the N most-recently-added
+# items (_get_kitchen_ingredients returns _createdDate DESC) — plenty for 20 varied
+# recipes and deterministically fast. Matching still uses the full kitchen. Also give
+# the generation call more timeout headroom (Lambda timeout is 420s).
+RECIPE_GEN_MAX_INGREDIENTS = int(os.getenv('RECIPE_GEN_MAX_INGREDIENTS', '80'))
+RECIPE_GEN_TIMEOUT_SECONDS = int(os.getenv('RECIPE_GEN_TIMEOUT_SECONDS', '90'))
 SUBSTITUTION_MODEL = os.getenv('OPENAI_SUBSTITUTION_MODEL', os.getenv('OPENAI_MODEL', 'gpt-4o'))
 MAX_AI_SUBSTITUTION_MISSING_INGREDIENTS = max(0, int(os.getenv('RECIPES_MAX_AI_SUBSTITUTION_MISSING_INGREDIENTS', '2')))
 DB_CONNECT_TIMEOUT = int(os.getenv('DB_CONNECT_TIMEOUT_SECONDS', '5'))
@@ -805,13 +813,19 @@ def _generate_recipes_with_gpt(ingredients_list, kitchen_only_count=10, need_gro
     from openai import OpenAI
     client = OpenAI(
         api_key=os.getenv('OPENAI_API_KEY'),
-        timeout=OPENAI_TIMEOUT_SECONDS,
+        timeout=RECIPE_GEN_TIMEOUT_SECONDS,
         max_retries=OPENAI_MAX_RETRIES,
     )
     kitchen_only_count = max(0, int(kitchen_only_count or 0))
     need_grocery_count = max(0, int(need_grocery_count or 0))
     if kitchen_only_count == 0 and need_grocery_count == 0:
         return {'kitchen_only': [], 'need_grocery': []}
+    # Cap the generation context to the most-recent items so a huge kitchen can't
+    # blow the OpenAI timeout. ingredients_list is already _createdDate DESC.
+    full_ingredient_count = len(ingredients_list or [])
+    if full_ingredient_count > RECIPE_GEN_MAX_INGREDIENTS:
+        ingredients_list = list(ingredients_list)[:RECIPE_GEN_MAX_INGREDIENTS]
+        print(f"[recipes_generator] Capped generation context {full_ingredient_count} -> {RECIPE_GEN_MAX_INGREDIENTS} most-recent items")
     ingredients_str = _format_kitchen_for_prompt(ingredients_list) if ingredients_list else 'No specific ingredients (suggest pantry staples)'
     excluded_titles = [str(item).strip() for item in (excluded_titles or []) if str(item).strip()]
     exclusion_text = ''
@@ -927,7 +941,10 @@ def handler(event, context):
             _ensure_recipes_table(conn, target_owner)
             table = _recipes_table(target_owner)
             with conn.cursor() as cur:
-                cur.execute(f"SELECT _id, status FROM `{table}` WHERE _id = 'current'")
+                cur.execute(
+                    f"SELECT _id, status, (kitchen_only IS NOT NULL AND JSON_LENGTH(kitchen_only) > 0) AS has_recipes "
+                    f"FROM `{table}` WHERE _id = 'current'"
+                )
                 row = cur.fetchone()
                 if not row:
                     cur.execute(
@@ -936,9 +953,19 @@ def handler(event, context):
                     )
                     conn.commit()
                 else:
-                    if row.get('status') == 'ready':
+                    # A row that already holds recipes must NEVER be gutted or hidden by
+                    # a crash/timeout mid-regeneration. Treat existing content as
+                    # has_existing_recipes (even if a prior timeout left status stuck at
+                    # 'regenerating'), keep it VISIBLE ('ready') during regen, and swap
+                    # the new set in atomically on success (the UPDATE below). Only show a
+                    # bare 'regenerating' state when there is nothing to display.
+                    if row.get('status') == 'ready' or row.get('has_recipes'):
                         has_existing_recipes = True
-                    _set_status(conn, target_owner, 'regenerating')
+                    if not has_existing_recipes:
+                        _set_status(conn, target_owner, 'regenerating')
+                    elif row.get('status') != 'ready':
+                        # Recover a set stranded in 'regenerating'/'failed' by a prior run.
+                        _set_status(conn, target_owner, 'ready')
 
         ingredients = _get_kitchen_ingredients(conn, owner)
         kitchen_version = _get_owner_kitchen_version(conn, owner)
