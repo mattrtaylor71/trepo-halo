@@ -279,7 +279,10 @@ def _generate_suggestions(kitchen_items, exclude_items=None):
         return []
 
     try:
-        client = OpenAI(api_key=api_key)
+        # Internal deadline well under API Gateway's 30s hard cap so the fn controls
+        # the failure (serve cache/default) instead of the gateway returning a 504.
+        llm_timeout = int(os.getenv('HOME_SUGGESTIONS_LLM_TIMEOUT_SECONDS', '22'))
+        client = OpenAI(api_key=api_key, timeout=llm_timeout, max_retries=0)
         prompt = _build_prompt(kitchen_items, exclude_items=exclude_items)
 
         response = client.chat.completions.create(
@@ -321,6 +324,47 @@ def _generate_suggestions(kitchen_items, exclude_items=None):
         return []
 
 
+def _ensure_cache_table(conn):
+    with conn.cursor() as cur:
+        cur.execute(
+            """CREATE TABLE IF NOT EXISTS home_suggestions_cache (
+                owner_id VARCHAR(191) PRIMARY KEY,
+                suggestions_json LONGTEXT NOT NULL,
+                updated_at DATETIME NOT NULL
+            )"""
+        )
+
+
+def _read_cached_suggestions(conn, owner):
+    """Last-good suggestions for this owner, or None."""
+    try:
+        _ensure_cache_table(conn)
+        with conn.cursor() as cur:
+            cur.execute("SELECT suggestions_json FROM home_suggestions_cache WHERE owner_id = %s", [_sanitize_owner(owner)])
+            row = cur.fetchone()
+        if row and row.get('suggestions_json'):
+            parsed = json.loads(row['suggestions_json'])
+            if isinstance(parsed, list) and parsed:
+                return parsed
+    except Exception as e:
+        print(f"[WARN] home suggestions cache read failed: {e}")
+    return None
+
+
+def _write_cached_suggestions(conn, owner, suggestions):
+    try:
+        _ensure_cache_table(conn)
+        with conn.cursor() as cur:
+            cur.execute(
+                """INSERT INTO home_suggestions_cache (owner_id, suggestions_json, updated_at)
+                   VALUES (%s, %s, NOW())
+                   ON DUPLICATE KEY UPDATE suggestions_json = VALUES(suggestions_json), updated_at = NOW()""",
+                [_sanitize_owner(owner), json.dumps(suggestions)]
+            )
+    except Exception as e:
+        print(f"[WARN] home suggestions cache write failed: {e}")
+
+
 def _get_suggestions(owner, exclude_items=None):
     try:
         conn = _mysql_conn()
@@ -336,10 +380,18 @@ def _get_suggestions(owner, exclude_items=None):
 
         suggestions = _generate_suggestions(serialized_items, exclude_items=exclude_items)
 
-        if not suggestions:
-            return _success({'suggestions': _DEFAULT_SUGGESTIONS})
+        if suggestions:
+            # Fresh set — cache it so a future slow/timeout run can still serve 200.
+            _write_cached_suggestions(conn, owner, suggestions)
+            return _success({'suggestions': suggestions})
 
-        return _success({'suggestions': suggestions})
+        # Generation timed out / failed / returned empty. Serve this owner's last-good
+        # set (never a 504); fall back to the generic default only for a brand-new owner.
+        cached = _read_cached_suggestions(conn, owner)
+        if cached:
+            print(f"[INFO] home suggestions served from cache (owner={_sanitize_owner(owner)})")
+            return _success({'suggestions': cached, 'stale': True})
+        return _success({'suggestions': _DEFAULT_SUGGESTIONS})
 
     except Exception as e:
         print(f"[ERROR] Failed to get suggestions: {str(e)}")
