@@ -691,6 +691,12 @@ export async function identifyGroceryItem(input: IdentifyImageInput, options: { 
     }
 
     const model = getOpenAIModel();
+    // Fast in-handler retry: a single "No structured output" / ZodError blip
+    // otherwise fails the invocation (the Merlot-saga class). Retry once immediately.
+    let result!: GroceryItem;
+    let _identifyLastErr: unknown = null;
+    for (let _identifyAttempt = 0; _identifyAttempt < 2; _identifyAttempt += 1) {
+      try {
     const response = await openai.responses.create({
       model,
       ...((/^(o[1-9]|gpt-5)/.test(model)) ? { reasoning: { effort: "medium" } } : {}),
@@ -730,7 +736,17 @@ export async function identifyGroceryItem(input: IdentifyImageInput, options: { 
     } as any);
 
     const parsed = parseJsonResponse<GroceryItem>(response);
-    const result = mergeLabelEvidenceIntoItem(GroceryItemSchema.parse(parsed), labelEvidence);
+    result = mergeLabelEvidenceIntoItem(GroceryItemSchema.parse(parsed), labelEvidence);
+    if (_identifyAttempt > 0) {
+      console.log(JSON.stringify({ evt: "openai_fast_retry_saved", service: "grocery_identify", op: "identify_deep" }));
+    }
+    break;
+      } catch (_identifyErr) {
+        _identifyLastErr = _identifyErr;
+        if (_identifyAttempt === 0) { await new Promise((r) => setTimeout(r, 2500)); continue; }
+        throw _identifyLastErr;
+      }
+    }
 
     // Normalize UPF flag (model may emit "Yes"/null/etc.)
     result.upf = normalizeUpf(result.upf);

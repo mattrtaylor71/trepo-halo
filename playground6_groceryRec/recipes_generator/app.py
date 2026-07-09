@@ -858,15 +858,29 @@ Return the JSON object only."""
         f"Generate exactly {kitchen_only_count} kitchen_only recipes using ONLY these items (plus pantry), and exactly {need_grocery_count} need_grocery recipes that use some of these items but need extra ingredients to buy (include missing_ingredients for each)."
         f"{exclusion_text}\nReturn the JSON object only."
     )
-    resp = client.chat.completions.create(
-        model=os.getenv('OPENAI_MODEL', 'gpt-4o'),
-        messages=[{'role': 'system', 'content': system}, {'role': 'user', 'content': user}],
-        temperature=0.4,
-    )
-    text = (resp.choices[0].message.content or '').strip()
-    if text.startswith('```'):
-        text = text.split('\n', 1)[-1].rsplit('```', 1)[0].strip()
-    return json.loads(text)
+    # Fast in-handler retry: a single malformed/blank generation (JSONDecodeError)
+    # otherwise fails the invocation and detours through the 4-min refresh-flag class.
+    # Retry the generate+parse 1x immediately before giving up.
+    last_err = None
+    for _attempt in range(2):
+        resp = client.chat.completions.create(
+            model=os.getenv('OPENAI_MODEL', 'gpt-4o'),
+            messages=[{'role': 'system', 'content': system}, {'role': 'user', 'content': user}],
+            temperature=0.4,
+        )
+        text = (resp.choices[0].message.content or '').strip()
+        if text.startswith('```'):
+            text = text.split('\n', 1)[-1].rsplit('```', 1)[0].strip()
+        try:
+            parsed = json.loads(text)
+            if _attempt > 0:
+                print(json.dumps({'evt': 'openai_fast_retry_saved', 'service': 'recipes_generator', 'op': 'generate'}))
+            return parsed
+        except json.JSONDecodeError as e:
+            last_err = e
+            if _attempt == 0:
+                time.sleep(2)
+    raise last_err
 
 
 def _build_recipe_record(recipe, fallback_index=0):

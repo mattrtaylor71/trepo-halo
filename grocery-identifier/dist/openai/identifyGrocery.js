@@ -618,6 +618,13 @@ async function identifyGroceryItem(input, options = {}) {
             systemText += `\n\nLEFTOVERS MODE: This is a photo of leftover FOOD or DRINK the user is saving — NOT a packaged grocery product. Name the item by what the food/drink actually IS, as specifically as the image allows (e.g. 'Black Coffee', 'Chicken Fried Rice', 'Half a Burrito'). A confident contextual guess beats a generic label — e.g. a Starbucks cup is 'Black Coffee' (or 'Iced Coffee' etc), not 'Prepared Food'. NEVER use 'Prepared Food', 'Leftovers', or 'Prepared Food Leftovers' as the product_name — the item is already tagged as a leftover elsewhere. Put container details (cup, tupperware) in variant, not the name. Only if the contents are truly unidentifiable, use a best-effort descriptive name like 'Mixed Leftover Meal'.`;
         }
         const model = (0, client_1.getOpenAIModel)();
+        // Fast in-handler retry: a single "No structured output" / ZodError blip
+        // otherwise fails the invocation (the Merlot-saga class). Retry the
+        // model call + parse once immediately before giving up.
+        let result;
+        let _identifyLastErr = null;
+        for (let _identifyAttempt = 0; _identifyAttempt < 2; _identifyAttempt += 1) {
+          try {
         const response = await openai.responses.create({
             model,
             ...((/^(o[1-9]|gpt-5)/.test(model)) ? { reasoning: { effort: "medium" } } : {}),
@@ -653,7 +660,17 @@ async function identifyGroceryItem(input, options = {}) {
             ],
         });
         const parsed = (0, client_1.parseJsonResponse)(response);
-        const result = mergeLabelEvidenceIntoItem(exports.GroceryItemSchema.parse(parsed), labelEvidence);
+        result = mergeLabelEvidenceIntoItem(exports.GroceryItemSchema.parse(parsed), labelEvidence);
+        if (_identifyAttempt > 0) {
+            console.log(JSON.stringify({ evt: "openai_fast_retry_saved", service: "grocery_identify", op: "identify_deep" }));
+        }
+        break;
+          } catch (_identifyErr) {
+            _identifyLastErr = _identifyErr;
+            if (_identifyAttempt === 0) { await new Promise((r) => setTimeout(r, 2500)); continue; }
+            throw _identifyLastErr;
+          }
+        }
         // Normalize UPF flag (model may emit "Yes"/null/etc.)
         result.upf = normalizeUpf(result.upf);
         // If the vision pass produced few ingredients, augment with a text-based
