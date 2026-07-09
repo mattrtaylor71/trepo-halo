@@ -4934,22 +4934,78 @@ export async function addShoppingItem(context, itemName, requestedStore = null, 
 }
 
 export async function addManyShoppingItems(context, batchItems, options = {}) {
-  const items = [];
-  for (const batchItem of batchItems || []) {
-    items.push(await addShoppingItem(context, batchItem.item_name, batchItem.store || null, batchItem.quantity || null, options));
-  }
+  // Run the WHOLE batch on ONE pooled connection with the same shared + household
+  // fall-through as addShoppingItem (WRITE_SHARED_ONLY dual-write). This previously
+  // delegated to addShoppingItem per item, acquiring/releasing a fresh pool
+  // connection in a tight 20-item loop; on a 2+ member household that intermittently
+  // left per-user {member}_new_list copies missing while the shared_shopping_list
+  // row landed (canary trepo-capture-voice-dualwrite-miss; 7/20 for owner 7d7df434).
+  // One connection + a per-insert affectedRows check makes the dual-write
+  // deterministic and self-reporting.
+  return withDbConnection(async (connection) => {
+    const memberIds = getShoppingHouseholdMemberIds(context);
+    const shoppingOwnerId = resolveShoppingOwnerId(context);
+    const items = [];
 
-  console.log("[DEBUG] shopping items added in batch:", JSON.stringify({
-    ownerId: context?.ownerId || null,
-    userId: context?.userId || null,
-    count: items.length,
-    item_names: items.map((item) => item.item_name)
-  }));
+    for (const batchItem of batchItems || []) {
+      const householdItemUuid = crypto.randomUUID();
+      const store = await resolveShoppingStore(connection, context, batchItem.store || null);
+      const displayItemName = formatUserFacingItemName(batchItem.item_name);
+      const quantity = batchItem.quantity || null;
 
-  return {
-    items,
-    count: items.length
-  };
+      if (WRITE_SHARED_ONLY) {
+        await connection.execute(
+          `INSERT INTO \`${SHARED_SHOPPING_TABLE}\` (
+            _owner, _device, product_name, quantity, product_brand,
+            images, product_barcode, store, action,
+            _createdDate, created_at, updated_at, household_item_uuid, owner_id
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW(), NOW(), ?, ?)`,
+          [shoppingOwnerId, "voice-assistant", displayItemName, quantity, null, null, null, store, "ADDED", householdItemUuid, shoppingOwnerId]
+        );
+      }
+
+      // ALSO write each household member's per-user {member}_new_list — the store
+      // the iOS app + HALO device read from.
+      let primaryInsertId = null;
+      for (const memberId of memberIds) {
+        const tableName = shoppingListTableName(memberId);
+        await ensureShoppingTable(connection, tableName);
+        const [result] = await connection.execute(
+          `INSERT INTO \`${tableName}\` (
+            _owner, _device, product_name, quantity, product_brand,
+            images, product_barcode, store, action,
+            _createdDate, created_at, updated_at, household_item_uuid
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW(), NOW(), ?)`,
+          [memberId, "voice-assistant", displayItemName, quantity, null, null, null, store, "ADDED", householdItemUuid]
+        );
+        if ((result?.affectedRows ?? 0) !== 1) {
+          console.warn(JSON.stringify({ evt: "shopping_peruser_write_miss", owner: shoppingOwnerId, member: memberId, household_item_uuid: householdItemUuid, item_name: displayItemName }));
+        }
+        if (memberId === shoppingOwnerId) {
+          primaryInsertId = result?.insertId != null ? String(result.insertId) : null;
+        }
+      }
+
+      items.push({
+        shopping_id: primaryInsertId,
+        household_item_uuid: householdItemUuid,
+        item_name: displayItemName,
+        quantity,
+        store,
+        source: "new_list",
+        action: "ADDED"
+      });
+    }
+
+    console.log("[DEBUG] shopping items added in batch:", JSON.stringify({
+      ownerId: context?.ownerId || null,
+      userId: context?.userId || null,
+      count: items.length,
+      item_names: items.map((item) => item.item_name)
+    }));
+
+    return { items, count: items.length };
+  }, options);
 }
 
 export async function removeShoppingItem(context, itemName, options = {}) {
