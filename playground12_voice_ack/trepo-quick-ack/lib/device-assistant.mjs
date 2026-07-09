@@ -756,8 +756,10 @@ const ACTION_CLAIM_RULES = [
     okTools: new Set(["check_in_item", "check_in_many_items"]),
     failText: "I wasn't able to add that to your kitchen just now — please try again.",
     patterns: [
-      /\badded\b[^.?!\n]{0,40}\bto\s+your\s+kitchen\b/i,
-      /\bchecked[\s-]*in\b[^.?!\n]{0,30}\b(kitchen|item|it|that)\b/i,
+      /\badded\b[^.?!\n]{0,40}\bto\s+your\s+(kitchen|pantry|fridge)\b/i,
+      // "checked in" AND "checked into" (into is one token, so \bin\b fails there).
+      /\bchecked\s+in(?:to)?\b[^.?!\n]{0,50}\b(kitchen|pantry|fridge)\b/i,
+      /\bchecked[\s-]*in\b[^.?!\n]{0,30}\b(kitchen|pantry|fridge|item|it|that)\b/i,
     ],
   },
 ];
@@ -862,9 +864,15 @@ export async function* runDeviceAssistantStreaming({ transcript, userContext, en
   let fullText = "";
   let falseConfirmCorrections = 0;
   let falseConfirmRecovered = false;
+  // When the false-confirmation guard fires, the corrective retry FORCES a tool
+  // call (tool_choice: "required") — "auto" let the model re-claim without calling
+  // the tool (kitchen_add on 07-09: retry produced text again in ~1s, recovered:false).
+  let forceToolChoiceNext = null;
 
   for (let turn = 0; turn < 6; turn += 1) {
-    const stream = createChatCompletionStream(messages, env, { deadline });
+    const turnToolChoice = forceToolChoiceNext || "auto";
+    forceToolChoiceNext = null;
+    const stream = createChatCompletionStream(messages, env, { deadline, toolChoice: turnToolChoice });
     let assembledContent = "";
     const assembledToolCalls = [];
 
@@ -914,18 +922,24 @@ export async function* runDeviceAssistantStreaming({ transcript, userContext, en
       if (claim && !backed) {
         if (falseConfirmCorrections < 1) {
           falseConfirmCorrections += 1;
-          console.log(JSON.stringify({ evt: "assistant_false_confirm", tool: claim.expectedTool, domain: claim.domain, userId: userContext?.userId || null, recovered: null, phase: "retrying" }));
+          console.log(JSON.stringify({ evt: "assistant_false_confirm", tool: claim.expectedTool, domain: claim.domain, userId: userContext?.userId || null, recovered: null, phase: "retrying", reason: "claim_without_tool" }));
           messages.push({ role: "assistant", content: fullText });
           messages.push({
             role: "user",
             content: `You stated the action was completed but you did not call ${claim.expectedTool}. Call it now with the details from the user's message, then confirm. If you genuinely cannot do it, say so honestly instead of claiming success.`
           });
+          // Force a tool call on the retry so the model can't just re-claim in text.
+          forceToolChoiceNext = "required";
           fullText = "";
           yield { type: "text_delta", delta: "\n" };
           continue;
         }
-        // Retry already happened and it STILL produced an unbacked claim.
-        console.log(JSON.stringify({ evt: "assistant_false_confirm", tool: claim.expectedTool, domain: claim.domain, userId: userContext?.userId || null, recovered: false }));
+        // Retry already happened and it STILL produced an unbacked claim. Record WHY
+        // so we're not guessing next time: did the domain tool run and fail, or was
+        // it never called at all?
+        const domainToolAttempted = toolTrace.some((t) => claim.okTools.has(t.toolName));
+        const reason = domainToolAttempted ? "retry_tool_call_failed" : "retry_no_tool_call";
+        console.log(JSON.stringify({ evt: "assistant_false_confirm", tool: claim.expectedTool, domain: claim.domain, userId: userContext?.userId || null, recovered: false, reason }));
         fullText = claim.failText;
         yield { type: "text_delta", delta: `\n${claim.failText}` };
       }
@@ -996,7 +1010,7 @@ export async function* runDeviceAssistantStreaming({ transcript, userContext, en
     // write, record the recovery for the corpus/metric.
     if (falseConfirmCorrections > 0 && !falseConfirmRecovered && toolTrace.some((t) => t.ok && WRITE_TOOL_NAMES.has(t.toolName))) {
       falseConfirmRecovered = true;
-      console.log(JSON.stringify({ evt: "assistant_false_confirm", userId: userContext?.userId || null, recovered: true }));
+      console.log(JSON.stringify({ evt: "assistant_false_confirm", userId: userContext?.userId || null, recovered: true, reason: "corrective_tool_succeeded" }));
     }
 
     // If the model produced no visible text this turn (went straight to tools),
@@ -1150,6 +1164,8 @@ export async function runDeviceAssistant({ transcript, userContext, env, session
   let lastAssistantText = "";
   let falseConfirmCorrections = 0;
   let falseConfirmRecovered = false;
+  // The false-confirmation corrective retry FORCES a tool call (see streaming path).
+  let forceToolChoiceNext = null;
 
   // On the first turn, detect write intent and force tool_choice if appropriate
   const initialToolChoice = detectWriteIntent(transcript);
@@ -1158,8 +1174,9 @@ export async function runDeviceAssistant({ transcript, userContext, env, session
   }
 
   for (let turn = 0; turn < 6; turn += 1) {
-    // Only force tool_choice on the first turn; subsequent turns use "auto"
-    const turnToolChoice = turn === 0 ? initialToolChoice : "auto";
+    // Force a tool on a corrective retry; else force on the first turn if write-intent; else auto.
+    const turnToolChoice = forceToolChoiceNext || (turn === 0 ? initialToolChoice : "auto");
+    forceToolChoiceNext = null;
     const completion = await createChatCompletion(messages, env, { deadline, toolChoice: turnToolChoice });
     const message = completion?.choices?.[0]?.message;
 
@@ -1178,15 +1195,18 @@ export async function runDeviceAssistant({ transcript, userContext, env, session
       if (claim && !backed) {
         if (falseConfirmCorrections < 1) {
           falseConfirmCorrections += 1;
-          console.log(JSON.stringify({ evt: "assistant_false_confirm", tool: claim.expectedTool, domain: claim.domain, userId: userContext?.userId || null, recovered: null, phase: "retrying" }));
+          console.log(JSON.stringify({ evt: "assistant_false_confirm", tool: claim.expectedTool, domain: claim.domain, userId: userContext?.userId || null, recovered: null, phase: "retrying", reason: "claim_without_tool" }));
           messages.push({ role: "assistant", content: lastAssistantText });
           messages.push({
             role: "user",
             content: `You stated the action was completed but you did not call ${claim.expectedTool}. Call it now with the details from the user's message, then confirm. If you genuinely cannot do it, say so honestly instead of claiming success.`
           });
+          forceToolChoiceNext = "required"; // make the retry actually call the tool
           continue; // retry this turn
         }
-        console.log(JSON.stringify({ evt: "assistant_false_confirm", tool: claim.expectedTool, domain: claim.domain, userId: userContext?.userId || null, recovered: false }));
+        const domainToolAttempted = toolTrace.some((t) => claim.okTools.has(t.toolName));
+        const reason = domainToolAttempted ? "retry_tool_call_failed" : "retry_no_tool_call";
+        console.log(JSON.stringify({ evt: "assistant_false_confirm", tool: claim.expectedTool, domain: claim.domain, userId: userContext?.userId || null, recovered: false, reason }));
         lastAssistantText = claim.failText;
       }
 
@@ -1271,7 +1291,7 @@ export async function runDeviceAssistant({ transcript, userContext, env, session
     // Corrective retry produced a successful write -> record the recovery.
     if (falseConfirmCorrections > 0 && !falseConfirmRecovered && toolTrace.some((t) => t.ok && WRITE_TOOL_NAMES.has(t.toolName))) {
       falseConfirmRecovered = true;
-      console.log(JSON.stringify({ evt: "assistant_false_confirm", userId: userContext?.userId || null, recovered: true }));
+      console.log(JSON.stringify({ evt: "assistant_false_confirm", userId: userContext?.userId || null, recovered: true, reason: "corrective_tool_succeeded" }));
     }
   }
 
