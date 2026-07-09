@@ -82,6 +82,11 @@ const CORE_LOG_GROUPS = [
   "/aws/lambda/grocery-identifier-dev-bulk-commit",
   "/aws/lambda/grocery-identifier-dev-enrich-kitchen-item",
   "/aws/lambda/trepo-analytics-SummaryFunction-r16bAHjy96zm",
+  // Slow fn behind most 5xx-main-grocery 504s (25-29s -> API GW 30s cap).
+  "/aws/lambda/trepo-grocery-backend-dev-HomeSuggestionsFunction-eq77AzDop23s",
+  // Non-capture fns that also feed the account-wide error alarm (were coming back
+  // 'unattributable').
+  "/aws/lambda/halo-live-dashboard-updater",
 ];
 
 const DIAGNOSIS_SCHEMA = {
@@ -119,9 +124,11 @@ KNOWN FAILURE CLASSES (match the logs to these)
 - SavedRecipes instagram_url_rejected -> user shared a non-content IG URL (profile/login). Gate working as intended. noise.
 - enrich "No structured output" -> transient OpenAI response; Lambda async retries usually heal it. self_healed/noise.
 - trepo-capture-voice-dualwrite-miss (VoiceDualWriteMiss metric, from trepo-voice-dualwrite-canary): fires when a voice write's per-user app-visible copy is missing. BUT any row/_id/household_item_uuid prefixed 'canary-fault-test-' is a SYNTHETIC fault-injection self-test, NOT a real miss — if the canary logs / missing rows are only these prefixed ids, the verdict is noise/validation (the canary is testing itself) and the recommended_action is "none — synthetic self-test". NEVER recommend a data backfill for canary-fault-test- rows. Only genuine (non-prefixed) missing rows are a real dual-write regression worth acting on.
+- 5xx-main-grocery / account-error alarms are OFTEN API Gateway 504s from a SLOW function, NOT an error log. API Gateway hard-times-out any integration at 30s. So a "SLOW INVOCATIONS" evidence block with a fn whose Duration ≈ 25000-30000ms (or a "Task timed out") IS the root cause — that fn tipped over the 30s cap and returned 504. The usual culprit is HomeSuggestions. In that case: severity degraded (not noise), root cause = "<fn> exceeds the 30s API Gateway timeout", recommended_action names the slow fn. Do NOT call a 504 "noise" just because there are no ERROR lines — a timeout leaves no error line, only a slow REPORT.
 
 INSTRUCTIONS
-- Decide whether the incident ALREADY self-healed (async Lambda retries, recipe refresh flags, job re-drive) — set self_healed accordingly.
+- Use the RECURRENCE CHECK line: only call something self_healed when it says no matching errors in the last 10 min. If it says the error is STILL appearing, it has NOT self-healed — set self_healed=false and severity degraded/critical.
+- Decide whether the incident ALREADY self-healed (async Lambda retries, recipe refresh flags, job re-drive) — set self_healed accordingly, but never over the RECURRENCE CHECK.
 - Name the affected scope concretely from log fields: which owners/user_ids, job_ids, or features are hit, and roughly how many.
 - Give exactly ONE concrete recommended_action (or "none — self-healed/noise" when that's the truth).
 - severity: critical = active user-facing outage; degraded = partial/one feature or subset of users; self_healed = fired but already recovered; noise = expected/benign/single transient.
@@ -240,6 +247,44 @@ async function gatherLogs(groups, endMs) {
   return chunks.join("\n\n").slice(0, MAX_LOG_BYTES);
 }
 
+// Slow-invocation evidence for 5xx / latency alarms. A Lambda REPORT line whose
+// Duration is near API Gateway's 30s hard cap (or a "Task timed out") is the fn that
+// caused the 504 — usually HomeSuggestions. This is the log-side proxy for the
+// ApiGateway IntegrationLatency=30000ms metric, without a metrics SDK dependency.
+async function gatherSlowReports(groups, endMs) {
+  const startMs = endMs - LOOKBACK_MS;
+  const slow = [];
+  for (const lg of groups) {
+    const reports = await filterOnce({
+      logGroupName: lg, startTime: startMs, endTime: endMs,
+      filterPattern: '?"REPORT RequestId" ?"Task timed out"', limit: 30, interleaved: true,
+    });
+    for (const e of reports) {
+      const m = /Billed Duration:\s*([\d.]+)\s*ms/.exec(e.message || "") || /Duration:\s*([\d.]+)\s*ms/.exec(e.message || "");
+      const dur = m ? parseFloat(m[1]) : (/Task timed out/.test(e.message || "") ? 999999 : 0);
+      if (dur >= 15000) slow.push({ lg, dur, msg: (e.message || "").trim() });
+    }
+  }
+  if (!slow.length) return "";
+  slow.sort((a, b) => b.dur - a.dur);
+  const lines = slow.slice(0, 8).map((s) => `${s.lg.split("/").pop()}  Duration≈${Math.round(s.dur)}ms  ${s.msg.slice(0, 110)}`);
+  return "### SLOW INVOCATIONS (Duration ≥15s — a fn behind API Gateway near ~30000ms IS the 504 culprit):\n" + lines.join("\n");
+}
+
+// Stale self-heal guard: is the same error pattern STILL firing right up to now?
+async function recentRecurrenceNote(groups, nowMs) {
+  const startMs = nowMs - 10 * 60 * 1000;
+  let hits = 0;
+  for (const lg of groups) {
+    const r = await filterOnce({ logGroupName: lg, startTime: startMs, endTime: nowMs, filterPattern: ERROR_FILTER_PATTERN, limit: 5, interleaved: true });
+    hits += r.length;
+    if (hits >= 3) break;
+  }
+  return hits > 0
+    ? `RECURRENCE CHECK: the error pattern is STILL appearing — ${hits}+ matching line(s) in the last 10 min. Do NOT declare this self_healed.`
+    : "RECURRENCE CHECK: no matching error lines in the last 10 min (consistent with self_healed).";
+}
+
 async function diagnose(alarm, evidence, resolveMode) {
   const anthropic = new Anthropic(); // ANTHROPIC_API_KEY from env
   const userContent =
@@ -347,7 +392,15 @@ async function handleRecord(record) {
   try {
     const endMs = alarm.StateChangeTime ? Date.parse(alarm.StateChangeTime) || Date.now() : Date.now();
     const { groups, mode } = await resolveLogGroups(alarm);
-    const evidence = await gatherLogs(groups, endMs);
+    const baseEvidence = await gatherLogs(groups, endMs);
+    // For 5xx/account sweeps, add slow-invocation evidence (which fn tipped over the
+    // API GW 30s cap). Always add a recurrence check so a stale error isn't called
+    // self-healed.
+    const [slowReports, recurrence] = await Promise.all([
+      mode === "core_sweep" ? gatherSlowReports(groups, endMs) : Promise.resolve(""),
+      recentRecurrenceNote(groups, Date.now()),
+    ]);
+    const evidence = [baseEvidence, slowReports, recurrence].filter(Boolean).join("\n\n");
     const diag = await diagnose(alarm, evidence, mode);
     const { subject, body } = buildReport(alarm, diag, evidence, mode);
     console.log("[triage] report:\n" + subject + "\n" + body); // corpus in our own logs
