@@ -2183,6 +2183,20 @@ def _normalize_url(raw_url):
         raise ServiceError('URL must use http or https.', status_code=400)
     if not parsed.netloc:
         raise ServiceError('URL is missing a hostname.', status_code=400)
+    # Reject pasted recipe TEXT masquerading as a URL BEFORE we try to fetch it —
+    # otherwise a schemeless blob like "Chicken Parmesan: 2 lbs chicken..." gets
+    # https:// prepended, passes netloc, and 502s on fetch (bogus 5xx alarm trips).
+    # A real host has no whitespace and a dot-TLD (or is localhost / an IP).
+    try:
+        host = (parsed.hostname or '').strip().lower()
+    except ValueError:
+        host = ''
+    _friendly_not_url = ("That doesn't look like a recipe link. Paste a webpage URL "
+                         "(or use the paste-text option to add a recipe by text).")
+    if (not host) or (' ' in parsed.netloc) or (
+        '.' not in host and host != 'localhost' and not re.match(r'^\d{1,3}(\.\d{1,3}){3}$', host)
+    ):
+        raise ServiceError(_friendly_not_url, status_code=422)
     cleaned = parsed._replace(fragment='')
     normalized = urlunparse(cleaned)
     # NOTE: Instagram content-type validation is deliberately NOT done here.
