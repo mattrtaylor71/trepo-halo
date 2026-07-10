@@ -23,7 +23,19 @@ const ANALYZER = path.resolve(LIB, "..", "..", "..", "shared", "voice-assistant"
 // ---- mock connection ---------------------------------------------------------
 // selectRows: canned rows returned for SELECTs (other than information_schema),
 // used by lookup-then-mutate ops (clear/remove).
-function makeConn({ columns = ["_id", "_owner", "_device", "product_name", "quantity", "store", "action", "household_item_uuid", "owner_id", "_createdDate", "_updatedDate", "created_at", "updated_at", "source_kitchen_id", "discard_reason", "dish_name", "user_id"], selectRows = [] } = {}) {
+const ALL_COLUMNS = ["_id", "_owner", "_device", "product_name", "quantity", "store", "action", "household_item_uuid", "owner_id", "_createdDate", "_updatedDate", "created_at", "updated_at", "source_kitchen_id", "discard_reason", "dish_name", "user_id", "product_brand", "images", "product_barcode", "category", "storage_location", "product_image_url", "product_image_key", "is_opened", "confidence", "explanation", "serving_size", "calories", "ingredients", "components", "allergens", "job_id", "analysis_status"];
+
+// A rich canned "target" row so lookup-then-mutate ops (remove/update/delete) find
+// something to act on. Tests override fields as needed.
+function targetRow(over = {}) {
+  return {
+    _id: "row-1", household_item_uuid: "uuid-1", product_name: "Bananas", dish_name: "Oatmeal",
+    store: "Groceries", action: "IN", quantity: 1, owner_id: "ownerA", _owner: "ownerA",
+    user_id: "ownerA", category: "produce", ...over,
+  };
+}
+
+function makeConn({ columns = ALL_COLUMNS, selectRows = [], countRow = { count: 1 } } = {}) {
   const calls = [];
   const conn = {
     calls,
@@ -35,7 +47,11 @@ function makeConn({ columns = ["_id", "_owner", "_device", "product_name", "quan
       if (u.includes("INFORMATION_SCHEMA.COLUMNS")) return [columns.map((c) => ({ column_name: c }))];
       if (u.startsWith("INSERT")) return [{ insertId: 101, affectedRows: 1 }];
       if (u.startsWith("UPDATE") || u.startsWith("DELETE")) return [{ affectedRows: 1 }];
-      if (u.startsWith("SELECT")) return [Array.isArray(selectRows) ? selectRows : []];
+      if (u.startsWith("SELECT")) {
+        // COUNT(*) probes -> a count row; row-finding SELECTs -> the canned target(s).
+        if (/COUNT\(/i.test(norm) || /SELECT\s+1\b/i.test(norm)) return [[countRow]];
+        return [Array.isArray(selectRows) ? selectRows : []];
+      }
       return [[]];
     },
     release() {},
@@ -50,6 +66,11 @@ function targets(conn, verb) {
     .map((c) => (c.sql.match(VERB_RE) || [])[2])
     .filter(Boolean);
 }
+function allWriteTargets(conn) {
+  return [...targets(conn, "INSERT"), ...targets(conn, "UPDATE"), ...targets(conn, "DELETE")];
+}
+const wroteForMember = (conn, memberId) => allWriteTargets(conn).some((t) => t.includes(memberId));
+const wroteShared = (conn) => allWriteTargets(conn).some((t) => t.startsWith("shared_"));
 
 // ---- module mock + import ----------------------------------------------------
 let da;
@@ -132,4 +153,65 @@ test("clearRecentDiscards clears shared + both members (household scope)", async
   assert.ok(mutated.some((t) => t === "shared_discards"), "shared_discards not cleared");
   assert.ok(mutated.some((t) => t === "ownerA_discards"), "owner _discards not cleared");
   assert.ok(mutated.some((t) => t === "memberB_discards"), "member _discards not cleared (household scope)");
+});
+
+// ==== EXPANDED NET: the remaining fan-out sites (item-4 consolidation targets) ====
+
+// KITCHEN — shared-only under WRITE_SHARED_ONLY (kitchen_api resolves _prod_kitchen
+// -> shared_kitchen, so the per-member fan-out is intentionally NOT reached; the
+// item-4 helper must PRESERVE this shared-only scope, not enable the legacy loop).
+test("checkInKitchenItem writes shared_kitchen ONLY (no per-member fan-out)", async () => {
+  CONN = makeConn();
+  await da.checkInKitchenItem(householdCtx(), { product_name: "Yogurt", category: "dairy" });
+  assert.ok(targets(CONN, "INSERT").includes("shared_kitchen"), "shared_kitchen insert missing");
+  assert.ok(!wroteForMember(CONN, "memberB"), "kitchen must NOT fan out to member tables (shared-only model)");
+});
+
+test("setKitchenItemProductImage updates shared_kitchen ONLY (no per-member fan-out)", async () => {
+  CONN = makeConn({ selectRows: [targetRow()] });
+  await da.setKitchenItemProductImage(householdCtx(), "row-1", { product_image_url: "http://img" });
+  assert.ok(targets(CONN, "UPDATE").includes("shared_kitchen"), "shared_kitchen update missing");
+  assert.ok(!wroteForMember(CONN, "memberB"), "kitchen must NOT fan out to member tables (shared-only model)");
+});
+
+// DISCARDS (household)
+test("discardKitchenItem inserts discard into shared + BOTH members (household)", async () => {
+  CONN = makeConn({ selectRows: [targetRow()] });
+  await da.discardKitchenItem(householdCtx(), "Bananas", "spoiled");
+  assert.ok(wroteForMember(CONN, "ownerA") && wroteForMember(CONN, "memberB"), "discard insert must fan out to both members");
+});
+
+test("deleteRecentDiscard (action=OUT) updates shared + BOTH members (household)", async () => {
+  CONN = makeConn({ selectRows: [targetRow({ action: "IN" })] });
+  await da.deleteRecentDiscard(householdCtx(), "Bananas");
+  assert.ok(wroteForMember(CONN, "ownerA") && wroteForMember(CONN, "memberB"), "discard update must fan out to both members");
+});
+
+// DISHES (user-private — never the other member)
+test("appendToRecentDish updates shared_dishes + ONLY the user (user-private)", async () => {
+  const nowIso = new Date().toISOString();
+  CONN = makeConn({ selectRows: [targetRow({ dish_name: "Oatmeal", ingredients: "[]", components: "[]", _createdDate: nowIso, _updatedDate: nowIso })] });
+  await da.appendToRecentDish(householdCtx(), { ingredients: ["banana"] });
+  assert.ok(wroteForMember(CONN, "ownerA"), "user dish update missing");
+  assert.ok(!wroteForMember(CONN, "memberB"), "dish update must NOT touch the other member (user-private)");
+});
+
+test("deleteDishLog deletes shared_dishes + ONLY the user (user-private)", async () => {
+  CONN = makeConn({ selectRows: [targetRow({ dish_name: "Oatmeal" })] });
+  await da.deleteDishLog(householdCtx(), { dish_name: "Oatmeal" });
+  assert.ok(wroteForMember(CONN, "ownerA"), "user dish delete missing");
+  assert.ok(!wroteForMember(CONN, "memberB"), "dish delete must NOT touch the other member (user-private)");
+});
+
+// SHOPPING (household)
+test("removeShoppingItem deletes from shared + BOTH members (household)", async () => {
+  CONN = makeConn({ selectRows: [targetRow({ product_name: "Bananas", household_item_uuid: "uuid-1" })] });
+  await da.removeShoppingItem(householdCtx(), "Bananas");
+  assert.ok(wroteForMember(CONN, "ownerA") && wroteForMember(CONN, "memberB"), "shopping delete must fan out to both members");
+});
+
+test("updateShoppingItemStore updates shared + BOTH members (household)", async () => {
+  CONN = makeConn({ selectRows: [targetRow({ product_name: "Bananas", household_item_uuid: "uuid-1" })] });
+  await da.updateShoppingItemStore(householdCtx(), "Bananas", "Costco");
+  assert.ok(wroteForMember(CONN, "ownerA") && wroteForMember(CONN, "memberB"), "shopping store-update must fan out to both members");
 });
