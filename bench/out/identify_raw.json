@@ -1,0 +1,1038 @@
+{
+  "raw": {
+    "gpt-4.1-mini": [
+      {
+        "model": "gpt-4.1-mini",
+        "id": "05afcaf9",
+        "truth": "Merlot Wine",
+        "truthCat": "beverages",
+        "pred": "Premium Dark Chocolate",
+        "predCat": "Chocolate",
+        "confidence": 0.6,
+        "needsReview": true,
+        "latencyMs": 2501,
+        "usage": {
+          "prompt_tokens": 2197,
+          "completion_tokens": 108,
+          "total_tokens": 2305,
+          "prompt_tokens_details": {
+            "cached_tokens": 0,
+            "audio_tokens": 0
+          },
+          "completion_tokens_details": {
+            "reasoning_tokens": 0,
+            "audio_tokens": 0,
+            "accepted_prediction_tokens": 0,
+            "rejected_prediction_tokens": 0
+          }
+        },
+        "cost": {
+          "usd": 0.0010516000000000002,
+          "est": false
+        },
+        "reasoningOff": false,
+        "error": null,
+        "accScore": 0
+      },
+      {
+        "model": "gpt-4.1-mini",
+        "id": "fda6bf54",
+        "truth": "Oven Roasted Turkey Breast",
+        "truthCat": "meat_seafood",
+        "pred": "Oven Roasted Turkey Breast",
+        "predCat": "Deli Meat",
+        "confidence": 0.95,
+        "needsReview": false,
+        "latencyMs": 2449,
+        "usage": {
+          "prompt_tokens": 2197,
+          "completion_tokens": 118,
+          "total_tokens": 2315,
+          "prompt_tokens_details": {
+            "cached_tokens": 0,
+            "audio_tokens": 0
+          },
+          "completion_tokens_details": {
+            "reasoning_tokens": 0,
+            "audio_tokens": 0,
+            "accepted_prediction_tokens": 0,
+            "rejected_prediction_tokens": 0
+          }
+        },
+        "cost": {
+          "usd": 0.0010676000000000001,
+          "est": false
+        },
+        "reasoningOff": false,
+        "error": null,
+        "accScore": 2
+      },
+      {
+        "model": "gpt-4.1-mini",
+        "id": "9b15da28",
+        "truth": "Marinated Smoked Pork Tenderloin",
+        "truthCat": "meat_seafood",
+        "pred": "Turkey Ham",
+        "predCat": "Deli Meat",
+        "confidence": 0.85,
+        "needsReview": false,
+        "latencyMs": 2329,
+        "usage": {
+          "prompt_tokens": 2197,
+          "completion_tokens": 122,
+          "total_tokens": 2319,
+          "prompt_tokens_details": {
+            "cached_tokens": 0,
+            "audio_tokens": 0
+          },
+          "completion_tokens_details": {
+            "reasoning_tokens": 0,
+            "audio_tokens": 0,
+            "accepted_prediction_tokens": 0,
+            "rejected_prediction_tokens": 0
+          }
+        },
+        "cost": {
+          "usd": 0.001074,
+          "est": false
+        },
+        "reasoningOff": false,
+        "error": null,
+        "accScore": 1
+      },
+      {
+        "model": "gpt-4.1-mini",
+        "id": "d56d99fb",
+        "truth": "Long Bone Heritage Pork Chop",
+        "truthCat": "meat_seafood",
+        "pred": "Long Bone Heritage Pork Chop",
+        "predCat": "Meat",
+        "confidence": 0.85,
+        "needsReview": true,
+        "latencyMs": 2470,
+        "usage": {
+          "prompt_tokens": 2197,
+          "completion_tokens": 125,
+          "total_tokens": 2322,
+          "prompt_tokens_details": {
+            "cached_tokens": 0,
+            "audio_tokens": 0
+          },
+          "completion_tokens_details": {
+            "reasoning_tokens": 0,
+            "audio_tokens": 0,
+            "accepted_prediction_tokens": 0,
+            "rejected_prediction_tokens": 0
+          }
+        },
+        "cost": {
+          "usd": 0.0010788000000000002,
+          "est": false
+        },
+        "reasoningOff": false,
+        "error": null,
+        "accScore": 2
+      },
+      {
+        "model": "gpt-4.1-mini",
+        "id": "0f566ab3",
+        "truth": "Asian Chopped Salad Kit",
+        "truthCat": "prepared_other",
+        "pred": "Chopped Kit Asian",
+        "predCat": "Pre-packaged Salad Kit",
+        "confidence": 0.85,
+        "needsReview": false,
+        "latencyMs": 2117,
+        "usage": {
+          "prompt_tokens": 2197,
+          "completion_tokens": 121,
+          "total_tokens": 2318,
+          "prompt_tokens_details": {
+            "cached_tokens": 0,
+            "audio_tokens": 0
+          },
+          "completion_tokens_details": {
+            "reasoning_tokens": 0,
+            "audio_tokens": 0,
+            "accepted_prediction_tokens": 0,
+            "rejected_prediction_tokens": 0
+          }
+        },
+        "cost": {
+          "usd": 0.0010724,
+          "est": false
+        },
+        "reasoningOff": false,
+        "error": null,
+        "accScore": 2
+      },
+      {
+        "model": "gpt-4.1-mini",
+        "id": "290acf6e",
+        "truth": "Basil Pesto",
+        "truthCat": "pantry",
+        "pred": "Basil Pesto",
+        "predCat": "Sauces & Condiments",
+        "confidence": 0.95,
+        "needsReview": false,
+        "latencyMs": 2152,
+        "usage": {
+          "prompt_tokens": 2197,
+          "completion_tokens": 126,
+          "total_tokens": 2323,
+          "prompt_tokens_details": {
+            "cached_tokens": 0,
+            "audio_tokens": 0
+          },
+          "completion_tokens_details": {
+            "reasoning_tokens": 0,
+            "audio_tokens": 0,
+            "accepted_prediction_tokens": 0,
+            "rejected_prediction_tokens": 0
+          }
+        },
+        "cost": {
+          "usd": 0.0010804,
+          "est": false
+        },
+        "reasoningOff": false,
+        "error": null,
+        "accScore": 2
+      },
+      {
+        "model": "gpt-4.1-mini",
+        "id": "c45c0cbe",
+        "truth": "Roasted Pine Nut Hummus",
+        "truthCat": "prepared_other",
+        "pred": "Roasted Pine Nut Hummus",
+        "predCat": "Dips & Spreads",
+        "confidence": 0.95,
+        "needsReview": false,
+        "latencyMs": 2853,
+        "usage": {
+          "prompt_tokens": 2197,
+          "completion_tokens": 136,
+          "total_tokens": 2333,
+          "prompt_tokens_details": {
+            "cached_tokens": 0,
+            "audio_tokens": 0
+          },
+          "completion_tokens_details": {
+            "reasoning_tokens": 0,
+            "audio_tokens": 0,
+            "accepted_prediction_tokens": 0,
+            "rejected_prediction_tokens": 0
+          }
+        },
+        "cost": {
+          "usd": 0.0010964000000000002,
+          "est": false
+        },
+        "reasoningOff": false,
+        "error": null,
+        "accScore": 2
+      },
+      {
+        "model": "gpt-4.1-mini",
+        "id": "ea5b519d",
+        "truth": "Provolone Cheese Slices",
+        "truthCat": "dairy_eggs",
+        "pred": "Provolone Cheese Slices",
+        "predCat": "Deli Cheese",
+        "confidence": 0.95,
+        "needsReview": false,
+        "latencyMs": 2061,
+        "usage": {
+          "prompt_tokens": 2197,
+          "completion_tokens": 128,
+          "total_tokens": 2325,
+          "prompt_tokens_details": {
+            "cached_tokens": 0,
+            "audio_tokens": 0
+          },
+          "completion_tokens_details": {
+            "reasoning_tokens": 0,
+            "audio_tokens": 0,
+            "accepted_prediction_tokens": 0,
+            "rejected_prediction_tokens": 0
+          }
+        },
+        "cost": {
+          "usd": 0.0010836,
+          "est": false
+        },
+        "reasoningOff": false,
+        "error": null,
+        "accScore": 2
+      },
+      {
+        "model": "gpt-4.1-mini",
+        "id": "56c41483",
+        "truth": "Mexican Style 4 Cheese Blend",
+        "truthCat": "dairy_eggs",
+        "pred": "Mexican Style 4 Cheese Blend",
+        "predCat": "Dairy",
+        "confidence": 0.95,
+        "needsReview": false,
+        "latencyMs": 2341,
+        "usage": {
+          "prompt_tokens": 2197,
+          "completion_tokens": 125,
+          "total_tokens": 2322,
+          "prompt_tokens_details": {
+            "cached_tokens": 0,
+            "audio_tokens": 0
+          },
+          "completion_tokens_details": {
+            "reasoning_tokens": 0,
+            "audio_tokens": 0,
+            "accepted_prediction_tokens": 0,
+            "rejected_prediction_tokens": 0
+          }
+        },
+        "cost": {
+          "usd": 0.0010788000000000002,
+          "est": false
+        },
+        "reasoningOff": false,
+        "error": null,
+        "accScore": 2
+      },
+      {
+        "model": "gpt-4.1-mini",
+        "id": "291f6fb7",
+        "truth": "Half & Half Blend",
+        "truthCat": "produce",
+        "pred": "Half & Half Blend Salad Greens",
+        "predCat": "Fresh Salad Greens",
+        "confidence": 0.85,
+        "needsReview": false,
+        "latencyMs": 2171,
+        "usage": {
+          "prompt_tokens": 2197,
+          "completion_tokens": 124,
+          "total_tokens": 2321,
+          "prompt_tokens_details": {
+            "cached_tokens": 0,
+            "audio_tokens": 0
+          },
+          "completion_tokens_details": {
+            "reasoning_tokens": 0,
+            "audio_tokens": 0,
+            "accepted_prediction_tokens": 0,
+            "rejected_prediction_tokens": 0
+          }
+        },
+        "cost": {
+          "usd": 0.0010772,
+          "est": false
+        },
+        "reasoningOff": false,
+        "error": null,
+        "accScore": 2
+      }
+    ],
+    "gpt-5.4-mini": [
+      {
+        "model": "gpt-5.4-mini",
+        "id": "05afcaf9",
+        "truth": "Merlot Wine",
+        "truthCat": "beverages",
+        "pred": "Bottled soda",
+        "predCat": "soft drink",
+        "confidence": 0.41,
+        "needsReview": true,
+        "latencyMs": 1246,
+        "usage": {
+          "prompt_tokens": 1659,
+          "completion_tokens": 101,
+          "total_tokens": 1760,
+          "prompt_tokens_details": {
+            "cached_tokens": 0,
+            "audio_tokens": 0
+          },
+          "completion_tokens_details": {
+            "reasoning_tokens": 0,
+            "audio_tokens": 0,
+            "accepted_prediction_tokens": 0,
+            "rejected_prediction_tokens": 0
+          }
+        },
+        "cost": {
+          "usd": 0.00061675,
+          "est": true
+        },
+        "reasoningOff": false,
+        "error": null,
+        "accScore": 0
+      },
+      {
+        "model": "gpt-5.4-mini",
+        "id": "fda6bf54",
+        "truth": "Oven Roasted Turkey Breast",
+        "truthCat": "meat_seafood",
+        "pred": "Oven Roasted Turkey Breast",
+        "predCat": "deli meat",
+        "confidence": 0.98,
+        "needsReview": false,
+        "latencyMs": 1348,
+        "usage": {
+          "prompt_tokens": 1659,
+          "completion_tokens": 139,
+          "total_tokens": 1798,
+          "prompt_tokens_details": {
+            "cached_tokens": 0,
+            "audio_tokens": 0
+          },
+          "completion_tokens_details": {
+            "reasoning_tokens": 0,
+            "audio_tokens": 0,
+            "accepted_prediction_tokens": 0,
+            "rejected_prediction_tokens": 0
+          }
+        },
+        "cost": {
+          "usd": 0.00069275,
+          "est": true
+        },
+        "reasoningOff": false,
+        "error": null,
+        "accScore": 2
+      },
+      {
+        "model": "gpt-5.4-mini",
+        "id": "9b15da28",
+        "truth": "Marinated Smoked Pork Tenderloin",
+        "truthCat": "meat_seafood",
+        "pred": "turkey ham",
+        "predCat": "deli meat",
+        "confidence": 0.72,
+        "needsReview": true,
+        "latencyMs": 1261,
+        "usage": {
+          "prompt_tokens": 1659,
+          "completion_tokens": 92,
+          "total_tokens": 1751,
+          "prompt_tokens_details": {
+            "cached_tokens": 0,
+            "audio_tokens": 0
+          },
+          "completion_tokens_details": {
+            "reasoning_tokens": 0,
+            "audio_tokens": 0,
+            "accepted_prediction_tokens": 0,
+            "rejected_prediction_tokens": 0
+          }
+        },
+        "cost": {
+          "usd": 0.00059875,
+          "est": true
+        },
+        "reasoningOff": false,
+        "error": null,
+        "accScore": 1
+      },
+      {
+        "model": "gpt-5.4-mini",
+        "id": "d56d99fb",
+        "truth": "Long Bone Heritage Pork Chop",
+        "truthCat": "meat_seafood",
+        "pred": "long bone heritage pork chop",
+        "predCat": "meat",
+        "confidence": 0.86,
+        "needsReview": false,
+        "latencyMs": 2002,
+        "usage": {
+          "prompt_tokens": 1659,
+          "completion_tokens": 135,
+          "total_tokens": 1794,
+          "prompt_tokens_details": {
+            "cached_tokens": 0,
+            "audio_tokens": 0
+          },
+          "completion_tokens_details": {
+            "reasoning_tokens": 0,
+            "audio_tokens": 0,
+            "accepted_prediction_tokens": 0,
+            "rejected_prediction_tokens": 0
+          }
+        },
+        "cost": {
+          "usd": 0.00068475,
+          "est": true
+        },
+        "reasoningOff": false,
+        "error": null,
+        "accScore": 2
+      },
+      {
+        "model": "gpt-5.4-mini",
+        "id": "0f566ab3",
+        "truth": "Asian Chopped Salad Kit",
+        "truthCat": "prepared_other",
+        "pred": "Asian Chopped Kit",
+        "predCat": "salad kit",
+        "confidence": 0.92,
+        "needsReview": false,
+        "latencyMs": 1482,
+        "usage": {
+          "prompt_tokens": 1659,
+          "completion_tokens": 91,
+          "total_tokens": 1750,
+          "prompt_tokens_details": {
+            "cached_tokens": 0,
+            "audio_tokens": 0
+          },
+          "completion_tokens_details": {
+            "reasoning_tokens": 0,
+            "audio_tokens": 0,
+            "accepted_prediction_tokens": 0,
+            "rejected_prediction_tokens": 0
+          }
+        },
+        "cost": {
+          "usd": 0.00059675,
+          "est": true
+        },
+        "reasoningOff": false,
+        "error": null,
+        "accScore": 2
+      },
+      {
+        "model": "gpt-5.4-mini",
+        "id": "290acf6e",
+        "truth": "Basil Pesto",
+        "truthCat": "pantry",
+        "pred": "Basil Pesto",
+        "predCat": "sauce",
+        "confidence": 0.92,
+        "needsReview": false,
+        "latencyMs": 1338,
+        "usage": {
+          "prompt_tokens": 1659,
+          "completion_tokens": 91,
+          "total_tokens": 1750,
+          "prompt_tokens_details": {
+            "cached_tokens": 0,
+            "audio_tokens": 0
+          },
+          "completion_tokens_details": {
+            "reasoning_tokens": 0,
+            "audio_tokens": 0,
+            "accepted_prediction_tokens": 0,
+            "rejected_prediction_tokens": 0
+          }
+        },
+        "cost": {
+          "usd": 0.00059675,
+          "est": true
+        },
+        "reasoningOff": false,
+        "error": null,
+        "accScore": 2
+      },
+      {
+        "model": "gpt-5.4-mini",
+        "id": "c45c0cbe",
+        "truth": "Roasted Pine Nut Hummus",
+        "truthCat": "prepared_other",
+        "pred": "Roasted Pine Nut Hummus",
+        "predCat": "hummus",
+        "confidence": 0.97,
+        "needsReview": false,
+        "latencyMs": 1251,
+        "usage": {
+          "prompt_tokens": 1659,
+          "completion_tokens": 115,
+          "total_tokens": 1774,
+          "prompt_tokens_details": {
+            "cached_tokens": 0,
+            "audio_tokens": 0
+          },
+          "completion_tokens_details": {
+            "reasoning_tokens": 0,
+            "audio_tokens": 0,
+            "accepted_prediction_tokens": 0,
+            "rejected_prediction_tokens": 0
+          }
+        },
+        "cost": {
+          "usd": 0.00064475,
+          "est": true
+        },
+        "reasoningOff": false,
+        "error": null,
+        "accScore": 2
+      },
+      {
+        "model": "gpt-5.4-mini",
+        "id": "ea5b519d",
+        "truth": "Provolone Cheese Slices",
+        "truthCat": "dairy_eggs",
+        "pred": "Provolone cheese slices",
+        "predCat": "Cheese",
+        "confidence": 0.97,
+        "needsReview": false,
+        "latencyMs": 1211,
+        "usage": {
+          "prompt_tokens": 1659,
+          "completion_tokens": 89,
+          "total_tokens": 1748,
+          "prompt_tokens_details": {
+            "cached_tokens": 0,
+            "audio_tokens": 0
+          },
+          "completion_tokens_details": {
+            "reasoning_tokens": 0,
+            "audio_tokens": 0,
+            "accepted_prediction_tokens": 0,
+            "rejected_prediction_tokens": 0
+          }
+        },
+        "cost": {
+          "usd": 0.00059275,
+          "est": true
+        },
+        "reasoningOff": false,
+        "error": null,
+        "accScore": 2
+      },
+      {
+        "model": "gpt-5.4-mini",
+        "id": "56c41483",
+        "truth": "Mexican Style 4 Cheese Blend",
+        "truthCat": "dairy_eggs",
+        "pred": "Mexican Style 4 Cheese Blend shredded cheese",
+        "predCat": "dairy/cheese",
+        "confidence": 0.97,
+        "needsReview": false,
+        "latencyMs": 1474,
+        "usage": {
+          "prompt_tokens": 1659,
+          "completion_tokens": 103,
+          "total_tokens": 1762,
+          "prompt_tokens_details": {
+            "cached_tokens": 0,
+            "audio_tokens": 0
+          },
+          "completion_tokens_details": {
+            "reasoning_tokens": 0,
+            "audio_tokens": 0,
+            "accepted_prediction_tokens": 0,
+            "rejected_prediction_tokens": 0
+          }
+        },
+        "cost": {
+          "usd": 0.00062075,
+          "est": true
+        },
+        "reasoningOff": false,
+        "error": null,
+        "accScore": 2
+      },
+      {
+        "model": "gpt-5.4-mini",
+        "id": "291f6fb7",
+        "truth": "Half & Half Blend",
+        "truthCat": "produce",
+        "pred": "blended salad greens",
+        "predCat": "produce",
+        "confidence": 0.92,
+        "needsReview": true,
+        "latencyMs": 1399,
+        "usage": {
+          "prompt_tokens": 1659,
+          "completion_tokens": 100,
+          "total_tokens": 1759,
+          "prompt_tokens_details": {
+            "cached_tokens": 0,
+            "audio_tokens": 0
+          },
+          "completion_tokens_details": {
+            "reasoning_tokens": 0,
+            "audio_tokens": 0,
+            "accepted_prediction_tokens": 0,
+            "rejected_prediction_tokens": 0
+          }
+        },
+        "cost": {
+          "usd": 0.00061475,
+          "est": true
+        },
+        "reasoningOff": false,
+        "error": null,
+        "accScore": 1
+      }
+    ],
+    "gpt-5.4": [
+      {
+        "model": "gpt-5.4",
+        "id": "05afcaf9",
+        "truth": "Merlot Wine",
+        "truthCat": "beverages",
+        "pred": "rotisserie chicken",
+        "predCat": "prepared deli meat",
+        "confidence": 0.47,
+        "needsReview": true,
+        "latencyMs": 2691,
+        "usage": {
+          "prompt_tokens": 1659,
+          "completion_tokens": 128,
+          "total_tokens": 1787,
+          "prompt_tokens_details": {
+            "cached_tokens": 0,
+            "audio_tokens": 0
+          },
+          "completion_tokens_details": {
+            "reasoning_tokens": 0,
+            "audio_tokens": 0,
+            "accepted_prediction_tokens": 0,
+            "rejected_prediction_tokens": 0
+          }
+        },
+        "cost": {
+          "usd": 0.00335375,
+          "est": true
+        },
+        "reasoningOff": false,
+        "error": null,
+        "accScore": 0
+      },
+      {
+        "model": "gpt-5.4",
+        "id": "fda6bf54",
+        "truth": "Oven Roasted Turkey Breast",
+        "truthCat": "meat_seafood",
+        "pred": "Oven Roasted Turkey Breast",
+        "predCat": "Deli meat",
+        "confidence": 0.98,
+        "needsReview": false,
+        "latencyMs": 1859,
+        "usage": {
+          "prompt_tokens": 1659,
+          "completion_tokens": 131,
+          "total_tokens": 1790,
+          "prompt_tokens_details": {
+            "cached_tokens": 0,
+            "audio_tokens": 0
+          },
+          "completion_tokens_details": {
+            "reasoning_tokens": 0,
+            "audio_tokens": 0,
+            "accepted_prediction_tokens": 0,
+            "rejected_prediction_tokens": 0
+          }
+        },
+        "cost": {
+          "usd": 0.00338375,
+          "est": true
+        },
+        "reasoningOff": false,
+        "error": null,
+        "accScore": 2
+      },
+      {
+        "model": "gpt-5.4",
+        "id": "9b15da28",
+        "truth": "Marinated Smoked Pork Tenderloin",
+        "truthCat": "meat_seafood",
+        "pred": "Turkey Hills Honey Cured Traditional sausage",
+        "predCat": "Smoked sausage",
+        "confidence": 0.56,
+        "needsReview": true,
+        "latencyMs": 2724,
+        "usage": {
+          "prompt_tokens": 1659,
+          "completion_tokens": 128,
+          "total_tokens": 1787,
+          "prompt_tokens_details": {
+            "cached_tokens": 0,
+            "audio_tokens": 0
+          },
+          "completion_tokens_details": {
+            "reasoning_tokens": 0,
+            "audio_tokens": 0,
+            "accepted_prediction_tokens": 0,
+            "rejected_prediction_tokens": 0
+          }
+        },
+        "cost": {
+          "usd": 0.00335375,
+          "est": true
+        },
+        "reasoningOff": false,
+        "error": null,
+        "accScore": 1
+      },
+      {
+        "model": "gpt-5.4",
+        "id": "d56d99fb",
+        "truth": "Long Bone Heritage Pork Chop",
+        "truthCat": "meat_seafood",
+        "pred": "Pork chop",
+        "predCat": "meat",
+        "confidence": 0.85,
+        "needsReview": false,
+        "latencyMs": 3019,
+        "usage": {
+          "prompt_tokens": 1659,
+          "completion_tokens": 90,
+          "total_tokens": 1749,
+          "prompt_tokens_details": {
+            "cached_tokens": 0,
+            "audio_tokens": 0
+          },
+          "completion_tokens_details": {
+            "reasoning_tokens": 0,
+            "audio_tokens": 0,
+            "accepted_prediction_tokens": 0,
+            "rejected_prediction_tokens": 0
+          }
+        },
+        "cost": {
+          "usd": 0.00297375,
+          "est": true
+        },
+        "reasoningOff": false,
+        "error": null,
+        "accScore": 1
+      },
+      {
+        "model": "gpt-5.4",
+        "id": "0f566ab3",
+        "truth": "Asian Chopped Salad Kit",
+        "truthCat": "prepared_other",
+        "pred": "Chopped Salad Kit",
+        "predCat": "Salad kit",
+        "confidence": 0.88,
+        "needsReview": false,
+        "latencyMs": 1653,
+        "usage": {
+          "prompt_tokens": 1659,
+          "completion_tokens": 80,
+          "total_tokens": 1739,
+          "prompt_tokens_details": {
+            "cached_tokens": 0,
+            "audio_tokens": 0
+          },
+          "completion_tokens_details": {
+            "reasoning_tokens": 0,
+            "audio_tokens": 0,
+            "accepted_prediction_tokens": 0,
+            "rejected_prediction_tokens": 0
+          }
+        },
+        "cost": {
+          "usd": 0.00287375,
+          "est": true
+        },
+        "reasoningOff": false,
+        "error": null,
+        "accScore": 1
+      },
+      {
+        "model": "gpt-5.4",
+        "id": "290acf6e",
+        "truth": "Basil Pesto",
+        "truthCat": "pantry",
+        "pred": "Basil Pesto",
+        "predCat": "Pasta sauce / pesto",
+        "confidence": 0.94,
+        "needsReview": false,
+        "latencyMs": 1995,
+        "usage": {
+          "prompt_tokens": 1659,
+          "completion_tokens": 84,
+          "total_tokens": 1743,
+          "prompt_tokens_details": {
+            "cached_tokens": 0,
+            "audio_tokens": 0
+          },
+          "completion_tokens_details": {
+            "reasoning_tokens": 0,
+            "audio_tokens": 0,
+            "accepted_prediction_tokens": 0,
+            "rejected_prediction_tokens": 0
+          }
+        },
+        "cost": {
+          "usd": 0.00291375,
+          "est": true
+        },
+        "reasoningOff": false,
+        "error": null,
+        "accScore": 2
+      },
+      {
+        "model": "gpt-5.4",
+        "id": "c45c0cbe",
+        "truth": "Roasted Pine Nut Hummus",
+        "truthCat": "prepared_other",
+        "pred": "Roasted Pine Nut Hummus",
+        "predCat": "Hummus",
+        "confidence": 0.98,
+        "needsReview": false,
+        "latencyMs": 2892,
+        "usage": {
+          "prompt_tokens": 1659,
+          "completion_tokens": 98,
+          "total_tokens": 1757,
+          "prompt_tokens_details": {
+            "cached_tokens": 0,
+            "audio_tokens": 0
+          },
+          "completion_tokens_details": {
+            "reasoning_tokens": 0,
+            "audio_tokens": 0,
+            "accepted_prediction_tokens": 0,
+            "rejected_prediction_tokens": 0
+          }
+        },
+        "cost": {
+          "usd": 0.00305375,
+          "est": true
+        },
+        "reasoningOff": false,
+        "error": null,
+        "accScore": 2
+      },
+      {
+        "model": "gpt-5.4",
+        "id": "ea5b519d",
+        "truth": "Provolone Cheese Slices",
+        "truthCat": "dairy_eggs",
+        "pred": "Provolone cheese slices",
+        "predCat": "Sliced cheese",
+        "confidence": 0.98,
+        "needsReview": false,
+        "latencyMs": 2600,
+        "usage": {
+          "prompt_tokens": 1659,
+          "completion_tokens": 101,
+          "total_tokens": 1760,
+          "prompt_tokens_details": {
+            "cached_tokens": 0,
+            "audio_tokens": 0
+          },
+          "completion_tokens_details": {
+            "reasoning_tokens": 0,
+            "audio_tokens": 0,
+            "accepted_prediction_tokens": 0,
+            "rejected_prediction_tokens": 0
+          }
+        },
+        "cost": {
+          "usd": 0.00308375,
+          "est": true
+        },
+        "reasoningOff": false,
+        "error": null,
+        "accScore": 2
+      },
+      {
+        "model": "gpt-5.4",
+        "id": "56c41483",
+        "truth": "Mexican Style 4 Cheese Blend",
+        "truthCat": "dairy_eggs",
+        "pred": "Mexican Style 4 Cheese Blend shredded cheese",
+        "predCat": "shredded cheese",
+        "confidence": 0.98,
+        "needsReview": false,
+        "latencyMs": 1906,
+        "usage": {
+          "prompt_tokens": 1659,
+          "completion_tokens": 102,
+          "total_tokens": 1761,
+          "prompt_tokens_details": {
+            "cached_tokens": 0,
+            "audio_tokens": 0
+          },
+          "completion_tokens_details": {
+            "reasoning_tokens": 0,
+            "audio_tokens": 0,
+            "accepted_prediction_tokens": 0,
+            "rejected_prediction_tokens": 0
+          }
+        },
+        "cost": {
+          "usd": 0.00309375,
+          "est": true
+        },
+        "reasoningOff": false,
+        "error": null,
+        "accScore": 2
+      },
+      {
+        "model": "gpt-5.4",
+        "id": "291f6fb7",
+        "truth": "Half & Half Blend",
+        "truthCat": "produce",
+        "pred": "Half & Half Blend salad greens",
+        "predCat": "Salad greens",
+        "confidence": 0.93,
+        "needsReview": false,
+        "latencyMs": 2096,
+        "usage": {
+          "prompt_tokens": 1659,
+          "completion_tokens": 82,
+          "total_tokens": 1741,
+          "prompt_tokens_details": {
+            "cached_tokens": 0,
+            "audio_tokens": 0
+          },
+          "completion_tokens_details": {
+            "reasoning_tokens": 0,
+            "audio_tokens": 0,
+            "accepted_prediction_tokens": 0,
+            "rejected_prediction_tokens": 0
+          }
+        },
+        "cost": {
+          "usd": 0.00289375,
+          "est": true
+        },
+        "reasoningOff": false,
+        "error": null,
+        "accScore": 2
+      }
+    ]
+  },
+  "agg": {
+    "gpt-4.1-mini": {
+      "n": 10,
+      "topLabelAccuracy": 0.8,
+      "partialRate": 0.1,
+      "wrongRate": 0.1,
+      "avgAccScore": 1.7,
+      "medianLatencyMs": 2341,
+      "p90LatencyMs": 2853,
+      "costPer1kImages": 1.08,
+      "costEst": false,
+      "merlotPred": "Premium Dark Chocolate"
+    },
+    "gpt-5.4-mini": {
+      "n": 10,
+      "topLabelAccuracy": 0.7,
+      "partialRate": 0.2,
+      "wrongRate": 0.1,
+      "avgAccScore": 1.6,
+      "medianLatencyMs": 1348,
+      "p90LatencyMs": 2002,
+      "costPer1kImages": 0.63,
+      "costEst": true,
+      "merlotPred": "Bottled soda"
+    },
+    "gpt-5.4": {
+      "n": 10,
+      "topLabelAccuracy": 0.6,
+      "partialRate": 0.3,
+      "wrongRate": 0.1,
+      "avgAccScore": 1.5,
+      "medianLatencyMs": 2600,
+      "p90LatencyMs": 3019,
+      "costPer1kImages": 3.1,
+      "costEst": true,
+      "merlotPred": "rotisserie chicken"
+    }
+  }
+}

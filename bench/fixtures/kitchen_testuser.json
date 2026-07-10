@@ -1,0 +1,69 @@
+{
+  "owner": "1f4db6b6-2f62-4558-aa40-c8e82527dc74",
+  "household_members": [
+    "1f4db6b6-2f62-4558-aa40-c8e82527dc74"
+  ],
+  "count": 5,
+  "items": [
+    {
+      "product_name": "Bananas",
+      "brand": null,
+      "variant": null,
+      "category": null,
+      "quantity": null,
+      "is_opened": false,
+      "fill_percent": null,
+      "expiration": null,
+      "storage_location": "pantry",
+      "description": null
+    },
+    {
+      "product_name": "oat milk",
+      "brand": null,
+      "variant": null,
+      "category": null,
+      "quantity": null,
+      "is_opened": false,
+      "fill_percent": null,
+      "expiration": null,
+      "storage_location": "fridge",
+      "description": null
+    },
+    {
+      "product_name": "Eggs",
+      "brand": null,
+      "variant": null,
+      "category": null,
+      "quantity": null,
+      "is_opened": false,
+      "fill_percent": null,
+      "expiration": null,
+      "storage_location": "fridge",
+      "description": null
+    },
+    {
+      "product_name": "Eggs",
+      "brand": null,
+      "variant": null,
+      "category": null,
+      "quantity": null,
+      "is_opened": false,
+      "fill_percent": null,
+      "expiration": null,
+      "storage_location": null,
+      "description": null
+    },
+    {
+      "product_name": "oat milk",
+      "brand": null,
+      "variant": null,
+      "category": null,
+      "quantity": null,
+      "is_opened": false,
+      "fill_percent": null,
+      "expiration": null,
+      "storage_location": null,
+      "description": null
+    }
+  ]
+}

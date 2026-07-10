@@ -1,0 +1,102 @@
+[
+  {
+    "id": "lunch_sourdough",
+    "group": "tool-required (write)",
+    "transcript": "For lunch I had sourdough, one slice, with cottage cheese, guac on top",
+    "expect": "write",
+    "accept": ["log_dish_from_voice", "log_dish_ingredients"],
+    "note": "Matt's exact lunch message — must log a dish"
+  },
+  {
+    "id": "iced_coffee",
+    "group": "tool-required (write)",
+    "transcript": "I just had an iced coffee",
+    "expect": "write",
+    "accept": ["log_dish_from_voice", "log_dish_ingredients"],
+    "note": "terse consumption — should still log"
+  },
+  {
+    "id": "checkin_kitchen",
+    "group": "tool-required (write)",
+    "transcript": "checked into my kitchen: black beans and salsa",
+    "expect": "write",
+    "accept": ["check_in_item", "check_in_many_items"],
+    "note": "casual phrasing kitchen check-in"
+  },
+  {
+    "id": "add_two_items",
+    "group": "tool-required (write)",
+    "transcript": "add ground turkey and salmon to my shopping list",
+    "expect": "write",
+    "accept": ["add_to_shopping_list", "add_many_to_shopping_list"],
+    "note": "explicit multi-item add"
+  },
+  {
+    "id": "add_protein_staples",
+    "group": "tool-required (write)",
+    "transcript": "add high-protein staples for the week to my list",
+    "expect": "write",
+    "accept": ["add_to_shopping_list", "add_many_to_shopping_list"],
+    "note": "batch/interpretive add — model must expand staples and add them"
+  },
+  {
+    "id": "log_dinner_batch",
+    "group": "tool-required (write)",
+    "transcript": "log dinner: 2 margaritas, half a burger, nachos, fries",
+    "expect": "write",
+    "accept": ["log_dish_from_voice", "log_dish_ingredients"],
+    "note": "multi-component dinner log"
+  },
+  {
+    "id": "readback_ate_today",
+    "group": "tool-forbidden (read-back → READ tool, no write)",
+    "transcript": "what did I eat today?",
+    "expect": "read",
+    "accept": ["get_recent_dishes"],
+    "note": "read-back must use a READ tool, never a write"
+  },
+  {
+    "id": "readback_shopping_list",
+    "group": "tool-forbidden (read-back → READ tool, no write)",
+    "transcript": "what's on my shopping list right now?",
+    "expect": "read",
+    "accept": ["get_shopping_list"],
+    "note": "read-back must use a READ tool, never a write"
+  },
+  {
+    "id": "chat_buttermilk_sub",
+    "group": "tool-forbidden (pure chat, NO tool)",
+    "transcript": "what's a good substitute for buttermilk?",
+    "expect": "none",
+    "accept": [],
+    "note": "general knowledge — answer directly, no tool"
+  },
+  {
+    "id": "chat_rice_storage",
+    "group": "tool-forbidden (pure chat, NO tool)",
+    "transcript": "how long does cooked rice last in the fridge?",
+    "expect": "none",
+    "accept": [],
+    "note": "general knowledge — answer directly, no tool"
+  },
+  {
+    "id": "chat_thinking_tacos",
+    "group": "tool-forbidden (musing, NO write)",
+    "transcript": "I'm thinking about making tacos tonight",
+    "expect": "none",
+    "accept": [],
+    "note": "no explicit command — must not fire a write; converse/ask instead"
+  },
+  {
+    "id": "self_poison_relog",
+    "group": "self-poisoning (must CALL tool again)",
+    "transcript": "log my lunch: turkey sandwich",
+    "history": [
+      { "role": "user", "content": "log my lunch: turkey sandwich" },
+      { "role": "assistant", "content": "Done — your lunch (turkey sandwich) has been logged. ✅" }
+    ],
+    "expect": "write",
+    "accept": ["log_dish_from_voice", "log_dish_ingredients"],
+    "note": "prior assistant 'logged' line is a FALSE confirmation in history; on repeat, model MUST call the tool again (system prompt forbids trusting history)"
+  }
+]

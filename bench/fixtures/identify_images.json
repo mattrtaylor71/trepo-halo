@@ -1,0 +1,85 @@
+{
+  "bucket": "trepo-grocery-uploads-dev",
+  "images": [
+    {
+      "id": "05afcaf9",
+      "s3_key": "images/8554b7a3-6421-4a36-b54b-9366f72437cb/halo-d45b-5085/2026/07/06/05afcaf963f94b81acced3ee72c18910.jpg",
+      "truth_name": "Merlot Wine",
+      "truth_brand": null,
+      "truth_category": "beverages",
+      "source_table": "shared_archive_kitchen"
+    },
+    {
+      "id": "fda6bf54",
+      "s3_key": "images/8554b7a3-6421-4a36-b54b-9366f72437cb/halo-d45b-5085/2026/07/06/fda6bf54c5ad40e59b2e58685be45ed6.jpg",
+      "truth_name": "Oven Roasted Turkey Breast",
+      "truth_brand": "Primo Taglio",
+      "truth_category": "meat_seafood",
+      "source_table": "shared_kitchen"
+    },
+    {
+      "id": "9b15da28",
+      "s3_key": "images/8554b7a3-6421-4a36-b54b-9366f72437cb/halo-d45b-5085/2026/07/06/9b15da28a82a4a338d2f926c69b14a4e.jpg",
+      "truth_name": "Marinated Smoked Pork Tenderloin",
+      "truth_brand": "Pecan Hams",
+      "truth_category": "meat_seafood",
+      "source_table": "shared_kitchen"
+    },
+    {
+      "id": "d56d99fb",
+      "s3_key": "images/8554b7a3-6421-4a36-b54b-9366f72437cb/halo-d45b-5085/2026/07/06/d56d99fb470d43a984452f961ff8f1e9.jpg",
+      "truth_name": "Long Bone Heritage Pork Chop",
+      "truth_brand": null,
+      "truth_category": "meat_seafood",
+      "source_table": "shared_kitchen"
+    },
+    {
+      "id": "0f566ab3",
+      "s3_key": "images/8554b7a3-6421-4a36-b54b-9366f72437cb/halo-d45b-5085/2026/07/06/0f566ab3152c42ef94d8171abaa45bfe.jpg",
+      "truth_name": "Asian Chopped Salad Kit",
+      "truth_brand": "Taylor Farms",
+      "truth_category": "prepared_other",
+      "source_table": "shared_kitchen"
+    },
+    {
+      "id": "290acf6e",
+      "s3_key": "images/8554b7a3-6421-4a36-b54b-9366f72437cb/halo-d45b-5085/2026/07/06/290acf6ebdcb4d0fbbc98b95a4b191dc.jpg",
+      "truth_name": "Basil Pesto",
+      "truth_brand": "Giovanni Rana",
+      "truth_category": "pantry",
+      "source_table": "shared_kitchen"
+    },
+    {
+      "id": "c45c0cbe",
+      "s3_key": "images/8554b7a3-6421-4a36-b54b-9366f72437cb/halo-d45b-5085/2026/07/06/c45c0cbeea8a4c3ca3082457bf211911.jpg",
+      "truth_name": "Roasted Pine Nut Hummus",
+      "truth_brand": "Sabra",
+      "truth_category": "prepared_other",
+      "source_table": "shared_kitchen"
+    },
+    {
+      "id": "ea5b519d",
+      "s3_key": "images/8554b7a3-6421-4a36-b54b-9366f72437cb/halo-d45b-5085/2026/07/06/ea5b519d930a451ba736f537c1367474.jpg",
+      "truth_name": "Provolone Cheese Slices",
+      "truth_brand": "Lucerne",
+      "truth_category": "dairy_eggs",
+      "source_table": "shared_kitchen"
+    },
+    {
+      "id": "56c41483",
+      "s3_key": "images/8554b7a3-6421-4a36-b54b-9366f72437cb/halo-d45b-5085/2026/07/06/56c4148373c447faae1cb6029bcdb296.jpg",
+      "truth_name": "Mexican Style 4 Cheese Blend",
+      "truth_brand": "Lucerne",
+      "truth_category": "dairy_eggs",
+      "source_table": "shared_kitchen"
+    },
+    {
+      "id": "291f6fb7",
+      "s3_key": "images/8554b7a3-6421-4a36-b54b-9366f72437cb/halo-d45b-5085/2026/07/06/291f6fb767864442917078aeec634d00.jpg",
+      "truth_name": "Half & Half Blend",
+      "truth_brand": "O Organics",
+      "truth_category": "produce",
+      "source_table": "shared_kitchen"
+    }
+  ]
+}

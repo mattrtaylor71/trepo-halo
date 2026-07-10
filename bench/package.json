@@ -1,0 +1,18 @@
+{
+  "name": "trepo-model-bench",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Local model-upgrade benchmark harness (no prod changes). Compares deployed OpenAI models vs upgrade candidates on 4 surfaces using real data.",
+  "scripts": {
+    "thyme": "node 01_thyme.mjs",
+    "recipes": "node 02_recipes.mjs",
+    "identify": "node 03_identify.mjs",
+    "home": "node 04_home.mjs"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.111.0",
+    "mysql2": "^3.22.6",
+    "openai": "^6.46.0"
+  }
+}

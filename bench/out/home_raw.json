@@ -1,0 +1,1175 @@
+{
+  "testuser": {
+    "gpt-4o-mini": {
+      "ok": true,
+      "error": null,
+      "latencyMs": 10184,
+      "withinDeadline": true,
+      "count": 33,
+      "dupWithKitchen": 0,
+      "dupInternal": 0,
+      "usage": {
+        "prompt_tokens": 318,
+        "completion_tokens": 945,
+        "total_tokens": 1263,
+        "prompt_tokens_details": {
+          "cached_tokens": 0,
+          "audio_tokens": 0
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 0,
+          "audio_tokens": 0,
+          "accepted_prediction_tokens": 0,
+          "rejected_prediction_tokens": 0
+        }
+      },
+      "cost": {
+        "usd": 0.0006147,
+        "est": false
+      },
+      "reasoningOff": false,
+      "suggestions": [
+        {
+          "item_name": "Whole Wheat Bread",
+          "reason": "Good for breakfast or sandwiches",
+          "confidence": 0.9
+        },
+        {
+          "item_name": "Almond Butter",
+          "reason": "Great with bananas for snacks",
+          "confidence": 0.8
+        },
+        {
+          "item_name": "Greek Yogurt",
+          "reason": "High in protein and good for breakfast",
+          "confidence": 0.85
+        },
+        {
+          "item_name": "Spinach",
+          "reason": "Can be used in omelets and smoothies",
+          "confidence": 0.7
+        },
+        {
+          "item_name": "Chicken Breast",
+          "reason": "Versatile protein option for meals",
+          "confidence": 0.9
+        },
+        {
+          "item_name": "Brown Rice",
+          "reason": "Healthy side dish and filling",
+          "confidence": 0.75
+        },
+        {
+          "item_name": "Canned Black Beans",
+          "reason": "Good for salads and protein source",
+          "confidence": 0.8
+        },
+        {
+          "item_name": "Avocados",
+          "reason": "Healthy fats and great for toast",
+          "confidence": 0.8
+        },
+        {
+          "item_name": "Tomatoes",
+          "reason": "Useful for salads and cooking",
+          "confidence": 0.75
+        },
+        {
+          "item_name": "Bell Peppers",
+          "reason": "Great for salads and stir-fries",
+          "confidence": 0.7
+        },
+        {
+          "item_name": "Broccoli",
+          "reason": "Nutrient-rich vegetable for sides",
+          "confidence": 0.7
+        },
+        {
+          "item_name": "Carrots",
+          "reason": "Good for snacking and cooking",
+          "confidence": 0.75
+        },
+        {
+          "item_name": "Quinoa",
+          "reason": "Healthy grain alternative",
+          "confidence": 0.7
+        },
+        {
+          "item_name": "Honey",
+          "reason": "Natural sweetener for yogurt or smoothies",
+          "confidence": 0.65
+        },
+        {
+          "item_name": "Peanut Butter",
+          "reason": "Another option for toast and snacks",
+          "confidence": 0.6
+        },
+        {
+          "item_name": "Frozen Berries",
+          "reason": "Great for smoothies and oatmeal",
+          "confidence": 0.8
+        },
+        {
+          "item_name": "Cinnamon",
+          "reason": "Flavor for oatmeal and smoothies",
+          "confidence": 0.6
+        },
+        {
+          "item_name": "Feta Cheese",
+          "reason": "Good topping for salads and omelets",
+          "confidence": 0.65
+        },
+        {
+          "item_name": "Chickpeas",
+          "reason": "Versatile for salads and hummus",
+          "confidence": 0.7
+        },
+        {
+          "item_name": "Zucchini",
+          "reason": "Can be used in stir-fries and baking",
+          "confidence": 0.6
+        },
+        {
+          "item_name": "Pasta",
+          "reason": "Quick meal option and versatile",
+          "confidence": 0.7
+        },
+        {
+          "item_name": "Coconut Milk",
+          "reason": "Great for smoothies and curries",
+          "confidence": 0.6
+        },
+        {
+          "item_name": "Olive Oil",
+          "reason": "Essential for cooking and dressings",
+          "confidence": 0.8
+        },
+        {
+          "item_name": "Garlic",
+          "reason": "Flavor enhancer for many dishes",
+          "confidence": 0.7
+        },
+        {
+          "item_name": "Onions",
+          "reason": "Basic cooking ingredient for flavor",
+          "confidence": 0.75
+        },
+        {
+          "item_name": "Lentils",
+          "reason": "Healthy protein source for meals",
+          "confidence": 0.65
+        },
+        {
+          "item_name": "Cucumber",
+          "reason": "Good for salads and snacking",
+          "confidence": 0.7
+        },
+        {
+          "item_name": "Potatoes",
+          "reason": "Versatile side dish option",
+          "confidence": 0.65
+        },
+        {
+          "item_name": "Salsa",
+          "reason": "Good for snacking with chips or topping",
+          "confidence": 0.6
+        },
+        {
+          "item_name": "Tortillas",
+          "reason": "For wraps and quick meals",
+          "confidence": 0.65
+        },
+        {
+          "item_name": "Vanilla Extract",
+          "reason": "Enhances flavor in baking and smoothies",
+          "confidence": 0.6
+        },
+        {
+          "item_name": "Dried Herbs",
+          "reason": "Enhances flavor in cooking",
+          "confidence": 0.55
+        },
+        {
+          "item_name": "Nuts",
+          "reason": "Healthy snack option",
+          "confidence": 0.6
+        }
+      ]
+    },
+    "gpt-5.4-mini": {
+      "ok": true,
+      "error": null,
+      "latencyMs": 5470,
+      "withinDeadline": true,
+      "count": 30,
+      "dupWithKitchen": 0,
+      "dupInternal": 0,
+      "usage": {
+        "prompt_tokens": 317,
+        "completion_tokens": 913,
+        "total_tokens": 1230,
+        "prompt_tokens_details": {
+          "cached_tokens": 0,
+          "audio_tokens": 0
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 0,
+          "audio_tokens": 0,
+          "accepted_prediction_tokens": 0,
+          "rejected_prediction_tokens": 0
+        }
+      },
+      "cost": {
+        "usd": 0.00190525,
+        "est": true
+      },
+      "reasoningOff": false,
+      "suggestions": [
+        {
+          "item_name": "Bread",
+          "reason": "Useful for breakfasts and quick meals with eggs",
+          "confidence": 0.95
+        },
+        {
+          "item_name": "Butter",
+          "reason": "Common staple for toast, cooking, and baking",
+          "confidence": 0.9
+        },
+        {
+          "item_name": "Milk",
+          "reason": "Handy for cereal, cooking, and baking if oat milk runs out",
+          "confidence": 0.72
+        },
+        {
+          "item_name": "Greek Yogurt",
+          "reason": "Good protein-rich breakfast or snack option",
+          "confidence": 0.88
+        },
+        {
+          "item_name": "Cheddar Cheese",
+          "reason": "Pairs well with eggs and sandwiches",
+          "confidence": 0.87
+        },
+        {
+          "item_name": "Chicken Breast",
+          "reason": "Easy lean protein for dinners and meal prep",
+          "confidence": 0.84
+        },
+        {
+          "item_name": "Ground Turkey",
+          "reason": "Versatile protein for tacos, pasta, and bowls",
+          "confidence": 0.8
+        },
+        {
+          "item_name": "Salmon Fillets",
+          "reason": "Healthy dinner protein to balance the week",
+          "confidence": 0.77
+        },
+        {
+          "item_name": "Spinach",
+          "reason": "Great for omelets, smoothies, and salads",
+          "confidence": 0.93
+        },
+        {
+          "item_name": "Broccoli",
+          "reason": "Nutrient-dense side vegetable for meals",
+          "confidence": 0.91
+        },
+        {
+          "item_name": "Carrots",
+          "reason": "Long-lasting vegetable for snacks and cooking",
+          "confidence": 0.89
+        },
+        {
+          "item_name": "Yellow Onions",
+          "reason": "Basic flavor base for many recipes",
+          "confidence": 0.92
+        },
+        {
+          "item_name": "Garlic",
+          "reason": "Essential seasoning for savory cooking",
+          "confidence": 0.94
+        },
+        {
+          "item_name": "Tomatoes",
+          "reason": "Useful for salads, sandwiches, and cooking",
+          "confidence": 0.82
+        },
+        {
+          "item_name": "Avocados",
+          "reason": "Good with eggs, toast, and bowls",
+          "confidence": 0.86
+        },
+        {
+          "item_name": "Apples",
+          "reason": "Easy fruit for snacks and lunches",
+          "confidence": 0.9
+        },
+        {
+          "item_name": "Blueberries",
+          "reason": "Great with yogurt, oatmeal, or smoothies",
+          "confidence": 0.84
+        },
+        {
+          "item_name": "Lemons",
+          "reason": "Adds flavor to water, fish, and vegetables",
+          "confidence": 0.76
+        },
+        {
+          "item_name": "Rice",
+          "reason": "A versatile staple for many meals",
+          "confidence": 0.93
+        },
+        {
+          "item_name": "Pasta",
+          "reason": "Quick dinner base for busy weeknights",
+          "confidence": 0.91
+        },
+        {
+          "item_name": "Oatmeal",
+          "reason": "Complements the oat milk for breakfast",
+          "confidence": 0.88
+        },
+        {
+          "item_name": "Peanut Butter",
+          "reason": "Easy protein snack and sandwich spread",
+          "confidence": 0.9
+        },
+        {
+          "item_name": "Granola",
+          "reason": "Good topping for yogurt or quick breakfast",
+          "confidence": 0.8
+        },
+        {
+          "item_name": "Tortillas",
+          "reason": "Useful for wraps, breakfast burritos, and quesadillas",
+          "confidence": 0.85
+        },
+        {
+          "item_name": "Black Beans",
+          "reason": "Affordable protein and fiber for bowls and tacos",
+          "confidence": 0.83
+        },
+        {
+          "item_name": "Canned Tuna",
+          "reason": "Shelf-stable protein for quick lunches",
+          "confidence": 0.79
+        },
+        {
+          "item_name": "Olive Oil",
+          "reason": "Kitchen staple for cooking and dressing",
+          "confidence": 0.92
+        },
+        {
+          "item_name": "Salt",
+          "reason": "Basic seasoning that may need restocking",
+          "confidence": 0.97
+        },
+        {
+          "item_name": "Black Pepper",
+          "reason": "Common seasoning for eggs and savory dishes",
+          "confidence": 0.95
+        },
+        {
+          "item_name": "Coffee Beans",
+          "reason": "Common breakfast staple if they drink coffee",
+          "confidence": 0.68
+        }
+      ]
+    },
+    "gpt-5.4": {
+      "ok": true,
+      "error": null,
+      "latencyMs": 17223,
+      "withinDeadline": true,
+      "count": 30,
+      "dupWithKitchen": 0,
+      "dupInternal": 0,
+      "usage": {
+        "prompt_tokens": 317,
+        "completion_tokens": 968,
+        "total_tokens": 1285,
+        "prompt_tokens_details": {
+          "cached_tokens": 0,
+          "audio_tokens": 0
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 0,
+          "audio_tokens": 0,
+          "accepted_prediction_tokens": 0,
+          "rejected_prediction_tokens": 0
+        }
+      },
+      "cost": {
+        "usd": 0.01007625,
+        "est": true
+      },
+      "reasoningOff": false,
+      "suggestions": [
+        {
+          "item_name": "Whole Wheat Bread",
+          "reason": "Pairs well with eggs and is a common breakfast staple likely missing",
+          "confidence": 0.95
+        },
+        {
+          "item_name": "Peanut Butter",
+          "reason": "Goes with bananas and toast for quick meals and snacks",
+          "confidence": 0.93
+        },
+        {
+          "item_name": "Greek Yogurt",
+          "reason": "Adds protein and works well with bananas for breakfast",
+          "confidence": 0.9
+        },
+        {
+          "item_name": "Strawberries",
+          "reason": "Adds fruit variety for breakfasts and snacks",
+          "confidence": 0.84
+        },
+        {
+          "item_name": "Blueberries",
+          "reason": "Useful for oatmeal, smoothies, or yogurt bowls",
+          "confidence": 0.82
+        },
+        {
+          "item_name": "Baby Spinach",
+          "reason": "Complements eggs and adds an easy vegetable to meals",
+          "confidence": 0.91
+        },
+        {
+          "item_name": "Avocados",
+          "reason": "Good with eggs and toast for balanced breakfasts",
+          "confidence": 0.86
+        },
+        {
+          "item_name": "Chicken Breast",
+          "reason": "Provides a versatile lean protein option missing from the kitchen",
+          "confidence": 0.89
+        },
+        {
+          "item_name": "Salmon Fillets",
+          "reason": "Adds protein and healthy fats for meal variety",
+          "confidence": 0.8
+        },
+        {
+          "item_name": "Brown Rice",
+          "reason": "Useful pantry staple to round out lunches and dinners",
+          "confidence": 0.88
+        },
+        {
+          "item_name": "Pasta",
+          "reason": "Common staple for quick dinners and likely not on hand",
+          "confidence": 0.85
+        },
+        {
+          "item_name": "Marinara Sauce",
+          "reason": "Pairs with pasta for an easy meal",
+          "confidence": 0.83
+        },
+        {
+          "item_name": "Yellow Onions",
+          "reason": "Basic cooking ingredient for many savory dishes",
+          "confidence": 0.94
+        },
+        {
+          "item_name": "Garlic",
+          "reason": "Essential flavor base for cooking proteins and vegetables",
+          "confidence": 0.94
+        },
+        {
+          "item_name": "Bell Peppers",
+          "reason": "Useful for omelets, stir-fries, and snacks",
+          "confidence": 0.87
+        },
+        {
+          "item_name": "Broccoli",
+          "reason": "Adds a nutritious vegetable side for dinners",
+          "confidence": 0.86
+        },
+        {
+          "item_name": "Carrots",
+          "reason": "Versatile produce for snacks, roasting, or soups",
+          "confidence": 0.84
+        },
+        {
+          "item_name": "Sweet Potatoes",
+          "reason": "Good source of fiber and pairs with eggs or chicken",
+          "confidence": 0.81
+        },
+        {
+          "item_name": "Black Beans",
+          "reason": "Affordable protein and fiber for bowls or tacos",
+          "confidence": 0.82
+        },
+        {
+          "item_name": "Canned Tomatoes",
+          "reason": "Handy pantry ingredient for soups, sauces, and stews",
+          "confidence": 0.8
+        },
+        {
+          "item_name": "Cheddar Cheese",
+          "reason": "Useful for eggs, sandwiches, and quick meals",
+          "confidence": 0.88
+        },
+        {
+          "item_name": "Butter",
+          "reason": "Common staple for cooking eggs and spreading on toast",
+          "confidence": 0.85
+        },
+        {
+          "item_name": "Olive Oil",
+          "reason": "Core cooking staple likely needed for everyday meals",
+          "confidence": 0.92
+        },
+        {
+          "item_name": "Rolled Oats",
+          "reason": "Pairs naturally with oat milk and bananas for breakfast",
+          "confidence": 0.96
+        },
+        {
+          "item_name": "Ground Cinnamon",
+          "reason": "Great with bananas, oats, and yogurt",
+          "confidence": 0.79
+        },
+        {
+          "item_name": "Maple Syrup",
+          "reason": "Useful topping for oats, yogurt, or breakfasts",
+          "confidence": 0.74
+        },
+        {
+          "item_name": "Almonds",
+          "reason": "Adds a healthy snack and topping for breakfast bowls",
+          "confidence": 0.76
+        },
+        {
+          "item_name": "Tortillas",
+          "reason": "Works with eggs, beans, and vegetables for easy meals",
+          "confidence": 0.78
+        },
+        {
+          "item_name": "Salsa",
+          "reason": "Pairs with eggs and tortillas for quick breakfasts or dinners",
+          "confidence": 0.77
+        },
+        {
+          "item_name": "Coffee",
+          "reason": "Common weekly staple often bought alongside oat milk",
+          "confidence": 0.72
+        }
+      ]
+    },
+    "__judge": {
+      "mapping": {
+        "A": "gpt-5.4",
+        "B": "gpt-4o-mini",
+        "C": "gpt-5.4-mini"
+      },
+      "verdict": {
+        "scores": {
+          "A": {
+            "relevance": 9,
+            "practicality": 9,
+            "comment": "Strong ties to existing inventory (oats/cinnamon/maple with oat milk and bananas; spinach/avocado/cheese with eggs). Concrete, buyable products, no duplicates of inventory, sensible variety."
+          },
+          "B": {
+            "relevance": 7,
+            "practicality": 8,
+            "comment": "Good complements but includes vaguer items like 'Nuts' and 'Dried Herbs'. Coconut milk slightly redundant with oat milk. Less explicit tie to the specific inventory."
+          },
+          "C": {
+            "relevance": 8,
+            "practicality": 8,
+            "comment": "Well-tied to eggs and oat milk (oatmeal, granola, cheese, avocado). Suggesting Milk is odd given oat milk already present, but framed as backup. Concrete items, good variety."
+          }
+        },
+        "winner": "A",
+        "why": "Set A best complements the specific inventory (eggs and banana/oat-milk breakfast pairings), offers concrete buyable products with no duplicates and excellent variety, edging out C's slightly redundant milk suggestion and B's vague categories."
+      },
+      "winnerModel": "gpt-5.4"
+    }
+  },
+  "owner3ed": {
+    "gpt-4o-mini": {
+      "ok": true,
+      "error": null,
+      "latencyMs": 11394,
+      "withinDeadline": true,
+      "count": 32,
+      "dupWithKitchen": 1,
+      "dupInternal": 0,
+      "usage": {
+        "prompt_tokens": 2787,
+        "completion_tokens": 983,
+        "total_tokens": 3770,
+        "prompt_tokens_details": {
+          "cached_tokens": 0,
+          "audio_tokens": 0
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 0,
+          "audio_tokens": 0,
+          "accepted_prediction_tokens": 0,
+          "rejected_prediction_tokens": 0
+        }
+      },
+      "cost": {
+        "usd": 0.0010078499999999998,
+        "est": false
+      },
+      "reasoningOff": false,
+      "suggestions": [
+        {
+          "item_name": "Quinoa",
+          "reason": "Good source of protein and complements salads.",
+          "confidence": 0.9
+        },
+        {
+          "item_name": "Chickpeas",
+          "reason": "Great for salads and hummus, adds protein.",
+          "confidence": 0.85
+        },
+        {
+          "item_name": "Greek Yogurt",
+          "reason": "Versatile for snacks and smoothies, adds probiotics.",
+          "confidence": 0.8
+        },
+        {
+          "item_name": "Bell Peppers",
+          "reason": "Adds color and crunch to salads and dishes.",
+          "confidence": 0.85
+        },
+        {
+          "item_name": "Lemons",
+          "reason": "Useful for dressings and flavoring dishes.",
+          "confidence": 0.9
+        },
+        {
+          "item_name": "Garlic",
+          "reason": "Essential for flavor in many recipes.",
+          "confidence": 0.95
+        },
+        {
+          "item_name": "Ginger",
+          "reason": "Adds flavor to dishes and is good for digestion.",
+          "confidence": 0.8
+        },
+        {
+          "item_name": "Cilantro",
+          "reason": "Great for garnishing and flavoring dishes.",
+          "confidence": 0.75
+        },
+        {
+          "item_name": "Feta Cheese",
+          "reason": "Complements salads and Mediterranean dishes.",
+          "confidence": 0.8
+        },
+        {
+          "item_name": "Rice Noodles",
+          "reason": "Can be used in stir-fries and soups.",
+          "confidence": 0.75
+        },
+        {
+          "item_name": "Pine Nuts",
+          "reason": "Good for salads and pesto, adds healthy fats.",
+          "confidence": 0.7
+        },
+        {
+          "item_name": "Eggplant",
+          "reason": "Versatile vegetable for various dishes.",
+          "confidence": 0.65
+        },
+        {
+          "item_name": "Zucchini",
+          "reason": "Great for grilling, roasting, or adding to frittatas.",
+          "confidence": 0.7
+        },
+        {
+          "item_name": "Basil",
+          "reason": "Fresh herb that enhances flavor in many dishes.",
+          "confidence": 0.8
+        },
+        {
+          "item_name": "Oats",
+          "reason": "Great for breakfast and baking, versatile staple.",
+          "confidence": 0.85
+        },
+        {
+          "item_name": "Peanut Butter",
+          "reason": "Good for snacks and smoothies, adds protein.",
+          "confidence": 0.9
+        },
+        {
+          "item_name": "Chili Peppers",
+          "reason": "Adds heat and flavor to dishes.",
+          "confidence": 0.75
+        },
+        {
+          "item_name": "Sriracha",
+          "reason": "Popular hot sauce for flavoring dishes.",
+          "confidence": 0.8
+        },
+        {
+          "item_name": "Honey",
+          "reason": "Natural sweetener for various recipes.",
+          "confidence": 0.85
+        },
+        {
+          "item_name": "Coconut Milk",
+          "reason": "Good for soups and curries, adds creaminess.",
+          "confidence": 0.8
+        },
+        {
+          "item_name": "Pasta",
+          "reason": "Versatile staple for quick meals.",
+          "confidence": 0.9
+        },
+        {
+          "item_name": "Canned Beans",
+          "reason": "Convenient protein source for meals.",
+          "confidence": 0.85
+        },
+        {
+          "item_name": "Olive Oil",
+          "reason": "Essential for cooking and dressing salads.",
+          "confidence": 0.95
+        },
+        {
+          "item_name": "Almonds",
+          "reason": "Healthy snack and great for salads.",
+          "confidence": 0.75
+        },
+        {
+          "item_name": "Frozen Mixed Vegetables",
+          "reason": "Convenient for quick meals and stir-fries.",
+          "confidence": 0.8
+        },
+        {
+          "item_name": "Vanilla Extract",
+          "reason": "Useful for baking and enhancing flavors.",
+          "confidence": 0.9
+        },
+        {
+          "item_name": "Pork Tenderloin",
+          "reason": "Lean protein option for meals.",
+          "confidence": 0.7
+        },
+        {
+          "item_name": "Chicken Thighs",
+          "reason": "Versatile meat option for various dishes.",
+          "confidence": 0.85
+        },
+        {
+          "item_name": "Salmon Fillets",
+          "reason": "Healthy fish option, rich in omega-3s.",
+          "confidence": 0.8
+        },
+        {
+          "item_name": "Tortillas",
+          "reason": "Great for wraps and quick meals.",
+          "confidence": 0.85
+        },
+        {
+          "item_name": "Coconut Flakes",
+          "reason": "Good for baking and adding to snacks.",
+          "confidence": 0.65
+        },
+        {
+          "item_name": "Maple Syrup",
+          "reason": "Natural sweetener for breakfast and baking.",
+          "confidence": 0.7
+        }
+      ]
+    },
+    "gpt-5.4-mini": {
+      "ok": true,
+      "error": null,
+      "latencyMs": 4991,
+      "withinDeadline": true,
+      "count": 30,
+      "dupWithKitchen": 0,
+      "dupInternal": 0,
+      "usage": {
+        "prompt_tokens": 2786,
+        "completion_tokens": 917,
+        "total_tokens": 3703,
+        "prompt_tokens_details": {
+          "cached_tokens": 0,
+          "audio_tokens": 0
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 0,
+          "audio_tokens": 0,
+          "accepted_prediction_tokens": 0,
+          "rejected_prediction_tokens": 0
+        }
+      },
+      "cost": {
+        "usd": 0.0025305,
+        "est": true
+      },
+      "reasoningOff": false,
+      "suggestions": [
+        {
+          "item_name": "Bananas",
+          "reason": "Easy fruit for breakfasts and snacks",
+          "confidence": 0.92
+        },
+        {
+          "item_name": "Lemons",
+          "reason": "Useful for seafood, drinks, and dressings",
+          "confidence": 0.9
+        },
+        {
+          "item_name": "Limes",
+          "reason": "Great for cocktails, tacos, and marinades",
+          "confidence": 0.9
+        },
+        {
+          "item_name": "Yellow Onions",
+          "reason": "Core cooking staple for many meals",
+          "confidence": 0.95
+        },
+        {
+          "item_name": "Garlic",
+          "reason": "Common base flavor for dinner recipes",
+          "confidence": 0.95
+        },
+        {
+          "item_name": "Fresh Ginger",
+          "reason": "Handy for stir-fries, tea, and sauces",
+          "confidence": 0.82
+        },
+        {
+          "item_name": "Baby Spinach",
+          "reason": "Quick greens for salads, eggs, and sautés",
+          "confidence": 0.88
+        },
+        {
+          "item_name": "Bell Peppers",
+          "reason": "Adds color and crunch to meals",
+          "confidence": 0.9
+        },
+        {
+          "item_name": "Zucchini",
+          "reason": "Pairs well with chicken, pasta, and veggies",
+          "confidence": 0.84
+        },
+        {
+          "item_name": "Sweet Potatoes",
+          "reason": "Versatile side dish and meal prep staple",
+          "confidence": 0.9
+        },
+        {
+          "item_name": "Cilantro",
+          "reason": "Fresh herb for tacos, salads, and bowls",
+          "confidence": 0.78
+        },
+        {
+          "item_name": "Parsley",
+          "reason": "Useful garnish and herb for many dishes",
+          "confidence": 0.76
+        },
+        {
+          "item_name": "Green Onions",
+          "reason": "Good topping for eggs, rice, and soups",
+          "confidence": 0.83
+        },
+        {
+          "item_name": "Salmon Fillets",
+          "reason": "Healthy protein to balance the week",
+          "confidence": 0.89
+        },
+        {
+          "item_name": "Chicken Breast",
+          "reason": "Lean protein for quick dinners",
+          "confidence": 0.87
+        },
+        {
+          "item_name": "Ground Beef",
+          "reason": "Useful for burgers, pasta, and tacos",
+          "confidence": 0.81
+        },
+        {
+          "item_name": "Greek Yogurt",
+          "reason": "Breakfast, snacks, and cooking ingredient",
+          "confidence": 0.91
+        },
+        {
+          "item_name": "Shredded Cheese",
+          "reason": "Handy for eggs, tacos, and sandwiches",
+          "confidence": 0.88
+        },
+        {
+          "item_name": "Butter",
+          "reason": "Basic dairy staple for cooking and baking",
+          "confidence": 0.94
+        },
+        {
+          "item_name": "Sourdough Bread",
+          "reason": "Good for breakfast and sandwiches",
+          "confidence": 0.8
+        },
+        {
+          "item_name": "Tortillas",
+          "reason": "Works for wraps, tacos, and quesadillas",
+          "confidence": 0.9
+        },
+        {
+          "item_name": "Olive Oil",
+          "reason": "Essential pantry item for cooking",
+          "confidence": 0.96
+        },
+        {
+          "item_name": "Egg Noodles",
+          "reason": "Easy pasta option for quick dinners",
+          "confidence": 0.77
+        },
+        {
+          "item_name": "Canned Beans",
+          "reason": "Affordable protein and fiber for meals",
+          "confidence": 0.9
+        },
+        {
+          "item_name": "Black Beans",
+          "reason": "Great for bowls, tacos, and salads",
+          "confidence": 0.86
+        },
+        {
+          "item_name": "Brown Rice",
+          "reason": "Nutritious side and meal base",
+          "confidence": 0.83
+        },
+        {
+          "item_name": "Oat Milk",
+          "reason": "Useful dairy alternative for cereal and coffee",
+          "confidence": 0.74
+        },
+        {
+          "item_name": "Coffee Beans",
+          "reason": "Likely household staple if they brew coffee",
+          "confidence": 0.7
+        },
+        {
+          "item_name": "Dish Soap",
+          "reason": "Common household item that often runs out",
+          "confidence": 0.72
+        },
+        {
+          "item_name": "Paper Towels",
+          "reason": "Practical kitchen staple for cleanup",
+          "confidence": 0.76
+        }
+      ]
+    },
+    "gpt-5.4": {
+      "ok": true,
+      "error": null,
+      "latencyMs": 13075,
+      "withinDeadline": true,
+      "count": 30,
+      "dupWithKitchen": 0,
+      "dupInternal": 0,
+      "usage": {
+        "prompt_tokens": 2786,
+        "completion_tokens": 1347,
+        "total_tokens": 4133,
+        "prompt_tokens_details": {
+          "cached_tokens": 0,
+          "audio_tokens": 0
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 0,
+          "audio_tokens": 0,
+          "accepted_prediction_tokens": 0,
+          "rejected_prediction_tokens": 0
+        }
+      },
+      "cost": {
+        "usd": 0.0169525,
+        "est": true
+      },
+      "reasoningOff": false,
+      "suggestions": [
+        {
+          "item_name": "Yellow Onions",
+          "reason": "A basic cooking staple missing that pairs with nearly all the vegetables and proteins on hand.",
+          "confidence": 0.98
+        },
+        {
+          "item_name": "Garlic Bulbs",
+          "reason": "Fresh garlic is more useful than dried for weeknight cooking and likely runs out quickly.",
+          "confidence": 0.96
+        },
+        {
+          "item_name": "Lemons",
+          "reason": "Useful for salads, seafood, chicken sausage, and many cocktails already in the kitchen.",
+          "confidence": 0.97
+        },
+        {
+          "item_name": "Limes",
+          "reason": "A strong match for tequila, gin, shrimp, and fresh vegetable dishes.",
+          "confidence": 0.95
+        },
+        {
+          "item_name": "Baby Spinach",
+          "reason": "Adds quick greens for eggs, pasta, salads, and smoothies while balancing the current produce mix.",
+          "confidence": 0.9
+        },
+        {
+          "item_name": "Russet Potatoes",
+          "reason": "A versatile starch is missing and would complement sausages, leftovers, and frittata meals.",
+          "confidence": 0.93
+        },
+        {
+          "item_name": "Sweet Potatoes",
+          "reason": "Adds variety, fiber, and an easy side dish option not currently on hand.",
+          "confidence": 0.86
+        },
+        {
+          "item_name": "Red Bell Peppers",
+          "reason": "Good for stir-fries, salads, roasting, and pairing with the ground turkey and sausages.",
+          "confidence": 0.88
+        },
+        {
+          "item_name": "Scallions",
+          "reason": "Great with miso, noodles, rice, eggs, and seafood and not listed in the kitchen contents.",
+          "confidence": 0.89
+        },
+        {
+          "item_name": "Fresh Cilantro",
+          "reason": "Useful for tacos, salads, shrimp, and brightening many savory dishes.",
+          "confidence": 0.82
+        },
+        {
+          "item_name": "Fresh Parsley",
+          "reason": "Helps finish pasta, fish, salads, and vegetable dishes with freshness.",
+          "confidence": 0.8
+        },
+        {
+          "item_name": "Bananas",
+          "reason": "A common breakfast fruit missing from the current produce selection and useful with oats and granola.",
+          "confidence": 0.87
+        },
+        {
+          "item_name": "Blueberries",
+          "reason": "Adds fruit variety for breakfast, snacks, and yogurt pairings.",
+          "confidence": 0.78
+        },
+        {
+          "item_name": "Greek Yogurt",
+          "reason": "A high-protein staple missing for breakfasts, snacks, and sauces.",
+          "confidence": 0.94
+        },
+        {
+          "item_name": "Cheddar Cheese",
+          "reason": "Useful for eggs, burgers on the buns, mac and cheese, and baked dishes.",
+          "confidence": 0.85
+        },
+        {
+          "item_name": "Parmesan Cheese",
+          "reason": "A practical finishing cheese for pasta, salads, and roasted vegetables.",
+          "confidence": 0.88
+        },
+        {
+          "item_name": "Salted Butter",
+          "reason": "A core fridge staple for cooking, baking, and spreading that is not clearly listed.",
+          "confidence": 0.91
+        },
+        {
+          "item_name": "Sourdough Bread",
+          "reason": "Useful for breakfasts, sandwiches, and serving with eggs or leftovers.",
+          "confidence": 0.9
+        },
+        {
+          "item_name": "Corn Tortillas",
+          "reason": "Good for tacos with turkey, shrimp, fish, avocado, cabbage, and hot sauces already available.",
+          "confidence": 0.84
+        },
+        {
+          "item_name": "Flour Tortillas",
+          "reason": "Helpful for wraps, quesadillas, and easy lunches using current produce and proteins.",
+          "confidence": 0.79
+        },
+        {
+          "item_name": "Ground Beef",
+          "reason": "They have hamburger buns but no obvious burger meat, making this a likely need.",
+          "confidence": 0.92
+        },
+        {
+          "item_name": "Chicken Breast",
+          "reason": "A flexible lean protein option to rotate in alongside sausage, turkey, and seafood.",
+          "confidence": 0.83
+        },
+        {
+          "item_name": "Bacon",
+          "reason": "Pairs well with eggs, salads, burgers, and breakfast items and is not currently listed.",
+          "confidence": 0.74
+        },
+        {
+          "item_name": "Shredded Mozzarella",
+          "reason": "Useful for pasta bakes, eggs, and quick meals with the tomato sauce already on hand.",
+          "confidence": 0.81
+        },
+        {
+          "item_name": "Black Beans",
+          "reason": "Adds pantry protein and works well with tortillas, rice, avocado, and hot sauces.",
+          "confidence": 0.86
+        },
+        {
+          "item_name": "Chickpeas",
+          "reason": "Good for salads, grain bowls, and easy protein-rich lunches.",
+          "confidence": 0.8
+        },
+        {
+          "item_name": "Chicken Broth",
+          "reason": "A useful base for soups, rice, sauces, and reheating leftovers, not clearly present.",
+          "confidence": 0.89
+        },
+        {
+          "item_name": "Olive Oil",
+          "reason": "A major cooking staple not explicitly listed and likely needed for produce-heavy meals.",
+          "confidence": 0.95
+        },
+        {
+          "item_name": "Mayonnaise",
+          "reason": "Useful for sandwiches, burgers, dressings, and tuna preparations.",
+          "confidence": 0.77
+        },
+        {
+          "item_name": "Coffee Beans",
+          "reason": "A common weekly staple not listed anywhere among pantry or beverage items.",
+          "confidence": 0.72
+        }
+      ]
+    },
+    "__judge": {
+      "mapping": {
+        "A": "gpt-5.4",
+        "B": "gpt-4o-mini",
+        "C": "gpt-5.4-mini"
+      },
+      "verdict": {
+        "scores": {
+          "A": {
+            "relevance": 9,
+            "practicality": 8,
+            "comment": "Strong awareness of this specific kitchen: notes hamburger buns without beef, huge cocktail collection needing citrus, sausages/turkey needing produce. Fills real gaps like onions, garlic, oils, dairy. Slight over-length and some overlap (two tortilla types, multiple cheeses), but each item is justified and buyable."
+          },
+          "B": {
+            "relevance": 5,
+            "practicality": 6,
+            "comment": "Generic healthy-eating list that ignores inventory context. Suggests oats, peanut butter, vanilla extract, and pasta which are already present. Some good gap-fillers (onions absent though), but feels templated rather than tailored."
+          },
+          "C": {
+            "relevance": 8,
+            "practicality": 8,
+            "comment": "Well-tailored and concrete, catches buns-without-beef gap and citrus for cocktails. Sensible household additions (dish soap, paper towels) add practical variety. Slightly less inventory-specific reasoning than A but tighter and clean."
+          }
+        },
+        "winner": "A",
+        "why": "A shows the deepest engagement with this exact kitchen (cocktail citrus, buns needing beef, sausage/turkey produce pairings) and fills the most real gaps with concrete products. C is a very close, cleaner second, but A's specificity edges it out. B is too generic and repeats items already in stock."
+      },
+      "winnerModel": "gpt-5.4"
+    }
+  }
+}

@@ -1,0 +1,54 @@
+{
+  "gpt-4.1": {
+    "n": 36,
+    "correctRate": 0.75,
+    "wrongToolRate": 0,
+    "noToolRate": 0.111,
+    "fabricationRate": 0.139,
+    "badWriteOnReadback": 0,
+    "medianLatencyMs": 966,
+    "avgInTok": 8368,
+    "avgOutTok": 60,
+    "costPer1k": 17.22,
+    "costEst": false
+  },
+  "gpt-5.4-2026-03-05": {
+    "n": 36,
+    "correctRate": 1,
+    "wrongToolRate": 0,
+    "noToolRate": 0,
+    "fabricationRate": 0,
+    "badWriteOnReadback": 0,
+    "medianLatencyMs": 1682,
+    "avgInTok": 8452,
+    "avgOutTok": 83,
+    "costPer1k": 11.39,
+    "costEst": true
+  },
+  "gpt-5.5": {
+    "n": 36,
+    "correctRate": 1,
+    "wrongToolRate": 0,
+    "noToolRate": 0,
+    "fabricationRate": 0,
+    "badWriteOnReadback": 0,
+    "medianLatencyMs": 2577,
+    "avgInTok": 8453,
+    "avgOutTok": 111,
+    "costPer1k": 11.67,
+    "costEst": true
+  },
+  "gpt-5.6-sol": {
+    "n": 36,
+    "correctRate": 1,
+    "wrongToolRate": 0,
+    "noToolRate": 0,
+    "fabricationRate": 0,
+    "badWriteOnReadback": 0,
+    "medianLatencyMs": 2016,
+    "avgInTok": 8453,
+    "avgOutTok": 60,
+    "costPer1k": 17.63,
+    "costEst": true
+  }
+}

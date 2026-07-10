@@ -1,0 +1,3 @@
+node_modules/
+# never commit real S3 image bytes or any secret material
+fixtures/images/

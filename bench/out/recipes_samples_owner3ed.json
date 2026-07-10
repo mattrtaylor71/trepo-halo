@@ -1,0 +1,146 @@
+{
+  "gpt-4.1-mini": [
+    {
+      "title": "Vegetable Frittata",
+      "meal_category": "breakfast",
+      "ingredients": [
+        "Homemade Skillet Vegetable Frittata"
+      ],
+      "steps": [
+        "Heat the skillet with the frittata until warmed through.",
+        "Serve warm as a hearty breakfast."
+      ]
+    },
+    {
+      "title": "Creamy Paprika Chicken Dinner",
+      "meal_category": "dinner",
+      "ingredients": [
+        "Creamy Paprika Chicken With Vegetables"
+      ],
+      "steps": [
+        "Heat the creamy paprika chicken with vegetables in a pan until hot.",
+        "Serve as a complete dinner meal."
+      ]
+    },
+    {
+      "title": "Fresh Garden Salad",
+      "meal_category": "lunch",
+      "ingredients": [
+        "Lettuce Head",
+        "Cucumbers",
+        "Tomatoes Roma and Cherry",
+        "Carrot"
+      ],
+      "steps": [
+        "Chop lettuce, cucumbers, tomatoes, and carrot into bite-sized pieces.",
+        "Toss together with salt, pepper, and oil to taste.",
+        "Serve fresh as a light lunch."
+      ]
+    }
+  ],
+  "gpt-5.4": [
+    {
+      "title": "Paprika Chicken Bowl",
+      "meal_category": "dinner",
+      "ingredients": [
+        "Creamy Paprika Chicken With Vegetables",
+        "Broccoli Crowns",
+        "Carrot",
+        "Snap Peas In green basket"
+      ],
+      "steps": [
+        "Chop Broccoli Crowns, Carrot, and Snap Peas In green basket into bite-size pieces.",
+        "Saut\u00e9 the vegetables in oil with salt, pepper, and basic spices until just tender.",
+        "Warm Creamy Paprika Chicken With Vegetables in a pan until hot.",
+        "Serve the creamy chicken over the saut\u00e9ed vegetables."
+      ]
+    },
+    {
+      "title": "Frittata Salad Plate",
+      "meal_category": "lunch",
+      "ingredients": [
+        "Homemade Skillet Vegetable Frittata",
+        "Lettuce Head",
+        "Cucumbers",
+        "Tomatoes Roma and Cherry",
+        "Avocado"
+      ],
+      "steps": [
+        "Slice Homemade Skillet Vegetable Frittata and warm lightly if desired.",
+        "Chop Lettuce Head, Cucumbers, Tomatoes Roma and Cherry, and Avocado.",
+        "Toss the salad with oil, salt, and pepper.",
+        "Serve the frittata alongside the salad for a complete plate."
+      ]
+    },
+    {
+      "title": "Turkey Cabbage Skillet",
+      "meal_category": "dinner",
+      "ingredients": [
+        "Norbest Organic Ground Turkey 93% Lean | 7% Fat",
+        "Cabbage Green",
+        "Mushrooms In green basket",
+        "Carrot"
+      ],
+      "steps": [
+        "Brown Norbest Organic Ground Turkey 93% Lean | 7% Fat in oil with salt, pepper, and basic spices.",
+        "Add sliced Mushrooms In green basket and chopped Carrot; cook until softened.",
+        "Stir in shredded Cabbage Green and cook until wilted and tender.",
+        "Season to taste and serve hot."
+      ]
+    }
+  ],
+  "gpt-5.5": [
+    {
+      "title": "Cajun Sausage Long Bean Skillet",
+      "meal_category": "dinner",
+      "ingredients": [
+        "Thrive Market Organic Cajun Style Chicken Sausage Cajun Style, 12 oz",
+        "Frozen Long Beans",
+        "Tomatoes Roma and Cherry",
+        "Mushrooms In green basket",
+        "Cabbage Green"
+      ],
+      "steps": [
+        "Slice the sausage and brown it in a little oil in a large skillet.",
+        "Add sliced mushrooms, shredded cabbage, and Frozen Long Beans; cook until tender.",
+        "Stir in chopped Tomatoes Roma and Cherry, salt, pepper, and paprika; cook until the tomatoes soften.",
+        "Serve hot as a one-pan dinner."
+      ]
+    },
+    {
+      "title": "Turkey Avocado Burgers",
+      "meal_category": "dinner",
+      "ingredients": [
+        "Norbest Organic Ground Turkey 93% Lean | 7% Fat",
+        "Francisco International Hamburger Buns 16 count, 1 lb 14 oz (850g)",
+        "Lettuce Head",
+        "Avocado",
+        "Tomatoes Roma and Cherry"
+      ],
+      "steps": [
+        "Season the ground turkey with salt, pepper, and basic spices, then form patties.",
+        "Cook the patties in an oiled skillet until fully cooked through.",
+        "Toast the hamburger buns if desired.",
+        "Assemble burgers with Lettuce Head, sliced Avocado, and Tomatoes Roma and Cherry."
+      ]
+    },
+    {
+      "title": "Shrimp Avocado Salad",
+      "meal_category": "lunch",
+      "ingredients": [
+        "Frozen Shrimp",
+        "Mixed Lettuce",
+        "Avocado",
+        "Cucumbers",
+        "Clementine",
+        "Carrot"
+      ],
+      "steps": [
+        "Thaw the shrimp, then cook in a skillet with oil, salt, pepper, and paprika until opaque.",
+        "Slice the avocado, cucumbers, clementine, and carrot.",
+        "Arrange Mixed Lettuce in bowls and top with the shrimp and produce.",
+        "Drizzle lightly with oil and season with salt and pepper."
+      ]
+    }
+  ]
+}

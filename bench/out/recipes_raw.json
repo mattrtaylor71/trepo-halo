@@ -1,0 +1,2501 @@
+{
+  "testuser": {
+    "gpt-4.1-mini": {
+      "ok": true,
+      "error": null,
+      "latencyMs": 18651,
+      "usage": {
+        "prompt_tokens": 762,
+        "completion_tokens": 1885,
+        "total_tokens": 2647,
+        "prompt_tokens_details": {
+          "cached_tokens": 0,
+          "audio_tokens": 0
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 0,
+          "audio_tokens": 0,
+          "accepted_prediction_tokens": 0,
+          "rejected_prediction_tokens": 0
+        }
+      },
+      "cost": {
+        "usd": 0.0033208,
+        "est": false
+      },
+      "reasoningOff": false,
+      "set": {
+        "kitchen_only": [
+          {
+            "title": "Banana Oat Milk Smoothie",
+            "meal_category": "breakfast",
+            "ingredients": [
+              "Bananas",
+              "oat milk"
+            ],
+            "steps": [
+              "Step 1. Peel and slice the bananas.",
+              "Step 2. Blend bananas with oat milk until smooth."
+            ]
+          },
+          {
+            "title": "Scrambled Eggs",
+            "meal_category": "breakfast",
+            "ingredients": [
+              "Eggs",
+              "salt",
+              "pepper",
+              "oil"
+            ],
+            "steps": [
+              "Step 1. Crack eggs into a bowl and whisk with salt and pepper.",
+              "Step 2. Heat oil in a pan and pour in eggs.",
+              "Step 3. Stir gently until cooked through."
+            ]
+          },
+          {
+            "title": "Banana Oat Milk Porridge",
+            "meal_category": "breakfast",
+            "ingredients": [
+              "Bananas",
+              "oat milk",
+              "salt"
+            ],
+            "steps": [
+              "Step 1. Heat oat milk in a pot with a pinch of salt.",
+              "Step 2. Slice bananas and add to the oat milk.",
+              "Step 3. Cook gently until warmed through."
+            ]
+          },
+          {
+            "title": "Boiled Eggs",
+            "meal_category": "breakfast",
+            "ingredients": [
+              "Eggs",
+              "salt"
+            ],
+            "steps": [
+              "Step 1. Place eggs in boiling water and cook for 8-10 minutes.",
+              "Step 2. Cool under cold water, peel, and sprinkle with salt."
+            ]
+          },
+          {
+            "title": "Banana Slices with Oat Milk Dip",
+            "meal_category": "snacks",
+            "ingredients": [
+              "Bananas",
+              "oat milk"
+            ],
+            "steps": [
+              "Step 1. Slice bananas into rounds.",
+              "Step 2. Serve with chilled oat milk as a dip."
+            ]
+          },
+          {
+            "title": "Egg Omelette",
+            "meal_category": "breakfast",
+            "ingredients": [
+              "Eggs",
+              "salt",
+              "pepper",
+              "oil"
+            ],
+            "steps": [
+              "Step 1. Beat eggs with salt and pepper.",
+              "Step 2. Heat oil in a pan, pour eggs in.",
+              "Step 3. Cook until set and fold omelette."
+            ]
+          },
+          {
+            "title": "Banana Egg Pancakes",
+            "meal_category": "breakfast",
+            "ingredients": [
+              "Bananas",
+              "Eggs",
+              "oil"
+            ],
+            "steps": [
+              "Step 1. Mash bananas and mix with beaten eggs.",
+              "Step 2. Heat oil in a pan.",
+              "Step 3. Pour batter to form small pancakes and cook until golden on both sides."
+            ]
+          },
+          {
+            "title": "Oat Milk Latte (No Coffee)",
+            "meal_category": "snacks",
+            "ingredients": [
+              "oat milk"
+            ],
+            "steps": [
+              "Step 1. Heat oat milk until warm.",
+              "Step 2. Froth oat milk if possible and serve warm."
+            ]
+          },
+          {
+            "title": "Banana Egg Scramble",
+            "meal_category": "breakfast",
+            "ingredients": [
+              "Bananas",
+              "Eggs",
+              "salt",
+              "pepper",
+              "oil"
+            ],
+            "steps": [
+              "Step 1. Beat eggs with salt and pepper.",
+              "Step 2. Heat oil and scramble eggs.",
+              "Step 3. Add sliced bananas at the end and warm through gently."
+            ]
+          },
+          {
+            "title": "Soft Boiled Eggs with Banana",
+            "meal_category": "breakfast",
+            "ingredients": [
+              "Eggs",
+              "Bananas",
+              "salt"
+            ],
+            "steps": [
+              "Step 1. Boil eggs for 5-6 minutes for soft yolk.",
+              "Step 2. Peel and sprinkle with salt.",
+              "Step 3. Serve with peeled banana on the side."
+            ]
+          }
+        ],
+        "need_grocery": [
+          {
+            "title": "Banana Oat Milk Pancakes",
+            "meal_category": "breakfast",
+            "ingredients": [
+              "Bananas",
+              "oat milk",
+              "Eggs",
+              "flour",
+              "baking powder",
+              "salt",
+              "oil"
+            ],
+            "steps": [
+              "Step 1. Mash bananas and mix with oat milk and eggs.",
+              "Step 2. Add flour, baking powder, and salt to form batter.",
+              "Step 3. Heat oil in pan and cook pancakes until golden."
+            ],
+            "missing_ingredients": [
+              "flour",
+              "baking powder"
+            ]
+          },
+          {
+            "title": "Oat Milk Banana Smoothie Bowl",
+            "meal_category": "breakfast",
+            "ingredients": [
+              "Bananas",
+              "oat milk",
+              "granola",
+              "honey"
+            ],
+            "steps": [
+              "Step 1. Blend bananas with oat milk until thick and smooth.",
+              "Step 2. Pour into bowl and top with granola and honey."
+            ],
+            "missing_ingredients": [
+              "granola",
+              "honey"
+            ]
+          },
+          {
+            "title": "Egg and Banana French Toast",
+            "meal_category": "breakfast",
+            "ingredients": [
+              "Eggs",
+              "Bananas",
+              "bread",
+              "milk",
+              "cinnamon",
+              "oil"
+            ],
+            "steps": [
+              "Step 1. Whisk eggs with milk and cinnamon.",
+              "Step 2. Dip bread slices in egg mixture.",
+              "Step 3. Fry in oil until golden and serve with sliced bananas."
+            ],
+            "missing_ingredients": [
+              "bread",
+              "milk",
+              "cinnamon"
+            ]
+          },
+          {
+            "title": "Banana Oat Milk Muffins",
+            "meal_category": "snacks",
+            "ingredients": [
+              "Bananas",
+              "oat milk",
+              "flour",
+              "sugar",
+              "baking powder",
+              "oil"
+            ],
+            "steps": [
+              "Step 1. Mash bananas and mix with oat milk and sugar.",
+              "Step 2. Add flour and baking powder to form batter.",
+              "Step 3. Bake in muffin tins until cooked through."
+            ],
+            "missing_ingredients": [
+              "flour",
+              "sugar",
+              "baking powder"
+            ]
+          },
+          {
+            "title": "Egg and Banana Breakfast Wrap",
+            "meal_category": "breakfast",
+            "ingredients": [
+              "Eggs",
+              "Bananas",
+              "tortilla wrap",
+              "cheese",
+              "oil"
+            ],
+            "steps": [
+              "Step 1. Scramble eggs in oil.",
+              "Step 2. Slice bananas.",
+              "Step 3. Place eggs, bananas, and cheese in tortilla and wrap."
+            ],
+            "missing_ingredients": [
+              "tortilla wrap",
+              "cheese"
+            ]
+          },
+          {
+            "title": "Banana Oat Milk Pudding",
+            "meal_category": "snacks",
+            "ingredients": [
+              "Bananas",
+              "oat milk",
+              "chia seeds",
+              "honey"
+            ],
+            "steps": [
+              "Step 1. Mix oat milk with chia seeds and honey.",
+              "Step 2. Refrigerate until thickened.",
+              "Step 3. Top with sliced bananas before serving."
+            ],
+            "missing_ingredients": [
+              "chia seeds",
+              "honey"
+            ]
+          },
+          {
+            "title": "Vegetable Omelette",
+            "meal_category": "breakfast",
+            "ingredients": [
+              "Eggs",
+              "salt",
+              "pepper",
+              "oil",
+              "bell pepper",
+              "onion"
+            ],
+            "steps": [
+              "Step 1. Chop bell pepper and onion.",
+              "Step 2. Sauté vegetables in oil.",
+              "Step 3. Beat eggs with salt and pepper, pour over vegetables and cook until set."
+            ],
+            "missing_ingredients": [
+              "bell pepper",
+              "onion"
+            ]
+          },
+          {
+            "title": "Banana Oat Milk Smoothie with Peanut Butter",
+            "meal_category": "snacks",
+            "ingredients": [
+              "Bananas",
+              "oat milk",
+              "peanut butter",
+              "honey"
+            ],
+            "steps": [
+              "Step 1. Blend bananas, oat milk, peanut butter, and honey until smooth."
+            ],
+            "missing_ingredients": [
+              "peanut butter",
+              "honey"
+            ]
+          },
+          {
+            "title": "Egg Salad Sandwich",
+            "meal_category": "lunch",
+            "ingredients": [
+              "Eggs",
+              "mayonnaise",
+              "bread",
+              "lettuce",
+              "salt",
+              "pepper"
+            ],
+            "steps": [
+              "Step 1. Boil eggs and chop.",
+              "Step 2. Mix eggs with mayonnaise, salt, and pepper.",
+              "Step 3. Spread on bread and add lettuce."
+            ],
+            "missing_ingredients": [
+              "mayonnaise",
+              "bread",
+              "lettuce"
+            ]
+          },
+          {
+            "title": "Banana Oat Milk Ice Cream",
+            "meal_category": "snacks",
+            "ingredients": [
+              "Bananas",
+              "oat milk",
+              "vanilla extract",
+              "sugar"
+            ],
+            "steps": [
+              "Step 1. Blend bananas, oat milk, vanilla extract, and sugar.",
+              "Step 2. Freeze mixture, stirring occasionally until firm."
+            ],
+            "missing_ingredients": [
+              "vanilla extract",
+              "sugar"
+            ]
+          }
+        ]
+      },
+      "metrics": {
+        "recipeCount": 20,
+        "kitchenOnlyCount": 10,
+        "needGroceryCount": 10,
+        "groundingRate": 1,
+        "phantomIngredientsInKitchenOnly": 0,
+        "distinctProteins": 2,
+        "mealCategorySpread": {
+          "breakfast": 13,
+          "snacks": 6,
+          "lunch": 1
+        }
+      }
+    },
+    "gpt-5.4": {
+      "ok": true,
+      "error": null,
+      "latencyMs": 29027,
+      "usage": {
+        "prompt_tokens": 761,
+        "completion_tokens": 1746,
+        "total_tokens": 2507,
+        "prompt_tokens_details": {
+          "cached_tokens": 0,
+          "audio_tokens": 0
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 0,
+          "audio_tokens": 0,
+          "accepted_prediction_tokens": 0,
+          "rejected_prediction_tokens": 0
+        }
+      },
+      "cost": {
+        "usd": 0.01841125,
+        "est": true
+      },
+      "reasoningOff": false,
+      "set": {
+        "kitchen_only": [
+          {
+            "title": "Banana Oat Milk Smooth Eggs",
+            "meal_category": "breakfast",
+            "ingredients": [
+              "Bananas",
+              "oat milk",
+              "Eggs"
+            ],
+            "steps": [
+              "Peel Bananas and mash until smooth.",
+              "Whisk in oat milk and beaten Eggs.",
+              "Cook gently in an oiled skillet, stirring, until softly set and warm."
+            ]
+          },
+          {
+            "title": "Soft Scrambled Eggs",
+            "meal_category": "breakfast",
+            "ingredients": [
+              "Eggs",
+              "oat milk"
+            ],
+            "steps": [
+              "Whisk Eggs with a splash of oat milk, salt, and pepper.",
+              "Cook slowly in an oiled pan, stirring, until softly scrambled."
+            ]
+          },
+          {
+            "title": "Fried Bananas",
+            "meal_category": "snacks",
+            "ingredients": [
+              "Bananas"
+            ],
+            "steps": [
+              "Slice Bananas into rounds.",
+              "Pan-fry in a little oil until golden on both sides.",
+              "Season lightly with a pinch of cinnamon if desired."
+            ]
+          },
+          {
+            "title": "Banana Egg Pancakes",
+            "meal_category": "breakfast",
+            "ingredients": [
+              "Bananas",
+              "Eggs"
+            ],
+            "steps": [
+              "Mash Bananas and mix with beaten Eggs into a batter.",
+              "Cook small rounds in an oiled skillet until set and browned on both sides."
+            ]
+          },
+          {
+            "title": "Banana Custard Scramble",
+            "meal_category": "snacks",
+            "ingredients": [
+              "Bananas",
+              "Eggs",
+              "oat milk"
+            ],
+            "steps": [
+              "Mash Bananas with oat milk and beaten Eggs.",
+              "Cook over low heat, stirring constantly, until thick and custardy."
+            ]
+          },
+          {
+            "title": "Banana Omelet",
+            "meal_category": "breakfast",
+            "ingredients": [
+              "Bananas",
+              "Eggs"
+            ],
+            "steps": [
+              "Beat Eggs with a pinch of salt.",
+              "Cook in an oiled skillet until nearly set, then add sliced Bananas to one side.",
+              "Fold and cook briefly until finished."
+            ]
+          },
+          {
+            "title": "Warm Banana Mash",
+            "meal_category": "snacks",
+            "ingredients": [
+              "Bananas",
+              "oat milk"
+            ],
+            "steps": [
+              "Mash Bananas with a small splash of oat milk.",
+              "Warm gently in a saucepan until creamy and heated through."
+            ]
+          },
+          {
+            "title": "Egg Drop Oat Milk Soup",
+            "meal_category": "snacks",
+            "ingredients": [
+              "Eggs",
+              "oat milk"
+            ],
+            "steps": [
+              "Heat oat milk with water, salt, pepper, and a pinch of spice.",
+              "Slowly drizzle in beaten Eggs while stirring to form ribbons.",
+              "Serve hot."
+            ]
+          },
+          {
+            "title": "Baked Banana Eggs",
+            "meal_category": "breakfast",
+            "ingredients": [
+              "Bananas",
+              "Eggs",
+              "oat milk"
+            ],
+            "steps": [
+              "Slice Bananas into a small oiled baking dish.",
+              "Whisk Eggs with oat milk and pour over the Bananas.",
+              "Bake until set and lightly golden."
+            ]
+          },
+          {
+            "title": "Banana Egg Bites",
+            "meal_category": "snacks",
+            "ingredients": [
+              "Bananas",
+              "Eggs"
+            ],
+            "steps": [
+              "Mash Bananas and mix with beaten Eggs.",
+              "Pour into oiled muffin cups or a small pan.",
+              "Bake until firm and cooked through."
+            ]
+          }
+        ],
+        "need_grocery": [
+          {
+            "title": "Banana Oatmeal",
+            "meal_category": "breakfast",
+            "ingredients": [
+              "Bananas",
+              "oat milk",
+              "rolled oats"
+            ],
+            "steps": [
+              "Cook rolled oats with oat milk and water until creamy.",
+              "Top with sliced Bananas and a pinch of cinnamon."
+            ],
+            "missing_ingredients": [
+              "rolled oats"
+            ]
+          },
+          {
+            "title": "French Toast",
+            "meal_category": "breakfast",
+            "ingredients": [
+              "Eggs",
+              "oat milk",
+              "Bananas",
+              "bread"
+            ],
+            "steps": [
+              "Whisk Eggs and oat milk together.",
+              "Dip bread in the mixture and cook in an oiled skillet until golden.",
+              "Serve with sliced Bananas on top."
+            ],
+            "missing_ingredients": [
+              "bread"
+            ]
+          },
+          {
+            "title": "Banana Muffins",
+            "meal_category": "breakfast",
+            "ingredients": [
+              "Bananas",
+              "Eggs",
+              "oat milk",
+              "flour",
+              "sugar",
+              "baking powder"
+            ],
+            "steps": [
+              "Mash Bananas and mix with Eggs and oat milk.",
+              "Stir in flour, sugar, and baking powder to make a batter.",
+              "Bake in muffin tins until cooked through."
+            ],
+            "missing_ingredients": [
+              "flour",
+              "sugar",
+              "baking powder"
+            ]
+          },
+          {
+            "title": "Egg Fried Rice",
+            "meal_category": "lunch",
+            "ingredients": [
+              "Eggs",
+              "cooked rice",
+              "green onions",
+              "soy sauce"
+            ],
+            "steps": [
+              "Scramble Eggs in an oiled pan and set aside.",
+              "Stir-fry cooked rice with green onions and soy sauce.",
+              "Return Eggs to the pan and toss until hot."
+            ],
+            "missing_ingredients": [
+              "cooked rice",
+              "green onions",
+              "soy sauce"
+            ]
+          },
+          {
+            "title": "Banana Bread",
+            "meal_category": "snacks",
+            "ingredients": [
+              "Bananas",
+              "Eggs",
+              "oat milk",
+              "flour",
+              "sugar",
+              "baking powder"
+            ],
+            "steps": [
+              "Mash Bananas and mix with Eggs and oat milk.",
+              "Stir in flour, sugar, and baking powder.",
+              "Bake in a loaf pan until set and browned."
+            ],
+            "missing_ingredients": [
+              "flour",
+              "sugar",
+              "baking powder"
+            ]
+          },
+          {
+            "title": "Veggie Omelet Toast",
+            "meal_category": "lunch",
+            "ingredients": [
+              "Eggs",
+              "oat milk",
+              "bread",
+              "spinach",
+              "cheddar cheese"
+            ],
+            "steps": [
+              "Whisk Eggs with a splash of oat milk.",
+              "Cook with spinach and cheddar cheese as an omelet.",
+              "Serve with toasted bread for a full meal."
+            ],
+            "missing_ingredients": [
+              "bread",
+              "spinach",
+              "cheddar cheese"
+            ]
+          },
+          {
+            "title": "Banana Yogurt Parfait",
+            "meal_category": "breakfast",
+            "ingredients": [
+              "Bananas",
+              "yogurt",
+              "granola"
+            ],
+            "steps": [
+              "Slice Bananas.",
+              "Layer yogurt, Bananas, and granola in a bowl or glass."
+            ],
+            "missing_ingredients": [
+              "yogurt",
+              "granola"
+            ]
+          },
+          {
+            "title": "Egg Salad Sandwich",
+            "meal_category": "lunch",
+            "ingredients": [
+              "Eggs",
+              "bread",
+              "mayonnaise",
+              "celery"
+            ],
+            "steps": [
+              "Boil Eggs, peel, and chop.",
+              "Mix with mayonnaise, chopped celery, salt, and pepper.",
+              "Pile onto bread and serve as a sandwich."
+            ],
+            "missing_ingredients": [
+              "bread",
+              "mayonnaise",
+              "celery"
+            ]
+          },
+          {
+            "title": "Banana Crepes",
+            "meal_category": "breakfast",
+            "ingredients": [
+              "Bananas",
+              "Eggs",
+              "oat milk",
+              "flour",
+              "butter"
+            ],
+            "steps": [
+              "Whisk Eggs, oat milk, and flour into a thin batter.",
+              "Cook thin crepes in a lightly buttered pan.",
+              "Fill with sliced Bananas and fold."
+            ],
+            "missing_ingredients": [
+              "flour",
+              "butter"
+            ]
+          },
+          {
+            "title": "Shakshuka Toast",
+            "meal_category": "dinner",
+            "ingredients": [
+              "Eggs",
+              "bread",
+              "tomatoes",
+              "onion",
+              "garlic"
+            ],
+            "steps": [
+              "Cook onion and garlic in oil, then add chopped tomatoes and simmer into a sauce.",
+              "Crack Eggs into the sauce and cook until set.",
+              "Serve with bread for dipping."
+            ],
+            "missing_ingredients": [
+              "bread",
+              "tomatoes",
+              "onion",
+              "garlic"
+            ]
+          }
+        ]
+      },
+      "metrics": {
+        "recipeCount": 20,
+        "kitchenOnlyCount": 10,
+        "needGroceryCount": 10,
+        "groundingRate": 1,
+        "phantomIngredientsInKitchenOnly": 0,
+        "distinctProteins": 2,
+        "mealCategorySpread": {
+          "breakfast": 10,
+          "snacks": 6,
+          "lunch": 3,
+          "dinner": 1
+        }
+      }
+    },
+    "gpt-5.5": {
+      "ok": true,
+      "error": null,
+      "latencyMs": 46840,
+      "usage": {
+        "prompt_tokens": 761,
+        "completion_tokens": 3879,
+        "total_tokens": 4640,
+        "prompt_tokens_details": {
+          "cached_tokens": 0,
+          "audio_tokens": 0
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 1410,
+          "audio_tokens": 0,
+          "accepted_prediction_tokens": 0,
+          "rejected_prediction_tokens": 0
+        }
+      },
+      "cost": {
+        "usd": 0.03974125,
+        "est": true
+      },
+      "reasoningOff": false,
+      "set": {
+        "kitchen_only": [
+          {
+            "title": "Banana Egg Pancakes",
+            "meal_category": "breakfast",
+            "ingredients": [
+              "Bananas",
+              "Eggs",
+              "oil",
+              "cinnamon",
+              "salt"
+            ],
+            "steps": [
+              "Mash Bananas in a bowl, then whisk in Eggs, cinnamon, and a pinch of salt.",
+              "Heat a little oil in a skillet over medium-low heat.",
+              "Cook small spoonfuls of batter until set on both sides."
+            ]
+          },
+          {
+            "title": "Creamy Scrambled Eggs",
+            "meal_category": "breakfast",
+            "ingredients": [
+              "Eggs",
+              "oat milk",
+              "oil",
+              "salt",
+              "pepper"
+            ],
+            "steps": [
+              "Whisk Eggs with a splash of oat milk, salt, and pepper.",
+              "Heat oil in a skillet over low heat.",
+              "Cook gently, stirring until the eggs are softly set."
+            ]
+          },
+          {
+            "title": "Plain Oat Milk Omelet",
+            "meal_category": "breakfast",
+            "ingredients": [
+              "Eggs",
+              "oat milk",
+              "oil",
+              "salt",
+              "pepper"
+            ],
+            "steps": [
+              "Whisk Eggs with oat milk, salt, and pepper.",
+              "Heat oil in a nonstick skillet over medium heat.",
+              "Pour in the eggs and cook until set, then fold and serve."
+            ]
+          },
+          {
+            "title": "Hard-Boiled Eggs",
+            "meal_category": "snacks",
+            "ingredients": [
+              "Eggs",
+              "water",
+              "salt",
+              "pepper"
+            ],
+            "steps": [
+              "Place Eggs in a pot and cover with water.",
+              "Bring to a boil, then simmer until fully cooked.",
+              "Cool, peel, and season with salt and pepper."
+            ]
+          },
+          {
+            "title": "Crispy Fried Eggs",
+            "meal_category": "breakfast",
+            "ingredients": [
+              "Eggs",
+              "oil",
+              "salt",
+              "pepper",
+              "paprika"
+            ],
+            "steps": [
+              "Heat oil in a skillet over medium-high heat.",
+              "Crack in Eggs and cook until the edges are crisp.",
+              "Season with salt, pepper, and paprika."
+            ]
+          },
+          {
+            "title": "Steamed Egg Custard",
+            "meal_category": "breakfast",
+            "ingredients": [
+              "Eggs",
+              "oat milk",
+              "water",
+              "salt",
+              "pepper"
+            ],
+            "steps": [
+              "Whisk Eggs with oat milk, a little water, salt, and pepper.",
+              "Pour into a heatproof bowl.",
+              "Steam gently until just set and silky."
+            ]
+          },
+          {
+            "title": "Banana Custard Bake",
+            "meal_category": "breakfast",
+            "ingredients": [
+              "Bananas",
+              "Eggs",
+              "oat milk",
+              "cinnamon",
+              "oil"
+            ],
+            "steps": [
+              "Mash Bananas and whisk with Eggs, oat milk, and cinnamon.",
+              "Oil a small baking dish and pour in the mixture.",
+              "Bake until puffed and set."
+            ]
+          },
+          {
+            "title": "Cinnamon Baked Bananas",
+            "meal_category": "snacks",
+            "ingredients": [
+              "Bananas",
+              "oil",
+              "cinnamon",
+              "salt"
+            ],
+            "steps": [
+              "Slice Bananas lengthwise and place in a lightly oiled baking dish.",
+              "Sprinkle with cinnamon and a tiny pinch of salt.",
+              "Bake until warm and soft."
+            ]
+          },
+          {
+            "title": "Egg Drop Soup",
+            "meal_category": "snacks",
+            "ingredients": [
+              "Eggs",
+              "water",
+              "salt",
+              "pepper",
+              "garlic powder"
+            ],
+            "steps": [
+              "Bring water to a gentle simmer with salt, pepper, and garlic powder.",
+              "Beat Eggs in a bowl.",
+              "Slowly drizzle Eggs into the simmering water while stirring to form ribbons."
+            ]
+          },
+          {
+            "title": "Sweet Banana Omelet",
+            "meal_category": "breakfast",
+            "ingredients": [
+              "Bananas",
+              "Eggs",
+              "oil",
+              "cinnamon",
+              "salt"
+            ],
+            "steps": [
+              "Slice Bananas and whisk Eggs with cinnamon and a tiny pinch of salt.",
+              "Heat oil in a skillet and pour in the Eggs.",
+              "Add Bananas, cook until set, then fold the omelet."
+            ]
+          }
+        ],
+        "need_grocery": [
+          {
+            "title": "Banana Oatmeal",
+            "meal_category": "breakfast",
+            "ingredients": [
+              "Bananas",
+              "oat milk",
+              "rolled oats",
+              "maple syrup",
+              "cinnamon",
+              "salt"
+            ],
+            "steps": [
+              "Cook rolled oats with oat milk, a pinch of salt, and cinnamon.",
+              "Slice Bananas over the oatmeal.",
+              "Drizzle with maple syrup and serve warm."
+            ],
+            "missing_ingredients": [
+              "rolled oats",
+              "maple syrup"
+            ]
+          },
+          {
+            "title": "Banana French Toast",
+            "meal_category": "breakfast",
+            "ingredients": [
+              "Eggs",
+              "oat milk",
+              "Bananas",
+              "bread",
+              "vanilla extract",
+              "cinnamon",
+              "oil"
+            ],
+            "steps": [
+              "Whisk Eggs with oat milk, vanilla extract, and cinnamon.",
+              "Dip bread slices into the mixture.",
+              "Cook in an oiled skillet until golden, then top with sliced Bananas."
+            ],
+            "missing_ingredients": [
+              "bread",
+              "vanilla extract"
+            ]
+          },
+          {
+            "title": "Veggie Omelet",
+            "meal_category": "breakfast",
+            "ingredients": [
+              "Eggs",
+              "oat milk",
+              "spinach",
+              "mushrooms",
+              "cheddar cheese",
+              "oil",
+              "salt",
+              "pepper"
+            ],
+            "steps": [
+              "Sauté spinach and mushrooms in oil until tender.",
+              "Whisk Eggs with oat milk, salt, and pepper.",
+              "Pour Eggs into the skillet, add cheddar cheese, and cook until set."
+            ],
+            "missing_ingredients": [
+              "spinach",
+              "mushrooms",
+              "cheddar cheese"
+            ]
+          },
+          {
+            "title": "Egg Fried Rice",
+            "meal_category": "dinner",
+            "ingredients": [
+              "Eggs",
+              "cooked rice",
+              "frozen peas and carrots",
+              "soy sauce",
+              "green onions",
+              "oil",
+              "pepper"
+            ],
+            "steps": [
+              "Scramble Eggs in a hot oiled skillet and set aside.",
+              "Stir-fry cooked rice with peas and carrots.",
+              "Add soy sauce, green onions, pepper, and the scrambled Eggs."
+            ],
+            "missing_ingredients": [
+              "cooked rice",
+              "frozen peas and carrots",
+              "soy sauce",
+              "green onions"
+            ]
+          },
+          {
+            "title": "Shakshuka",
+            "meal_category": "dinner",
+            "ingredients": [
+              "Eggs",
+              "canned tomatoes",
+              "bell pepper",
+              "onion",
+              "garlic",
+              "bread",
+              "oil",
+              "salt",
+              "pepper",
+              "cumin",
+              "paprika"
+            ],
+            "steps": [
+              "Sauté onion, bell pepper, and garlic in oil with cumin and paprika.",
+              "Add canned tomatoes and simmer into a thick sauce.",
+              "Crack in Eggs, cover, and cook until set; serve with bread."
+            ],
+            "missing_ingredients": [
+              "canned tomatoes",
+              "bell pepper",
+              "onion",
+              "garlic",
+              "bread"
+            ]
+          },
+          {
+            "title": "Egg Salad Sandwich",
+            "meal_category": "lunch",
+            "ingredients": [
+              "Eggs",
+              "bread",
+              "mayonnaise",
+              "celery",
+              "lettuce",
+              "salt",
+              "pepper"
+            ],
+            "steps": [
+              "Hard-boil Eggs, cool, peel, and chop.",
+              "Mix Eggs with mayonnaise, chopped celery, salt, and pepper.",
+              "Serve on bread with lettuce."
+            ],
+            "missing_ingredients": [
+              "bread",
+              "mayonnaise",
+              "celery",
+              "lettuce"
+            ]
+          },
+          {
+            "title": "Banana Muffins",
+            "meal_category": "snacks",
+            "ingredients": [
+              "Bananas",
+              "Eggs",
+              "flour",
+              "sugar",
+              "baking powder",
+              "oil",
+              "cinnamon",
+              "salt"
+            ],
+            "steps": [
+              "Mash Bananas and mix with Eggs and oil.",
+              "Stir in flour, sugar, baking powder, cinnamon, and salt.",
+              "Bake in muffin cups until risen and cooked through."
+            ],
+            "missing_ingredients": [
+              "flour",
+              "sugar",
+              "baking powder"
+            ]
+          },
+          {
+            "title": "Breakfast Burritos",
+            "meal_category": "breakfast",
+            "ingredients": [
+              "Eggs",
+              "tortillas",
+              "black beans",
+              "cheddar cheese",
+              "salsa",
+              "oil",
+              "salt",
+              "pepper"
+            ],
+            "steps": [
+              "Scramble Eggs in oil with salt and pepper.",
+              "Warm tortillas and black beans.",
+              "Fill tortillas with Eggs, black beans, cheddar cheese, and salsa, then roll."
+            ],
+            "missing_ingredients": [
+              "tortillas",
+              "black beans",
+              "cheddar cheese",
+              "salsa"
+            ]
+          },
+          {
+            "title": "Egg Pasta Carbonara",
+            "meal_category": "dinner",
+            "ingredients": [
+              "Eggs",
+              "spaghetti",
+              "Parmesan cheese",
+              "bacon",
+              "garlic",
+              "salt",
+              "pepper"
+            ],
+            "steps": [
+              "Cook spaghetti until al dente.",
+              "Cook bacon with garlic until crisp.",
+              "Toss hot pasta with beaten Eggs, Parmesan cheese, bacon, and pepper until creamy."
+            ],
+            "missing_ingredients": [
+              "spaghetti",
+              "Parmesan cheese",
+              "bacon",
+              "garlic"
+            ]
+          },
+          {
+            "title": "Banana Yogurt Parfait",
+            "meal_category": "breakfast",
+            "ingredients": [
+              "Bananas",
+              "Greek yogurt",
+              "granola",
+              "honey",
+              "cinnamon"
+            ],
+            "steps": [
+              "Slice Bananas.",
+              "Layer Greek yogurt, Bananas, and granola in a bowl.",
+              "Drizzle with honey and sprinkle with cinnamon."
+            ],
+            "missing_ingredients": [
+              "Greek yogurt",
+              "granola",
+              "honey"
+            ]
+          }
+        ]
+      },
+      "metrics": {
+        "recipeCount": 20,
+        "kitchenOnlyCount": 10,
+        "needGroceryCount": 10,
+        "groundingRate": 1,
+        "phantomIngredientsInKitchenOnly": 0,
+        "distinctProteins": 4,
+        "mealCategorySpread": {
+          "breakfast": 12,
+          "snacks": 4,
+          "dinner": 3,
+          "lunch": 1
+        }
+      }
+    },
+    "__judge": {
+      "mapping": {
+        "A": "gpt-5.4",
+        "B": "gpt-4.1-mini",
+        "C": "gpt-5.5"
+      },
+      "verdict": {
+        "scores": {
+          "A": {
+            "appeal": 4,
+            "practicality": 4,
+            "grounding": 6,
+            "comment": "Many recipes lean on odd banana-egg custard/scramble combos that few would enjoy. Grounding is mostly correct but assumes oil/salt as pantry (fine); however titles like 'Banana Oat Milk Smooth Eggs' and 'Banana Custard Scramble' are unappealing and repetitive. need_grocery flags look accurate."
+          },
+          "B": {
+            "appeal": 7,
+            "practicality": 8,
+            "grounding": 9,
+            "comment": "Cleaner, more realistic dishes: smoothie, scrambled/boiled eggs, omelette, banana egg pancakes. Explicitly lists pantry staples (salt, pepper, oil) which is honest grounding. need_grocery flags accurate, though French toast lists 'milk' as missing despite oat milk on hand—minor slip. Some snacks (oat milk dip, plain latte) are weak but harmless."
+          },
+          "C": {
+            "appeal": 8,
+            "practicality": 8,
+            "grounding": 9,
+            "comment": "Most appealing and varied set with clear seasoning (cinnamon, paprika, garlic powder as pantry) and coherent steps. Strong need_grocery variety (shakshuka, carbonara, burritos) with correct missing flags. Kitchen_only recipes genuinely use inventory+pantry. Banana pancakes/custard bake are genuinely nice."
+          }
+        },
+        "winner": "C",
+        "why": "Set C offers the most appealing, practical, and well-grounded recipes with sensible pantry assumptions and accurate missing-ingredient flags. B is close behind but slightly weaker on appeal and has a minor grounding slip (flagging 'milk' when oat milk is available). A relies on too many unappetizing, contrived banana-egg combinations."
+      },
+      "winnerModel": "gpt-5.5"
+    }
+  },
+  "owner3ed": {
+    "gpt-4.1-mini": {
+      "ok": true,
+      "error": null,
+      "latencyMs": 25734,
+      "usage": {
+        "prompt_tokens": 1749,
+        "completion_tokens": 2184,
+        "total_tokens": 3933,
+        "prompt_tokens_details": {
+          "cached_tokens": 0,
+          "audio_tokens": 0
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 0,
+          "audio_tokens": 0,
+          "accepted_prediction_tokens": 0,
+          "rejected_prediction_tokens": 0
+        }
+      },
+      "cost": {
+        "usd": 0.004194,
+        "est": false
+      },
+      "reasoningOff": false,
+      "set": {
+        "kitchen_only": [
+          {
+            "title": "Vegetable Frittata",
+            "meal_category": "breakfast",
+            "ingredients": [
+              "Homemade Skillet Vegetable Frittata"
+            ],
+            "steps": [
+              "Heat the skillet with the frittata until warmed through.",
+              "Serve warm as a hearty breakfast."
+            ]
+          },
+          {
+            "title": "Creamy Paprika Chicken Dinner",
+            "meal_category": "dinner",
+            "ingredients": [
+              "Creamy Paprika Chicken With Vegetables"
+            ],
+            "steps": [
+              "Heat the creamy paprika chicken with vegetables in a pan until hot.",
+              "Serve as a complete dinner meal."
+            ]
+          },
+          {
+            "title": "Fresh Garden Salad",
+            "meal_category": "lunch",
+            "ingredients": [
+              "Lettuce Head",
+              "Cucumbers",
+              "Tomatoes Roma and Cherry",
+              "Carrot"
+            ],
+            "steps": [
+              "Chop lettuce, cucumbers, tomatoes, and carrot into bite-sized pieces.",
+              "Toss together with salt, pepper, and oil to taste.",
+              "Serve fresh as a light lunch."
+            ]
+          },
+          {
+            "title": "Steamed Broccoli and Mushrooms",
+            "meal_category": "dinner",
+            "ingredients": [
+              "Broccoli Crowns",
+              "Mushrooms In green basket"
+            ],
+            "steps": [
+              "Steam broccoli crowns and mushrooms until tender.",
+              "Season with salt, pepper, and a drizzle of oil.",
+              "Serve as a vegetable side or light dinner."
+            ]
+          },
+          {
+            "title": "Avocado and Tomato Salad",
+            "meal_category": "snacks",
+            "ingredients": [
+              "Avocado",
+              "Assorted Small Tomatoes"
+            ],
+            "steps": [
+              "Dice avocado and assorted small tomatoes.",
+              "Mix gently with salt, pepper, and a splash of oil.",
+              "Serve as a fresh snack or side."
+            ]
+          },
+          {
+            "title": "Fruit Medley Snack",
+            "meal_category": "snacks",
+            "ingredients": [
+              "Apples Red",
+              "Peaches",
+              "Cherries In green basket",
+              "Oranges"
+            ],
+            "steps": [
+              "Wash and slice apples, peaches, and oranges.",
+              "Pit cherries and add to the fruit mix.",
+              "Serve chilled as a refreshing snack."
+            ]
+          },
+          {
+            "title": "Cabbage and Carrot Slaw",
+            "meal_category": "snacks",
+            "ingredients": [
+              "Cabbage Green",
+              "Carrot"
+            ],
+            "steps": [
+              "Shred cabbage and carrot finely.",
+              "Toss with salt, pepper, and oil to taste.",
+              "Serve as a crunchy slaw snack."
+            ]
+          },
+          {
+            "title": "Snap Peas Stir Fry",
+            "meal_category": "dinner",
+            "ingredients": [
+              "Snap Peas In green basket",
+              "Carrot",
+              "Mushrooms In green basket"
+            ],
+            "steps": [
+              "Slice carrots and mushrooms.",
+              "Stir fry snap peas, carrots, and mushrooms in oil with salt and pepper until tender-crisp.",
+              "Serve hot as a vegetable dinner."
+            ]
+          },
+          {
+            "title": "Fennel and Tomato Salad",
+            "meal_category": "lunch",
+            "ingredients": [
+              "Fennel Bulb with stalks",
+              "Tomatoes Roma and Cherry"
+            ],
+            "steps": [
+              "Thinly slice fennel bulb and chop tomatoes.",
+              "Toss with salt, pepper, and oil.",
+              "Serve fresh as a light lunch salad."
+            ]
+          },
+          {
+            "title": "Watermelon and Mint Snack",
+            "meal_category": "snacks",
+            "ingredients": [
+              "Watermelon Small, round"
+            ],
+            "steps": [
+              "Cut watermelon into bite-sized pieces.",
+              "Serve chilled as a refreshing snack."
+            ]
+          }
+        ],
+        "need_grocery": [
+          {
+            "title": "Turkey Sausage and Vegetable Stir Fry",
+            "meal_category": "dinner",
+            "ingredients": [
+              "Norbest Organic Ground Turkey 93% Lean | 7% Fat",
+              "Carrot",
+              "Broccoli Crowns",
+              "Mushrooms In green basket"
+            ],
+            "steps": [
+              "Cook ground turkey in a pan until browned.",
+              "Add chopped carrots, broccoli, and mushrooms and stir fry until vegetables are tender.",
+              "Season with salt, pepper, and preferred spices.",
+              "Serve hot as a filling dinner."
+            ],
+            "missing_ingredients": [
+              "Soy sauce"
+            ]
+          },
+          {
+            "title": "Chicken Sausage and Peppers Sandwich",
+            "meal_category": "lunch",
+            "ingredients": [
+              "Thrive Market Organic Italian Style Chicken Sausage Italian Style",
+              "Francisco International Hamburger Buns 16 count, 1 lb 14 oz (850g)",
+              "Assorted Small Tomatoes"
+            ],
+            "steps": [
+              "Cook chicken sausage in a pan until fully cooked.",
+              "Toast hamburger buns lightly.",
+              "Slice tomatoes and assemble sausage in buns with tomatoes.",
+              "Serve as a hearty lunch sandwich."
+            ],
+            "missing_ingredients": [
+              "Bell peppers",
+              "Mustard"
+            ]
+          },
+          {
+            "title": "Shrimp and Vegetable Stir Fry",
+            "meal_category": "dinner",
+            "ingredients": [
+              "Frozen Shrimp",
+              "Snap Peas In green basket",
+              "Carrot",
+              "Mushrooms In green basket"
+            ],
+            "steps": [
+              "Thaw and cook shrimp in a pan until pink.",
+              "Add sliced carrots, snap peas, and mushrooms and stir fry until vegetables are tender.",
+              "Season with salt, pepper, and soy sauce.",
+              "Serve hot as a complete dinner."
+            ],
+            "missing_ingredients": [
+              "Soy sauce",
+              "Garlic"
+            ]
+          },
+          {
+            "title": "Tilapia with Broccoli and Lemon",
+            "meal_category": "dinner",
+            "ingredients": [
+              "Frozen Tilapia",
+              "Broccoli Crowns"
+            ],
+            "steps": [
+              "Cook tilapia fillets in a pan with oil until flaky.",
+              "Steam broccoli until tender.",
+              "Serve tilapia and broccoli with a squeeze of fresh lemon.",
+              "Season with salt and pepper."
+            ],
+            "missing_ingredients": [
+              "Lemon"
+            ]
+          },
+          {
+            "title": "Vegetable and Sausage Pasta",
+            "meal_category": "dinner",
+            "ingredients": [
+              "Thrive Market Organic Cajun Style Chicken Sausage Cajun Style",
+              "Mushrooms In green basket",
+              "Carrot",
+              "Assorted Small Tomatoes"
+            ],
+            "steps": [
+              "Cook pasta according to package instructions.",
+              "Slice and cook sausage in a pan.",
+              "Add chopped mushrooms, carrot, and tomatoes and cook until soft.",
+              "Combine cooked pasta with sausage and vegetables, season with salt and pepper.",
+              "Serve hot."
+            ],
+            "missing_ingredients": [
+              "Pasta"
+            ]
+          },
+          {
+            "title": "Ground Turkey Lettuce Wraps",
+            "meal_category": "lunch",
+            "ingredients": [
+              "Norbest Organic Ground Turkey 93% Lean | 7% Fat",
+              "Lettuce Head",
+              "Carrot"
+            ],
+            "steps": [
+              "Cook ground turkey with salt, pepper, and spices.",
+              "Shred carrot finely.",
+              "Spoon cooked turkey and carrot into lettuce leaves as wraps.",
+              "Serve fresh for lunch."
+            ],
+            "missing_ingredients": [
+              "Soy sauce",
+              "Garlic"
+            ]
+          },
+          {
+            "title": "Chicken Sausage and Vegetable Soup",
+            "meal_category": "dinner",
+            "ingredients": [
+              "Thrive Market Organic Mild Italian Style Chicken Sausage Mild Italian Style",
+              "Carrot",
+              "Celery Salt",
+              "Cabbage Green"
+            ],
+            "steps": [
+              "Slice sausage and brown in a pot.",
+              "Add chopped carrot and cabbage.",
+              "Add water and season with celery salt, salt, and pepper.",
+              "Simmer until vegetables are tender.",
+              "Serve hot as a soup dinner."
+            ],
+            "missing_ingredients": [
+              "Chicken broth"
+            ]
+          },
+          {
+            "title": "Avocado and Tomato Toast",
+            "meal_category": "breakfast",
+            "ingredients": [
+              "Avocado",
+              "Assorted Small Tomatoes"
+            ],
+            "steps": [
+              "Toast bread slices until golden.",
+              "Mash avocado and spread on toast.",
+              "Top with chopped tomatoes, salt, and pepper.",
+              "Serve as a nutritious breakfast."
+            ],
+            "missing_ingredients": [
+              "Bread"
+            ]
+          },
+          {
+            "title": "Shrimp and Cabbage Stir Fry",
+            "meal_category": "dinner",
+            "ingredients": [
+              "Frozen Shrimp",
+              "Cabbage Green",
+              "Carrot"
+            ],
+            "steps": [
+              "Thaw and cook shrimp in a pan.",
+              "Add shredded cabbage and sliced carrot.",
+              "Stir fry with salt, pepper, and soy sauce until vegetables are tender.",
+              "Serve hot as a complete meal."
+            ],
+            "missing_ingredients": [
+              "Soy sauce",
+              "Garlic"
+            ]
+          },
+          {
+            "title": "Mushroom and Sausage Omelette",
+            "meal_category": "breakfast",
+            "ingredients": [
+              "Egg Carton (closed carton)",
+              "Thrive Market Organic Mushroom & Herb Chicken Sausage Mushroom & Herb",
+              "Mushrooms In green basket"
+            ],
+            "steps": [
+              "Beat eggs and season with salt and pepper.",
+              "Cook sliced sausage and mushrooms in a pan.",
+              "Pour eggs over sausage and mushrooms and cook until set.",
+              "Fold and serve hot for breakfast."
+            ],
+            "missing_ingredients": [
+              "Butter"
+            ]
+          }
+        ]
+      },
+      "metrics": {
+        "recipeCount": 20,
+        "kitchenOnlyCount": 10,
+        "needGroceryCount": 10,
+        "groundingRate": 1,
+        "phantomIngredientsInKitchenOnly": 0,
+        "distinctProteins": 6,
+        "mealCategorySpread": {
+          "breakfast": 3,
+          "dinner": 9,
+          "lunch": 4,
+          "snacks": 4
+        }
+      }
+    },
+    "gpt-5.4": {
+      "ok": true,
+      "error": null,
+      "latencyMs": 20703,
+      "usage": {
+        "prompt_tokens": 1748,
+        "completion_tokens": 3177,
+        "total_tokens": 4925,
+        "prompt_tokens_details": {
+          "cached_tokens": 0,
+          "audio_tokens": 0
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 0,
+          "audio_tokens": 0,
+          "accepted_prediction_tokens": 0,
+          "rejected_prediction_tokens": 0
+        }
+      },
+      "cost": {
+        "usd": 0.033955,
+        "est": true
+      },
+      "reasoningOff": false,
+      "set": {
+        "kitchen_only": [
+          {
+            "title": "Paprika Chicken Bowl",
+            "meal_category": "dinner",
+            "ingredients": [
+              "Creamy Paprika Chicken With Vegetables",
+              "Broccoli Crowns",
+              "Carrot",
+              "Snap Peas In green basket"
+            ],
+            "steps": [
+              "Chop Broccoli Crowns, Carrot, and Snap Peas In green basket into bite-size pieces.",
+              "Sauté the vegetables in oil with salt, pepper, and basic spices until just tender.",
+              "Warm Creamy Paprika Chicken With Vegetables in a pan until hot.",
+              "Serve the creamy chicken over the sautéed vegetables."
+            ]
+          },
+          {
+            "title": "Frittata Salad Plate",
+            "meal_category": "lunch",
+            "ingredients": [
+              "Homemade Skillet Vegetable Frittata",
+              "Lettuce Head",
+              "Cucumbers",
+              "Tomatoes Roma and Cherry",
+              "Avocado"
+            ],
+            "steps": [
+              "Slice Homemade Skillet Vegetable Frittata and warm lightly if desired.",
+              "Chop Lettuce Head, Cucumbers, Tomatoes Roma and Cherry, and Avocado.",
+              "Toss the salad with oil, salt, and pepper.",
+              "Serve the frittata alongside the salad for a complete plate."
+            ]
+          },
+          {
+            "title": "Turkey Cabbage Skillet",
+            "meal_category": "dinner",
+            "ingredients": [
+              "Norbest Organic Ground Turkey 93% Lean | 7% Fat",
+              "Cabbage Green",
+              "Mushrooms In green basket",
+              "Carrot"
+            ],
+            "steps": [
+              "Brown Norbest Organic Ground Turkey 93% Lean | 7% Fat in oil with salt, pepper, and basic spices.",
+              "Add sliced Mushrooms In green basket and chopped Carrot; cook until softened.",
+              "Stir in shredded Cabbage Green and cook until wilted and tender.",
+              "Season to taste and serve hot."
+            ]
+          },
+          {
+            "title": "Italian Sausage Veggie Saute",
+            "meal_category": "dinner",
+            "ingredients": [
+              "Thrive Market Organic Italian Style Chicken Sausage Italian Style, 12 oz",
+              "Broccoli Crowns",
+              "Mushrooms In green basket",
+              "Assorted Small Tomatoes"
+            ],
+            "steps": [
+              "Slice Thrive Market Organic Italian Style Chicken Sausage Italian Style, 12 oz.",
+              "Sauté the sausage in oil until browned.",
+              "Add chopped Broccoli Crowns and sliced Mushrooms In green basket; cook until tender.",
+              "Add Assorted Small Tomatoes at the end and cook briefly until softened, then serve."
+            ]
+          },
+          {
+            "title": "Cajun Shrimp and Long Beans",
+            "meal_category": "dinner",
+            "ingredients": [
+              "Frozen Shrimp",
+              "Frozen Long Beans",
+              "Tomatoes Roma and Cherry",
+              "Avocado"
+            ],
+            "steps": [
+              "Thaw Frozen Shrimp if needed and season with salt, pepper, and basic spices.",
+              "Sauté Frozen Long Beans in oil until hot and tender.",
+              "Add Frozen Shrimp and cook until pink and cooked through.",
+              "Serve with chopped Tomatoes Roma and Cherry and sliced Avocado on top."
+            ]
+          },
+          {
+            "title": "Tilapia Lettuce Plate",
+            "meal_category": "dinner",
+            "ingredients": [
+              "Frozen Tilapia",
+              "Lettuce Head",
+              "Cucumbers",
+              "Tomatoes Roma and Cherry",
+              "Fennel Bulb with stalks"
+            ],
+            "steps": [
+              "Season Frozen Tilapia with salt, pepper, and basic spices, then bake or pan-cook until flaky.",
+              "Thinly slice Lettuce Head, Cucumbers, Tomatoes Roma and Cherry, and Fennel Bulb with stalks.",
+              "Toss the vegetables with oil, salt, and pepper.",
+              "Serve the tilapia with the crisp salad."
+            ]
+          },
+          {
+            "title": "Mushroom Herb Sausage Scramble",
+            "meal_category": "breakfast",
+            "ingredients": [
+              "Egg Carton",
+              "Thrive Market Organic Mushroom & Herb Chicken Sausage Mushroom & Herb, 12 oz",
+              "Mushrooms In green basket",
+              "Assorted Small Tomatoes"
+            ],
+            "steps": [
+              "Slice Thrive Market Organic Mushroom & Herb Chicken Sausage Mushroom & Herb, 12 oz and sauté until browned.",
+              "Add sliced Mushrooms In green basket and cook until softened.",
+              "Whisk eggs from Egg Carton with salt and pepper, then pour into the pan.",
+              "Add Assorted Small Tomatoes and cook gently until the eggs are set."
+            ]
+          },
+          {
+            "title": "Turkey Lettuce Bun Burgers",
+            "meal_category": "lunch",
+            "ingredients": [
+              "Norbest Organic Ground Turkey 93% Lean | 7% Fat",
+              "Francisco International Hamburger Buns 16 count, 1 lb 14 oz (850g) (frozen in plastic bag)",
+              "Lettuce Head",
+              "Tomatoes Roma and Cherry",
+              "Avocado"
+            ],
+            "steps": [
+              "Form Norbest Organic Ground Turkey 93% Lean | 7% Fat into patties and season with salt, pepper, and basic spices.",
+              "Cook the patties in a skillet until fully cooked through.",
+              "Toast Francisco International Hamburger Buns 16 count, 1 lb 14 oz (850g) (frozen in plastic bag).",
+              "Assemble burgers with Lettuce Head, sliced Tomatoes Roma and Cherry, and Avocado."
+            ]
+          },
+          {
+            "title": "Mild Sausage Veggie Hash",
+            "meal_category": "lunch",
+            "ingredients": [
+              "Thrive Market Organic Mild Italian Style Chicken Sausage Mild Italian Style, 12 oz",
+              "Carrot",
+              "Broccoli Crowns",
+              "Mushrooms In green basket"
+            ],
+            "steps": [
+              "Slice Thrive Market Organic Mild Italian Style Chicken Sausage Mild Italian Style, 12 oz and brown in oil.",
+              "Dice Carrot, chop Broccoli Crowns, and slice Mushrooms In green basket.",
+              "Add the vegetables to the pan and cook until tender and lightly browned.",
+              "Season with salt, pepper, and basic spices, then serve hot."
+            ]
+          },
+          {
+            "title": "Fruit and Avocado Salad",
+            "meal_category": "snacks",
+            "ingredients": [
+              "Apples Red",
+              "Peaches",
+              "Cherries In green basket",
+              "Oranges",
+              "Avocado"
+            ],
+            "steps": [
+              "Chop Apples Red, Peaches, and Avocado into bite-size pieces.",
+              "Pit Cherries In green basket and segment Oranges.",
+              "Combine all fruit in a bowl with a pinch of salt if desired.",
+              "Serve chilled or at room temperature."
+            ]
+          }
+        ],
+        "need_grocery": [
+          {
+            "title": "Shrimp Tacos",
+            "meal_category": "dinner",
+            "ingredients": [
+              "Frozen Shrimp",
+              "Cabbage Green",
+              "Avocado",
+              "Tomatoes Roma and Cherry",
+              "tortillas",
+              "lime"
+            ],
+            "steps": [
+              "Cook Frozen Shrimp in oil with salt, pepper, and basic spices until pink.",
+              "Shred Cabbage Green and chop Avocado and Tomatoes Roma and Cherry.",
+              "Warm the tortillas.",
+              "Fill tortillas with shrimp, cabbage, tomato, and avocado, then finish with lime."
+            ],
+            "missing_ingredients": [
+              "tortillas",
+              "lime"
+            ]
+          },
+          {
+            "title": "Turkey Tomato Pasta",
+            "meal_category": "dinner",
+            "ingredients": [
+              "Norbest Organic Ground Turkey 93% Lean | 7% Fat",
+              "Tomatoes Roma and Cherry",
+              "Mushrooms In green basket",
+              "pasta",
+              "garlic",
+              "parmesan"
+            ],
+            "steps": [
+              "Cook pasta according to package directions.",
+              "Brown Norbest Organic Ground Turkey 93% Lean | 7% Fat in oil, then add sliced Mushrooms In green basket and chopped Tomatoes Roma and Cherry.",
+              "Add garlic and simmer until a light sauce forms.",
+              "Toss with pasta and top with parmesan."
+            ],
+            "missing_ingredients": [
+              "pasta",
+              "garlic",
+              "parmesan"
+            ]
+          },
+          {
+            "title": "Sausage Fennel Pizza",
+            "meal_category": "dinner",
+            "ingredients": [
+              "Thrive Market Organic Italian Style Chicken Sausage Italian Style, 12 oz",
+              "Fennel Bulb with stalks",
+              "Assorted Small Tomatoes",
+              "pizza dough",
+              "mozzarella"
+            ],
+            "steps": [
+              "Stretch the pizza dough on a baking tray or stone.",
+              "Top with sliced Assorted Small Tomatoes, thinly sliced Fennel Bulb with stalks, and sliced Thrive Market Organic Italian Style Chicken Sausage Italian Style, 12 oz.",
+              "Add mozzarella over the top.",
+              "Bake until the crust is golden and the cheese is melted."
+            ],
+            "missing_ingredients": [
+              "pizza dough",
+              "mozzarella"
+            ]
+          },
+          {
+            "title": "Tilapia Rice Bowl",
+            "meal_category": "lunch",
+            "ingredients": [
+              "Frozen Tilapia",
+              "Broccoli Crowns",
+              "Carrot",
+              "Avocado",
+              "rice",
+              "soy sauce"
+            ],
+            "steps": [
+              "Cook rice according to package directions.",
+              "Season and cook Frozen Tilapia until flaky.",
+              "Steam or sauté Broccoli Crowns and Carrot until tender.",
+              "Serve the fish and vegetables over rice with sliced Avocado and a little soy sauce."
+            ],
+            "missing_ingredients": [
+              "rice",
+              "soy sauce"
+            ]
+          },
+          {
+            "title": "Frittata Toast Plate",
+            "meal_category": "breakfast",
+            "ingredients": [
+              "Homemade Skillet Vegetable Frittata",
+              "Avocado",
+              "Tomatoes Roma and Cherry",
+              "bread",
+              "butter"
+            ],
+            "steps": [
+              "Toast the bread and spread with butter.",
+              "Slice Homemade Skillet Vegetable Frittata and warm if desired.",
+              "Top the toast with sliced Avocado and chopped Tomatoes Roma and Cherry.",
+              "Serve with the frittata on the side."
+            ],
+            "missing_ingredients": [
+              "bread",
+              "butter"
+            ]
+          },
+          {
+            "title": "Chicken Caesar Salad",
+            "meal_category": "lunch",
+            "ingredients": [
+              "Creamy Paprika Chicken With Vegetables",
+              "Mixed Lettuce, Clementine, Frozen Shrimp, Frozen Tilapia, Frozen Long Beans",
+              "croutons",
+              "parmesan",
+              "Caesar dressing"
+            ],
+            "steps": [
+              "Use the Mixed Lettuce from Mixed Lettuce, Clementine, Frozen Shrimp, Frozen Tilapia, Frozen Long Beans as the salad base.",
+              "Warm Creamy Paprika Chicken With Vegetables and slice into bite-size pieces if needed.",
+              "Toss the lettuce with Caesar dressing, croutons, and parmesan.",
+              "Top with the warm chicken and serve."
+            ],
+            "missing_ingredients": [
+              "croutons",
+              "parmesan",
+              "Caesar dressing"
+            ]
+          },
+          {
+            "title": "Cajun Sausage Jambalaya",
+            "meal_category": "dinner",
+            "ingredients": [
+              "Thrive Market Organic Cajun Style Chicken Sausage Cajun Style, 12 oz",
+              "Assorted Small Tomatoes",
+              "Carrot",
+              "rice",
+              "onion",
+              "celery"
+            ],
+            "steps": [
+              "Cook rice separately.",
+              "Slice Thrive Market Organic Cajun Style Chicken Sausage Cajun Style, 12 oz and brown in a pot.",
+              "Add chopped Carrot, onion, celery, and Assorted Small Tomatoes; cook until softened.",
+              "Stir in the cooked rice, season well, and serve hot."
+            ],
+            "missing_ingredients": [
+              "rice",
+              "onion",
+              "celery"
+            ]
+          },
+          {
+            "title": "Turkey Lettuce Wraps",
+            "meal_category": "lunch",
+            "ingredients": [
+              "Norbest Organic Ground Turkey 93% Lean | 7% Fat",
+              "Lettuce Head",
+              "Mushrooms In green basket",
+              "Carrot",
+              "hoisin sauce",
+              "green onions"
+            ],
+            "steps": [
+              "Brown Norbest Organic Ground Turkey 93% Lean | 7% Fat in oil.",
+              "Add chopped Mushrooms In green basket and finely diced Carrot; cook until tender.",
+              "Stir in hoisin sauce and cook briefly.",
+              "Spoon the filling into Lettuce Head leaves and top with sliced green onions."
+            ],
+            "missing_ingredients": [
+              "hoisin sauce",
+              "green onions"
+            ]
+          },
+          {
+            "title": "Broccoli Mushroom Quiche",
+            "meal_category": "dinner",
+            "ingredients": [
+              "Egg Carton",
+              "Broccoli Crowns",
+              "Mushrooms In green basket",
+              "pie crust",
+              "milk",
+              "cheddar cheese"
+            ],
+            "steps": [
+              "Prebake the pie crust if needed.",
+              "Sauté chopped Broccoli Crowns and sliced Mushrooms In green basket until just tender.",
+              "Whisk eggs from Egg Carton with milk, salt, and pepper, then stir in the vegetables and cheddar cheese.",
+              "Pour into the crust and bake until set."
+            ],
+            "missing_ingredients": [
+              "pie crust",
+              "milk",
+              "cheddar cheese"
+            ]
+          },
+          {
+            "title": "Fruit Yogurt Parfait",
+            "meal_category": "snacks",
+            "ingredients": [
+              "Apples Red",
+              "Peaches",
+              "Cherries In green basket",
+              "yogurt",
+              "granola",
+              "honey"
+            ],
+            "steps": [
+              "Chop Apples Red and Peaches, and pit Cherries In green basket.",
+              "Layer yogurt with the fruit in glasses or bowls.",
+              "Top with granola and drizzle with honey.",
+              "Serve immediately."
+            ],
+            "missing_ingredients": [
+              "yogurt",
+              "granola",
+              "honey"
+            ]
+          }
+        ]
+      },
+      "metrics": {
+        "recipeCount": 20,
+        "kitchenOnlyCount": 10,
+        "needGroceryCount": 10,
+        "groundingRate": 1,
+        "phantomIngredientsInKitchenOnly": 0,
+        "distinctProteins": 8,
+        "mealCategorySpread": {
+          "dinner": 10,
+          "lunch": 6,
+          "breakfast": 2,
+          "snacks": 2
+        }
+      }
+    },
+    "gpt-5.5": {
+      "ok": true,
+      "error": null,
+      "latencyMs": 66964,
+      "usage": {
+        "prompt_tokens": 1748,
+        "completion_tokens": 4386,
+        "total_tokens": 6134,
+        "prompt_tokens_details": {
+          "cached_tokens": 0,
+          "audio_tokens": 0
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 2048,
+          "audio_tokens": 0,
+          "accepted_prediction_tokens": 0,
+          "rejected_prediction_tokens": 0
+        }
+      },
+      "cost": {
+        "usd": 0.046045,
+        "est": true
+      },
+      "reasoningOff": false,
+      "set": {
+        "kitchen_only": [
+          {
+            "title": "Cajun Sausage Long Bean Skillet",
+            "meal_category": "dinner",
+            "ingredients": [
+              "Thrive Market Organic Cajun Style Chicken Sausage Cajun Style, 12 oz",
+              "Frozen Long Beans",
+              "Tomatoes Roma and Cherry",
+              "Mushrooms In green basket",
+              "Cabbage Green"
+            ],
+            "steps": [
+              "Slice the sausage and brown it in a little oil in a large skillet.",
+              "Add sliced mushrooms, shredded cabbage, and Frozen Long Beans; cook until tender.",
+              "Stir in chopped Tomatoes Roma and Cherry, salt, pepper, and paprika; cook until the tomatoes soften.",
+              "Serve hot as a one-pan dinner."
+            ]
+          },
+          {
+            "title": "Turkey Avocado Burgers",
+            "meal_category": "dinner",
+            "ingredients": [
+              "Norbest Organic Ground Turkey 93% Lean | 7% Fat",
+              "Francisco International Hamburger Buns 16 count, 1 lb 14 oz (850g)",
+              "Lettuce Head",
+              "Avocado",
+              "Tomatoes Roma and Cherry"
+            ],
+            "steps": [
+              "Season the ground turkey with salt, pepper, and basic spices, then form patties.",
+              "Cook the patties in an oiled skillet until fully cooked through.",
+              "Toast the hamburger buns if desired.",
+              "Assemble burgers with Lettuce Head, sliced Avocado, and Tomatoes Roma and Cherry."
+            ]
+          },
+          {
+            "title": "Shrimp Avocado Salad",
+            "meal_category": "lunch",
+            "ingredients": [
+              "Frozen Shrimp",
+              "Mixed Lettuce",
+              "Avocado",
+              "Cucumbers",
+              "Clementine",
+              "Carrot"
+            ],
+            "steps": [
+              "Thaw the shrimp, then cook in a skillet with oil, salt, pepper, and paprika until opaque.",
+              "Slice the avocado, cucumbers, clementine, and carrot.",
+              "Arrange Mixed Lettuce in bowls and top with the shrimp and produce.",
+              "Drizzle lightly with oil and season with salt and pepper."
+            ]
+          },
+          {
+            "title": "Tilapia Fennel Tray Bake",
+            "meal_category": "dinner",
+            "ingredients": [
+              "Frozen Tilapia",
+              "Fennel Bulb with stalks",
+              "Broccoli Crowns",
+              "Tomatoes Roma and Cherry",
+              "Snap Peas In green basket"
+            ],
+            "steps": [
+              "Thaw the tilapia and pat it dry.",
+              "Place sliced fennel, broccoli, tomatoes, and snap peas on an oiled baking tray.",
+              "Add the tilapia, season everything with salt, pepper, and basic spices.",
+              "Bake until the fish flakes easily and the vegetables are tender."
+            ]
+          },
+          {
+            "title": "Mushroom Tomato Frittata",
+            "meal_category": "breakfast",
+            "ingredients": [
+              "Egg Carton",
+              "Mushrooms In green basket",
+              "Assorted Small Tomatoes",
+              "Snap Peas In green basket",
+              "Avocado"
+            ],
+            "steps": [
+              "Slice the mushrooms, tomatoes, and snap peas.",
+              "Cook the vegetables in an oiled oven-safe skillet until softened.",
+              "Beat eggs with salt and pepper, then pour over the vegetables.",
+              "Cook gently until mostly set, finish under the broiler if needed, and serve with sliced avocado."
+            ]
+          },
+          {
+            "title": "Paprika Chicken Veg Bowl",
+            "meal_category": "dinner",
+            "ingredients": [
+              "Creamy Paprika Chicken With Vegetables",
+              "Broccoli Crowns",
+              "Carrot",
+              "Cabbage Green",
+              "Mushrooms In green basket"
+            ],
+            "steps": [
+              "Cut the broccoli, carrot, cabbage, and mushrooms into bite-size pieces.",
+              "Saute the vegetables in a little oil with salt and pepper until tender-crisp.",
+              "Reheat the Creamy Paprika Chicken With Vegetables until steaming hot.",
+              "Serve the chicken over the sauteed vegetables."
+            ]
+          },
+          {
+            "title": "Italian Sausage Cabbage Hash",
+            "meal_category": "dinner",
+            "ingredients": [
+              "Thrive Market Organic Italian Style Chicken Sausage Italian Style, 12 oz",
+              "Cabbage Green",
+              "Carrot",
+              "Fennel Bulb with stalks",
+              "Tomatoes Roma and Cherry"
+            ],
+            "steps": [
+              "Slice the sausage, cabbage, carrot, fennel, and tomatoes.",
+              "Brown the sausage in an oiled skillet.",
+              "Add cabbage, carrot, and fennel; cook until tender and lightly browned.",
+              "Stir in tomatoes, salt, pepper, and basic spices, then cook until juicy and hot."
+            ]
+          },
+          {
+            "title": "Shrimp Snap Pea Stir-Fry",
+            "meal_category": "dinner",
+            "ingredients": [
+              "Frozen Shrimp",
+              "Snap Peas In green basket",
+              "Broccoli Crowns",
+              "Mushrooms In green basket",
+              "Cabbage Green"
+            ],
+            "steps": [
+              "Thaw the shrimp and cut the vegetables into bite-size pieces.",
+              "Stir-fry broccoli, mushrooms, cabbage, and snap peas in oil until crisp-tender.",
+              "Add the shrimp and cook until opaque.",
+              "Season with salt, pepper, and basic spices, then serve hot."
+            ]
+          },
+          {
+            "title": "Avocado Egg Salad Buns",
+            "meal_category": "lunch",
+            "ingredients": [
+              "Egg Carton",
+              "Avocado",
+              "Francisco International Hamburger Buns 16 count, 1 lb 14 oz (850g)",
+              "Lettuce Head",
+              "Cucumbers",
+              "Assorted Small Tomatoes"
+            ],
+            "steps": [
+              "Boil eggs until hard-cooked, then cool, peel, and chop them.",
+              "Mash avocado with salt and pepper, then fold in the chopped eggs.",
+              "Toast the buns if desired.",
+              "Fill the buns with lettuce, avocado egg salad, sliced cucumbers, and tomatoes."
+            ]
+          },
+          {
+            "title": "Apple Fennel Fruit Salad",
+            "meal_category": "snacks",
+            "ingredients": [
+              "Apples Red",
+              "Fennel Bulb with stalks",
+              "Oranges",
+              "Cherries In green basket",
+              "Peaches"
+            ],
+            "steps": [
+              "Slice the apples, fennel, oranges, cherries, and peaches.",
+              "Toss the fruit and fennel together in a bowl.",
+              "Add a pinch of salt and a light drizzle of oil if desired.",
+              "Serve chilled or at room temperature."
+            ]
+          }
+        ],
+        "need_grocery": [
+          {
+            "title": "Shrimp Tacos",
+            "meal_category": "lunch",
+            "ingredients": [
+              "Frozen Shrimp",
+              "Cabbage Green",
+              "Avocado",
+              "Tomatoes Roma and Cherry",
+              "corn tortillas",
+              "lime",
+              "cilantro"
+            ],
+            "steps": [
+              "Thaw and cook the shrimp in oil with salt, pepper, and basic spices until opaque.",
+              "Warm the corn tortillas.",
+              "Fill tortillas with shrimp, shredded cabbage, avocado, and tomatoes.",
+              "Finish with lime juice and cilantro."
+            ],
+            "missing_ingredients": [
+              "corn tortillas",
+              "lime",
+              "cilantro"
+            ]
+          },
+          {
+            "title": "Turkey Meatball Pasta",
+            "meal_category": "dinner",
+            "ingredients": [
+              "Norbest Organic Ground Turkey 93% Lean | 7% Fat",
+              "Assorted Small Tomatoes",
+              "Mushrooms In green basket",
+              "spaghetti",
+              "parmesan cheese",
+              "onion"
+            ],
+            "steps": [
+              "Mix ground turkey with salt, pepper, and basic spices, then form small meatballs.",
+              "Brown the meatballs in oil and cook through.",
+              "Saute onion, mushrooms, and tomatoes until saucy.",
+              "Toss cooked spaghetti with the sauce and meatballs, then top with parmesan."
+            ],
+            "missing_ingredients": [
+              "spaghetti",
+              "parmesan cheese",
+              "onion"
+            ]
+          },
+          {
+            "title": "Chicken Sausage Rice Bowls",
+            "meal_category": "dinner",
+            "ingredients": [
+              "Thrive Market Organic Mushroom & Herb Chicken Sausage Mushroom & Herb, 12 oz",
+              "Broccoli Crowns",
+              "Snap Peas In green basket",
+              "rice",
+              "soy sauce"
+            ],
+            "steps": [
+              "Cook the rice according to package directions.",
+              "Slice and brown the chicken sausage in a skillet.",
+              "Add broccoli and snap peas, then stir-fry until tender-crisp.",
+              "Serve over rice with soy sauce."
+            ],
+            "missing_ingredients": [
+              "rice",
+              "soy sauce"
+            ]
+          },
+          {
+            "title": "Tilapia Sandwiches",
+            "meal_category": "lunch",
+            "ingredients": [
+              "Frozen Tilapia",
+              "Francisco International Hamburger Buns 16 count, 1 lb 14 oz (850g)",
+              "Lettuce Head",
+              "Tomatoes Roma and Cherry",
+              "lemon",
+              "tartar sauce"
+            ],
+            "steps": [
+              "Thaw the tilapia and season with salt, pepper, and basic spices.",
+              "Cook the fish in an oiled skillet until it flakes easily.",
+              "Toast the buns if desired.",
+              "Assemble sandwiches with lettuce, tomatoes, tilapia, lemon juice, and tartar sauce."
+            ],
+            "missing_ingredients": [
+              "lemon",
+              "tartar sauce"
+            ]
+          },
+          {
+            "title": "Greek Egg Pita Salad",
+            "meal_category": "lunch",
+            "ingredients": [
+              "Egg Carton",
+              "Cucumbers",
+              "Tomatoes Roma and Cherry",
+              "Mixed Lettuce",
+              "pita bread",
+              "feta cheese",
+              "olives"
+            ],
+            "steps": [
+              "Hard-boil the eggs, cool, peel, and slice them.",
+              "Chop the cucumbers and tomatoes.",
+              "Fill pita bread with Mixed Lettuce, eggs, cucumbers, tomatoes, feta, and olives.",
+              "Season with pepper and serve."
+            ],
+            "missing_ingredients": [
+              "pita bread",
+              "feta cheese",
+              "olives"
+            ]
+          },
+          {
+            "title": "Sausage Mushroom Pizza",
+            "meal_category": "dinner",
+            "ingredients": [
+              "Thrive Market Organic Mild Italian Style Chicken Sausage Mild Italian Style, 12 oz",
+              "Mushrooms In green basket",
+              "Tomatoes Roma and Cherry",
+              "pizza dough",
+              "mozzarella cheese",
+              "marinara sauce"
+            ],
+            "steps": [
+              "Brown sliced chicken sausage and mushrooms in a skillet.",
+              "Stretch the pizza dough on an oiled pan.",
+              "Spread marinara sauce over the dough and top with cheese, sausage, mushrooms, and tomatoes.",
+              "Bake until the crust is golden and the cheese is melted."
+            ],
+            "missing_ingredients": [
+              "pizza dough",
+              "mozzarella cheese",
+              "marinara sauce"
+            ]
+          },
+          {
+            "title": "Shrimp Fried Rice",
+            "meal_category": "dinner",
+            "ingredients": [
+              "Frozen Shrimp",
+              "Egg Carton",
+              "Frozen Long Beans",
+              "Carrot",
+              "rice",
+              "soy sauce",
+              "scallions"
+            ],
+            "steps": [
+              "Cook the rice ahead and let it cool if possible.",
+              "Scramble eggs in a hot oiled skillet, then remove them.",
+              "Stir-fry carrot, Frozen Long Beans, and shrimp until the shrimp is opaque.",
+              "Add rice, eggs, soy sauce, and scallions; stir-fry until hot."
+            ],
+            "missing_ingredients": [
+              "rice",
+              "soy sauce",
+              "scallions"
+            ]
+          },
+          {
+            "title": "Turkey Lettuce Wraps",
+            "meal_category": "dinner",
+            "ingredients": [
+              "Norbest Organic Ground Turkey 93% Lean | 7% Fat",
+              "Lettuce Head",
+              "Carrot",
+              "Cucumbers",
+              "hoisin sauce",
+              "soy sauce",
+              "fresh ginger"
+            ],
+            "steps": [
+              "Cook the ground turkey in oil until browned and fully cooked.",
+              "Stir in grated fresh ginger, hoisin sauce, and soy sauce.",
+              "Spoon the turkey into lettuce leaves.",
+              "Top with shredded carrot and sliced cucumbers."
+            ],
+            "missing_ingredients": [
+              "hoisin sauce",
+              "soy sauce",
+              "fresh ginger"
+            ]
+          },
+          {
+            "title": "White Bean Vegetable Soup",
+            "meal_category": "dinner",
+            "ingredients": [
+              "Broccoli Crowns",
+              "Cabbage Green",
+              "Carrot",
+              "Fennel Bulb with stalks",
+              "Tomatoes Roma and Cherry",
+              "vegetable broth",
+              "canned white beans"
+            ],
+            "steps": [
+              "Chop the broccoli, cabbage, carrot, fennel, and tomatoes.",
+              "Saute carrot and fennel in oil until softened.",
+              "Add broth, tomatoes, cabbage, broccoli, and drained white beans.",
+              "Simmer until the vegetables are tender, then season with salt and pepper."
+            ],
+            "missing_ingredients": [
+              "vegetable broth",
+              "canned white beans"
+            ]
+          },
+          {
+            "title": "Paprika Chicken Noodles",
+            "meal_category": "dinner",
+            "ingredients": [
+              "Creamy Paprika Chicken With Vegetables",
+              "Mushrooms In green basket",
+              "Broccoli Crowns",
+              "egg noodles",
+              "sour cream"
+            ],
+            "steps": [
+              "Cook the egg noodles according to package directions.",
+              "Saute mushrooms and broccoli in oil until tender.",
+              "Reheat the Creamy Paprika Chicken With Vegetables until steaming hot.",
+              "Toss noodles with the chicken, vegetables, and sour cream."
+            ],
+            "missing_ingredients": [
+              "egg noodles",
+              "sour cream"
+            ]
+          }
+        ]
+      },
+      "metrics": {
+        "recipeCount": 20,
+        "kitchenOnlyCount": 10,
+        "needGroceryCount": 10,
+        "groundingRate": 1,
+        "phantomIngredientsInKitchenOnly": 0,
+        "distinctProteins": 8,
+        "mealCategorySpread": {
+          "dinner": 13,
+          "lunch": 5,
+          "breakfast": 1,
+          "snacks": 1
+        }
+      }
+    },
+    "__judge": {
+      "mapping": {
+        "A": "gpt-5.4",
+        "B": "gpt-4.1-mini",
+        "C": "gpt-5.5"
+      },
+      "verdict": {
+        "scores": {
+          "A": {
+            "appeal": 8,
+            "practicality": 8,
+            "grounding": 7,
+            "comment": "Strong, appetizing variety with balanced meals. Kitchen_only recipes are well-grounded, but the 'Chicken Caesar Salad' misuses the combined mixed-produce item and treats a bundled inventory string awkwardly; some recipes lean on the multi-item bundle labels. Truncated final recipe. Overall coherent weeknight cooking."
+          },
+          "B": {
+            "appeal": 6,
+            "practicality": 8,
+            "grounding": 6,
+            "comment": "Simplest and most practical, coherent steps. However several kitchen_only recipes are trivially thin (just reheat frittata/chicken, plain watermelon). Grounding issues: need_grocery items like soy sauce/garlic flagged but some kitchen_only stir-fries omit similar seasonings; a few need_grocery recipes list 'soy sauce' in steps but as missing—acceptable. Watermelon recipe title mentions mint not in ingredients."
+          },
+          "C": {
+            "appeal": 9,
+            "practicality": 8,
+            "grounding": 8,
+            "comment": "Most appealing and creative set with well-composed, cohesive meals (tray bakes, fried rice, tacos, tray bakes). Uses Mixed Lettuce/Clementine as separate items correctly. Missing ingredients well flagged. Slightly ambitious for some weeknights but generally practical; final recipe truncated."
+          }
+        },
+        "winner": "C",
+        "why": "Set C offers the most appetizing, varied, and coherent meals while correctly handling inventory items and accurately flagging missing groceries, edging out A's solid but slightly less creative lineup and B's overly thin kitchen_only recipes."
+      },
+      "winnerModel": "gpt-5.5"
+    }
+  }
+}
