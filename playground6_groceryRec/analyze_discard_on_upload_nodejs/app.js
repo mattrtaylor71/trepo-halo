@@ -358,8 +358,17 @@ async function ensureShoppingListTable(conn, tableName) {
   if (!columns.has('images')) alterParts.push("ADD COLUMN `images` TEXT AFTER `product_brand`");
   if (!columns.has('product_barcode')) alterParts.push("ADD COLUMN `product_barcode` VARCHAR(64) DEFAULT NULL AFTER `images`");
   if (!columns.has('store')) alterParts.push("ADD COLUMN `store` VARCHAR(100) DEFAULT NULL AFTER `product_barcode`");
-  if (alterParts.length > 0) {
-    await conn.query(`ALTER TABLE \`${tableName}\` ${alterParts.join(', ')}`);
+  // Add each column as its OWN ALTER, tolerating ER_DUP_FIELDNAME (errno 1060):
+  // two discard writes for the same owner can race — both read information_schema,
+  // both build the ALTER; a duplicate just means a concurrent writer already added
+  // it (the desired end state). Per-column so a dup on one never blocks the others.
+  for (const addClause of alterParts) {
+    try {
+      await conn.query(`ALTER TABLE \`${tableName}\` ${addClause}`);
+    } catch (err) {
+      if (err && (err.errno === 1060 || err.code === 'ER_DUP_FIELDNAME')) continue;
+      throw err;
+    }
   }
 }
 
@@ -459,8 +468,17 @@ async function ensureMetricsColumns(conn, tableName) {
   if (!columns.has('kitchen_analysis_content')) alterParts.push("ADD COLUMN `kitchen_analysis_content` MEDIUMTEXT COMMENT 'Formatted AI summary of the kitchen' AFTER `kitchen_analysis_status`");
   if (!columns.has('kitchen_analysis_generated_at')) alterParts.push("ADD COLUMN `kitchen_analysis_generated_at` DATETIME NULL COMMENT 'When the kitchen analysis was generated' AFTER `kitchen_analysis_content`");
   if (!columns.has('kitchen_analysis_error')) alterParts.push("ADD COLUMN `kitchen_analysis_error` TEXT COMMENT 'Latest kitchen analysis error, if any' AFTER `kitchen_analysis_generated_at`");
-  if (alterParts.length > 0) {
-    await conn.query(`ALTER TABLE \`${tableName}\` ${alterParts.join(', ')}`);
+  // Add each column as its OWN ALTER, tolerating ER_DUP_FIELDNAME (errno 1060):
+  // two discard writes for the same owner can race — both read information_schema,
+  // both build the ALTER; a duplicate just means a concurrent writer already added
+  // it (the desired end state). Per-column so a dup on one never blocks the others.
+  for (const addClause of alterParts) {
+    try {
+      await conn.query(`ALTER TABLE \`${tableName}\` ${addClause}`);
+    } catch (err) {
+      if (err && (err.errno === 1060 || err.code === 'ER_DUP_FIELDNAME')) continue;
+      throw err;
+    }
   }
 }
 

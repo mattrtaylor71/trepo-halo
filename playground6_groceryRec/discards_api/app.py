@@ -432,8 +432,16 @@ def _update_discard(owner, item_id, body):
                 WHERE table_schema = DATABASE() AND table_name = %s AND column_name = '_updatedDate'
             """, [table_name])
             if cur.fetchone()['count'] == 0:
-                cur.execute(f"ALTER TABLE `{table_name}` ADD COLUMN `_updatedDate` DATETIME NULL")
-                conn.commit()
+                # Tolerate errno 1060: two concurrent requests can both see the column
+                # missing and both ALTER — a duplicate just means the other won the race.
+                try:
+                    cur.execute(f"ALTER TABLE `{table_name}` ADD COLUMN `_updatedDate` DATETIME NULL")
+                    conn.commit()
+                except Exception as e:
+                    if getattr(e, 'args', (None,))[0] == 1060:
+                        conn.rollback()
+                    else:
+                        raise
             query = f"UPDATE `{{table_name}}` SET {', '.join(updates)} WHERE `_id` = %s"
             for member_id in member_ids:
                 member_table_name = f"{member_id}_discards"
