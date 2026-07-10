@@ -69,6 +69,13 @@ function targets(conn, verb) {
 function allWriteTargets(conn) {
   return [...targets(conn, "INSERT"), ...targets(conn, "UPDATE"), ...targets(conn, "DELETE")];
 }
+// Params of the (first) INSERT into a specific table — lets us assert VALUES are
+// preserved through the helper's buildStatement (targets alone wouldn't catch a
+// garbage value, e.g. a stray function in the params).
+function insertParamsFor(conn, tableName) {
+  const c = conn.calls.find((x) => x.sql.toUpperCase().startsWith("INSERT INTO") && new RegExp("`" + tableName + "`").test(x.sql));
+  return c ? c.params : null;
+}
 const wroteForMember = (conn, memberId) => allWriteTargets(conn).some((t) => t.includes(memberId));
 const wroteShared = (conn) => allWriteTargets(conn).some((t) => t.startsWith("shared_"));
 
@@ -115,6 +122,9 @@ test("addShoppingItem writes shared_shopping_list + BOTH members' _new_list", as
   assert.ok(inserts.includes("shared_shopping_list"), "shared insert missing");
   assert.ok(inserts.includes("ownerA_new_list"), "owner per-user insert missing");
   assert.ok(inserts.includes("memberB_new_list"), "member per-user insert missing (household scope)");
+  // VALUES preserved: member row is _owner=memberB, product_name=Bananas, action=ADDED.
+  const mp = insertParamsFor(CONN, "memberB_new_list");
+  assert.deepEqual(mp, ["memberB", "voice-assistant", "Bananas", 1, null, null, null, mp[7], "ADDED", mp[9]]);
 });
 
 test("addManyShoppingItems fans out EVERY item to shared + both members", async () => {
@@ -179,6 +189,12 @@ test("discardKitchenItem inserts discard into shared + BOTH members (household)"
   CONN = makeConn({ selectRows: [targetRow()] });
   await da.discardKitchenItem(householdCtx(), "Bananas", "spoiled");
   assert.ok(wroteForMember(CONN, "ownerA") && wroteForMember(CONN, "memberB"), "discard insert must fan out to both members");
+  // VALUES preserved: member discard row is _owner=memberB (a plain string, not a
+  // function — guards the dynamic-column buildStatement wrapper).
+  const dp = insertParamsFor(CONN, "memberB_discards");
+  assert.equal(typeof dp?.[1], "string");
+  assert.equal(dp[1], "memberB");
+  assert.equal(dp[0], dp[0]); // _id (discardId) present
 });
 
 test("deleteRecentDiscard (action=OUT) updates shared + BOTH members (household)", async () => {

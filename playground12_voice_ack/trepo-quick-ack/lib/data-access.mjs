@@ -2653,19 +2653,23 @@ async function insertDiscardRowAcrossHousehold(connection, context, kitchenRow, 
     // members (app.py:436/:498) — without this, voice discards are invisible in the
     // app. Discards are HOUSEHOLD-VISIBLE, so fan out to all members (like the
     // shopping fix); per-user tables have no owner_id column.
-    for (const memberId of getTableHouseholdMemberIds(context)) {
-      const tableName = discardTableName(memberId);
-      await ensureDiscardTable(connection, tableName);
-      const columns = await getTableColumns(connection, tableName);
-      const fieldNames = ["_id", "_owner", "_device", "_createdDate", "product_name", "brand", "category", "images", "action", "product_expiration", "job_id", "user_id"];
-      const values = [discardId, memberId, "voice-assistant", kitchenRow.product_name || null, kitchenRow.brand || null, kitchenRow.category || null, kitchenRow.images || null, "IN", kitchenRow.product_expiration || null, kitchenRow.job_id || `voice-discard-${discardId}`, context.userId];
-      if (columns.has("_updatedDate")) fieldNames.push("_updatedDate");
-      if (columns.has("source_kitchen_id")) { fieldNames.push("source_kitchen_id"); values.push(kitchenRow._id); }
-      if (columns.has("discard_reason")) { fieldNames.push("discard_reason"); values.push(reason || null); }
-      const sqlFields = fieldNames.map((field) => `\`${field}\``).join(", ");
-      const sqlValues = fieldNames.map((field) => (field === "_createdDate" || field === "_updatedDate" ? "NOW()" : "?")).join(", ");
-      await connection.execute(`INSERT INTO \`${tableName}\` (${sqlFields}) VALUES (${sqlValues})`, values);
-    }
+    // Thin wrapper over the helper: discards are schema-tolerant (dynamic optional
+    // columns), so buildStatement inspects each member table's columns per-member.
+    await dualWriteAcrossHousehold(connection, {
+      memberIds: getTableHouseholdMemberIds(context), context, op: "insert", reportEvt: "discard_peruser_write_miss",
+      tableFn: discardTableName, ensureFn: ensureDiscardTable,
+      buildStatement: async (tableName, memberId) => {
+        const columns = await getTableColumns(connection, tableName);
+        const fieldNames = ["_id", "_owner", "_device", "_createdDate", "product_name", "brand", "category", "images", "action", "product_expiration", "job_id", "user_id"];
+        const values = [discardId, memberId, "voice-assistant", kitchenRow.product_name || null, kitchenRow.brand || null, kitchenRow.category || null, kitchenRow.images || null, "IN", kitchenRow.product_expiration || null, kitchenRow.job_id || `voice-discard-${discardId}`, context.userId];
+        if (columns.has("_updatedDate")) fieldNames.push("_updatedDate");
+        if (columns.has("source_kitchen_id")) { fieldNames.push("source_kitchen_id"); values.push(kitchenRow._id); }
+        if (columns.has("discard_reason")) { fieldNames.push("discard_reason"); values.push(reason || null); }
+        const sqlFields = fieldNames.map((field) => `\`${field}\``).join(", ");
+        const sqlValues = fieldNames.map((field) => (field === "_createdDate" || field === "_updatedDate" ? "NOW()" : "?")).join(", ");
+        return { sql: `INSERT INTO \`${tableName}\` (${sqlFields}) VALUES (${sqlValues})`, values };
+      },
+    });
     return discardId;
   }
 
@@ -4836,6 +4840,32 @@ export async function getShoppingItems(context, options = {}) {
   }, options);
 }
 
+// Fan a per-member write across a household (or the single acting user for
+// user-private domains) on ONE connection. Owns the loop mechanics: ensure-table on
+// insert / tableExists-tolerate on update+delete, execute the caller-built statement,
+// and — generalizing the batch-shopping silent-miss lesson to EVERY site — verify an
+// INSERT actually landed, emitting a self-report event if it didn't. buildStatement
+// returns { sql, values } (or null to skip a member); onResult(memberId, result) lets
+// a caller capture insertId / affectedRows.
+async function dualWriteAcrossHousehold(connection, { memberIds, tableFn, ensureFn = null, buildStatement, op = "insert", reportEvt = "household_write_miss", context = null, onResult = null }) {
+  for (const memberId of memberIds) {
+    const tableName = tableFn(memberId);
+    if (op === "insert") {
+      if (ensureFn) await ensureFn(connection, tableName);
+    } else {
+      if (!(await tableExists(connection, tableName))) continue; // update/delete tolerate a missing member table
+      if (ensureFn) await ensureFn(connection, tableName);
+    }
+    const built = await buildStatement(tableName, memberId);
+    if (!built) continue;
+    const [result] = await connection.execute(built.sql, built.values || []);
+    if (op === "insert" && (result?.affectedRows ?? 0) < 1) {
+      console.warn(JSON.stringify({ evt: reportEvt, op, table: tableName, member: memberId, owner: context?.userId || context?.ownerId || null }));
+    }
+    if (onResult) onResult(memberId, result);
+  }
+}
+
 export async function addShoppingItem(context, itemName, requestedStore = null, quantity = null, options = {}) {
   return withDbConnection(async (connection) => {
     const householdItemUuid = crypto.randomUUID();
@@ -4886,11 +4916,11 @@ export async function addShoppingItem(context, itemName, requestedStore = null, 
       store
     });
 
-    for (const memberId of memberIds) {
-      const tableName = shoppingListTableName(memberId);
-      await ensureShoppingTable(connection, tableName);
-      const [result] = await connection.execute(
-        `INSERT INTO \`${tableName}\` (
+    await dualWriteAcrossHousehold(connection, {
+      memberIds, context, op: "insert", reportEvt: "shopping_peruser_write_miss",
+      tableFn: shoppingListTableName, ensureFn: ensureShoppingTable,
+      buildStatement: (tableName, memberId) => ({
+        sql: `INSERT INTO \`${tableName}\` (
           _owner,
           _device,
           product_name,
@@ -4905,12 +4935,14 @@ export async function addShoppingItem(context, itemName, requestedStore = null, 
           updated_at,
           household_item_uuid
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW(), NOW(), ?)`,
-        [memberId, "voice-assistant", displayItemName, quantity || null, null, null, null, store, "ADDED", householdItemUuid]
-      );
-      if (memberId === shoppingOwnerId) {
-        primaryInsertId = result?.insertId != null ? String(result.insertId) : null;
-      }
-    }
+        values: [memberId, "voice-assistant", displayItemName, quantity || null, null, null, null, store, "ADDED", householdItemUuid],
+      }),
+      onResult: (memberId, result) => {
+        if (memberId === shoppingOwnerId) {
+          primaryInsertId = result?.insertId != null ? String(result.insertId) : null;
+        }
+      },
+    });
 
     const result = {
       shopping_id: primaryInsertId,
@@ -4967,24 +4999,23 @@ export async function addManyShoppingItems(context, batchItems, options = {}) {
       // ALSO write each household member's per-user {member}_new_list — the store
       // the iOS app + HALO device read from.
       let primaryInsertId = null;
-      for (const memberId of memberIds) {
-        const tableName = shoppingListTableName(memberId);
-        await ensureShoppingTable(connection, tableName);
-        const [result] = await connection.execute(
-          `INSERT INTO \`${tableName}\` (
+      await dualWriteAcrossHousehold(connection, {
+        memberIds, context, op: "insert", reportEvt: "shopping_peruser_write_miss",
+        tableFn: shoppingListTableName, ensureFn: ensureShoppingTable,
+        buildStatement: (tableName, memberId) => ({
+          sql: `INSERT INTO \`${tableName}\` (
             _owner, _device, product_name, quantity, product_brand,
             images, product_barcode, store, action,
             _createdDate, created_at, updated_at, household_item_uuid
           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW(), NOW(), ?)`,
-          [memberId, "voice-assistant", displayItemName, quantity, null, null, null, store, "ADDED", householdItemUuid]
-        );
-        if ((result?.affectedRows ?? 0) !== 1) {
-          console.warn(JSON.stringify({ evt: "shopping_peruser_write_miss", owner: shoppingOwnerId, member: memberId, household_item_uuid: householdItemUuid, item_name: displayItemName }));
-        }
-        if (memberId === shoppingOwnerId) {
-          primaryInsertId = result?.insertId != null ? String(result.insertId) : null;
-        }
-      }
+          values: [memberId, "voice-assistant", displayItemName, quantity, null, null, null, store, "ADDED", householdItemUuid],
+        }),
+        onResult: (memberId, result) => {
+          if (memberId === shoppingOwnerId) {
+            primaryInsertId = result?.insertId != null ? String(result.insertId) : null;
+          }
+        },
+      });
 
       items.push({
         shopping_id: primaryInsertId,
