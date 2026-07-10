@@ -7,9 +7,11 @@
     "test": "node --experimental-test-module-mocks --test test/*.test.mjs",
     "local:web": "node ./local-web/server.mjs",
     "sam:prepare": "node ./scripts/prepare-sam-src.mjs",
-    "sam:build": "npm run sam:prepare && sam build",
-    "sam:deploy": "npm run sam:prepare && sam build && sam deploy",
-    "sam:local:invoke": "sam local invoke QuickAckFunction"
+    "sam:build": "npm run sam:prepare && npm run sam:guard && sam build",
+    "sam:deploy": "npm run sam:prepare && npm run sam:guard && sam build && sam deploy",
+    "sam:local:invoke": "sam local invoke QuickAckFunction",
+    "sam:guard": "node ./scripts/assert-sam-src-fresh.mjs",
+    "deploy": "npm run sam:deploy"
   },
   "keywords": [],
   "author": "",
