@@ -76,6 +76,12 @@ function insertParamsFor(conn, tableName) {
   const c = conn.calls.find((x) => x.sql.toUpperCase().startsWith("INSERT INTO") && new RegExp("`" + tableName + "`").test(x.sql));
   return c ? c.params : null;
 }
+// Params of the (first) UPDATE/DELETE against a table — same VALUE-preservation
+// guard as insertParamsFor, but for the update/delete buildStatement closures.
+function mutateParamsFor(conn, verb, tableName) {
+  const c = conn.calls.find((x) => x.sql.toUpperCase().startsWith(verb) && new RegExp("`" + tableName + "`").test(x.sql));
+  return c ? c.params : null;
+}
 const wroteForMember = (conn, memberId) => allWriteTargets(conn).some((t) => t.includes(memberId));
 const wroteShared = (conn) => allWriteTargets(conn).some((t) => t.startsWith("shared_"));
 
@@ -224,10 +230,19 @@ test("removeShoppingItem deletes from shared + BOTH members (household)", async 
   CONN = makeConn({ selectRows: [targetRow({ product_name: "Bananas", household_item_uuid: "uuid-1" })] });
   await da.removeShoppingItem(householdCtx(), "Bananas");
   assert.ok(wroteForMember(CONN, "ownerA") && wroteForMember(CONN, "memberB"), "shopping delete must fan out to both members");
+  // VALUES preserved: household_item_uuid branch deletes by the resolved uuid, not a
+  // stray function/undefined (guards the branchy buildStatement values array).
+  const dp = mutateParamsFor(CONN, "DELETE", "memberB_new_list");
+  assert.deepEqual(dp, ["uuid-1"]);
 });
 
 test("updateShoppingItemStore updates shared + BOTH members (household)", async () => {
   CONN = makeConn({ selectRows: [targetRow({ product_name: "Bananas", household_item_uuid: "uuid-1" })] });
   await da.updateShoppingItemStore(householdCtx(), "Bananas", "Costco");
   assert.ok(wroteForMember(CONN, "ownerA") && wroteForMember(CONN, "memberB"), "shopping store-update must fan out to both members");
+  // VALUES preserved: the UPDATE carries the new store field value + the uuid key
+  // (fieldValues spread + household_item_uuid), proving buildStatement's values order.
+  const up = mutateParamsFor(CONN, "UPDATE", "memberB_new_list");
+  assert.ok(up.includes("Costco"), "store field value missing from UPDATE params");
+  assert.ok(up.includes("uuid-1"), "household_item_uuid key missing from UPDATE params");
 });

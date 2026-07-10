@@ -3145,57 +3145,46 @@ async function updateShoppingFieldsAcrossHousehold(connection, context, target, 
     fields: Object.keys(fields)
   });
 
-  for (const memberId of memberIds) {
-    const tableName = shoppingListTableName(memberId);
-    if (!(await tableExists(connection, tableName))) {
-      continue;
-    }
-
-    await ensureShoppingTable(connection, tableName);
-
-    if (target.household_item_uuid) {
-      await connection.execute(
-        `UPDATE \`${tableName}\`
+  await dualWriteAcrossHousehold(connection, {
+    memberIds, context, op: "update", reportEvt: "shopping_peruser_write_miss",
+    tableFn: shoppingListTableName, ensureFn: ensureShoppingTable,
+    buildStatement: async (tableName, memberId, conn) => {
+      if (target.household_item_uuid) {
+        return {
+          sql: `UPDATE \`${tableName}\`
          SET ${assignments.join(", ")}
          WHERE household_item_uuid = ?`,
-        [...fieldValues, target.household_item_uuid]
-      );
-      continue;
-    }
-
-    if (memberId === shoppingOwnerId && target.shopping_id) {
-      await connection.execute(
-        `UPDATE \`${tableName}\`
+          values: [...fieldValues, target.household_item_uuid],
+        };
+      }
+      if (memberId === shoppingOwnerId && target.shopping_id) {
+        return {
+          sql: `UPDATE \`${tableName}\`
          SET ${assignments.join(", ")}
          WHERE _id = ?
          LIMIT 1`,
-        [...fieldValues, target.shopping_id]
-      );
-      continue;
-    }
-
-    const [rows] = await connection.execute(
-      `SELECT _id
+          values: [...fieldValues, target.shopping_id],
+        };
+      }
+      const [rows] = await conn.execute(
+        `SELECT _id
        FROM \`${tableName}\`
        WHERE LOWER(TRIM(product_name)) = ?
        ORDER BY COALESCE(updated_at, created_at, _createdDate) DESC
        LIMIT 1`,
-      [normalizeName(target.item_name)]
-    );
-
-    const rowId = rows?.[0]?._id;
-    if (!rowId) {
-      continue;
-    }
-
-    await connection.execute(
-      `UPDATE \`${tableName}\`
+        [normalizeName(target.item_name)]
+      );
+      const rowId = rows?.[0]?._id;
+      if (!rowId) return null;
+      return {
+        sql: `UPDATE \`${tableName}\`
        SET ${assignments.join(", ")}
        WHERE _id = ?
        LIMIT 1`,
-      [...fieldValues, rowId]
-    );
-  }
+        values: [...fieldValues, rowId],
+      };
+    },
+  });
 }
 
 function sortUseUpCandidates(items) {
@@ -3900,15 +3889,14 @@ async function updateDiscardRowAcrossHousehold(connection, context, rowId, field
     // Discard log reads ONLY those. Household-visible → fan out to all members;
     // tolerate missing table/row (pre-fix rows live only in shared). Covers
     // deleteRecentDiscard, which routes through here with action=OUT.
-    for (const memberId of getTableHouseholdMemberIds(context)) {
-      const tableName = discardTableName(memberId);
-      if (!(await tableExists(connection, tableName))) continue;
-      await ensureDiscardColumns(connection, tableName);
-      await connection.execute(
-        `UPDATE \`${tableName}\` SET ${assignments.join(", ")} WHERE _id = ?`,
-        values
-      );
-    }
+    await dualWriteAcrossHousehold(connection, {
+      memberIds: getTableHouseholdMemberIds(context), context, op: "update", reportEvt: "discard_peruser_write_miss",
+      tableFn: discardTableName, ensureFn: ensureDiscardColumns,
+      buildStatement: (tableName) => ({
+        sql: `UPDATE \`${tableName}\` SET ${assignments.join(", ")} WHERE _id = ?`,
+        values,
+      }),
+    });
     return;
   }
 
@@ -3987,14 +3975,14 @@ export async function clearRecentDiscards(context, options = {}) {
         );
         // ALSO clear every household member's {member}_discards — the app's Discard
         // log reads ONLY those. Household-visible → fan out; tolerate missing table.
-        for (const memberId of getTableHouseholdMemberIds(context)) {
-          const tableName = discardTableName(memberId);
-          if (!(await tableExists(connection, tableName))) continue;
-          await ensureDiscardColumns(connection, tableName);
-          await connection.execute(
-            `UPDATE \`${tableName}\` SET action = 'OUT', _updatedDate = NOW() WHERE action = 'IN'`
-          );
-        }
+        await dualWriteAcrossHousehold(connection, {
+          memberIds: getTableHouseholdMemberIds(context), context, op: "update", reportEvt: "discard_peruser_write_miss",
+          tableFn: discardTableName, ensureFn: ensureDiscardColumns,
+          buildStatement: (tableName) => ({
+            sql: `UPDATE \`${tableName}\` SET action = 'OUT', _updatedDate = NOW() WHERE action = 'IN'`,
+            values: [],
+          }),
+        });
       }
       console.log("[DEBUG] discard history cleared (shared):", JSON.stringify({
         ownerId: context?.ownerId || null,
@@ -4856,7 +4844,7 @@ async function dualWriteAcrossHousehold(connection, { memberIds, tableFn, ensure
       if (!(await tableExists(connection, tableName))) continue; // update/delete tolerate a missing member table
       if (ensureFn) await ensureFn(connection, tableName);
     }
-    const built = await buildStatement(tableName, memberId);
+    const built = await buildStatement(tableName, memberId, connection);
     if (!built) continue;
     const [result] = await connection.execute(built.sql, built.values || []);
     if (op === "insert" && (result?.affectedRows ?? 0) < 1) {
@@ -5087,37 +5075,31 @@ export async function removeShoppingItem(context, itemName, options = {}) {
       item_name: target?.item_name || itemName
     });
 
-    for (const memberId of memberIds) {
-      const tableName = shoppingListTableName(memberId);
-      if (!(await tableExists(connection, tableName))) {
-        continue;
-      }
-
-      await ensureShoppingTable(connection, tableName);
-      if (target.household_item_uuid) {
-        await connection.execute(
-          `DELETE FROM \`${tableName}\` WHERE household_item_uuid = ?`,
-          [target.household_item_uuid]
-        );
-        continue;
-      }
-
-      if (memberId === shoppingOwnerId && target.shopping_id) {
-        await connection.execute(
-          `DELETE FROM \`${tableName}\` WHERE _id = ? LIMIT 1`,
-          [target.shopping_id]
-        );
-        continue;
-      }
-
-      await connection.execute(
-        `DELETE FROM \`${tableName}\`
+    await dualWriteAcrossHousehold(connection, {
+      memberIds, context, op: "delete", reportEvt: "shopping_peruser_write_miss",
+      tableFn: shoppingListTableName, ensureFn: ensureShoppingTable,
+      buildStatement: (tableName, memberId) => {
+        if (target.household_item_uuid) {
+          return {
+            sql: `DELETE FROM \`${tableName}\` WHERE household_item_uuid = ?`,
+            values: [target.household_item_uuid],
+          };
+        }
+        if (memberId === shoppingOwnerId && target.shopping_id) {
+          return {
+            sql: `DELETE FROM \`${tableName}\` WHERE _id = ? LIMIT 1`,
+            values: [target.shopping_id],
+          };
+        }
+        return {
+          sql: `DELETE FROM \`${tableName}\`
          WHERE LOWER(TRIM(product_name)) = ?
          ORDER BY COALESCE(updated_at, created_at, _createdDate) DESC
          LIMIT 1`,
-        [normalizeName(target.item_name)]
-      );
-    }
+          values: [normalizeName(target.item_name)],
+        };
+      },
+    });
 
     console.log("[DEBUG] shopping item removed:", JSON.stringify({
       ownerId: context?.ownerId || null,
@@ -5158,15 +5140,14 @@ export async function clearShoppingList(context, options = {}) {
       count: items.length
     });
 
-    for (const memberId of memberIds) {
-      const tableName = shoppingListTableName(memberId);
-      if (!(await tableExists(connection, tableName))) {
-        continue;
-      }
-
-      await ensureShoppingTable(connection, tableName);
-      await connection.execute(`DELETE FROM \`${tableName}\``);
-    }
+    await dualWriteAcrossHousehold(connection, {
+      memberIds, context, op: "delete", reportEvt: "shopping_peruser_write_miss",
+      tableFn: shoppingListTableName, ensureFn: ensureShoppingTable,
+      buildStatement: (tableName) => ({
+        sql: `DELETE FROM \`${tableName}\``,
+        values: [],
+      }),
+    });
 
     console.log("[DEBUG] shopping list cleared:", JSON.stringify({
       ownerId: context?.ownerId || null,
