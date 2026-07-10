@@ -1,0 +1,30 @@
+{
+  "name": "grocery-analyzer",
+  "version": "1.0.0",
+  "description": "Analyze grocery images using grocery-identifier and write to MySQL",
+  "main": "app.js",
+  "scripts": {
+    "sync:grocery-identifier": "node scripts/syncGroceryIdentifier.js",
+    "backfill:resized-images": "node scripts/backfillResizedImages.js",
+    "build": "tsc",
+    "prebuild": "npm install && npm run sync:grocery-identifier",
+    "test": "node --experimental-test-module-mocks --test test/*.test.mjs"
+  },
+  "dependencies": {
+    "aws-sdk": "^2.1691.0",
+    "jimp": "^1.6.0",
+    "mysql2": "^3.11.5",
+    "node-fetch": "^2.7.0",
+    "openai": "^6.27.0",
+    "zod": "^3.22.4"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.5",
+    "@types/node-fetch": "^2.6.12",
+    "@types/uuid": "^10.0.0",
+    "typescript": "^5.3.3"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

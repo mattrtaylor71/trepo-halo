@@ -1,0 +1,27 @@
+{
+  "name": "trepo-quick-ack",
+  "version": "1.0.0",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "test": "node --experimental-test-module-mocks --test test/*.test.mjs",
+    "local:web": "node ./local-web/server.mjs",
+    "sam:prepare": "node ./scripts/prepare-sam-src.mjs",
+    "sam:build": "npm run sam:prepare && sam build",
+    "sam:deploy": "npm run sam:prepare && sam build && sam deploy",
+    "sam:local:invoke": "sam local invoke QuickAckFunction"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.1013.0",
+    "@aws-sdk/client-lambda": "^3.1013.0",
+    "@aws-sdk/client-s3": "^3.1014.0",
+    "@aws-sdk/lib-dynamodb": "^3.1013.0",
+    "mysql2": "^3.15.3",
+    "openai": "^6.33.0",
+    "ws": "^8.18.3"
+  }
+}
