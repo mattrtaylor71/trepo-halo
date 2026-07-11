@@ -286,7 +286,7 @@ def _generate_suggestions(kitchen_items, exclude_items=None):
         prompt = _build_prompt(kitchen_items, exclude_items=exclude_items)
 
         response = client.chat.completions.create(
-            model="gpt-4o-mini",
+            model=os.getenv('HOME_SUGGESTIONS_MODEL', 'gpt-5.4-mini'),
             messages=[
                 {
                     "role": "system",
@@ -299,7 +299,10 @@ def _generate_suggestions(kitchen_items, exclude_items=None):
             ],
             response_format={"type": "json_object"},
             temperature=0.7,
-            max_tokens=2048,
+            # max_completion_tokens (not max_tokens): gpt-5.x reject the legacy
+            # max_tokens param; gpt-4o-mini accepts the new name too, so this is
+            # safe for the rollback target as well.
+            max_completion_tokens=2048,
         )
 
         raw = response.choices[0].message.content
