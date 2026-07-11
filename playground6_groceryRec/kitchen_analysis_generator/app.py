@@ -502,7 +502,6 @@ def _get_kitchen_rows(conn, owner):
                 SELECT * FROM `shared_kitchen`
                 WHERE `owner_id` IN ({placeholders})
                   AND `action` = 'IN'
-                  AND (`analysis_stage` = 'final' OR `analysis_stage` IS NULL)
                   AND (`analysis_status` = 'ready' OR `analysis_status` IS NULL)
                 ORDER BY COALESCE(`_updatedDate`, `_createdDate`) DESC, `_createdDate` DESC
             """, member_ids)
@@ -515,8 +514,9 @@ def _get_kitchen_rows(conn, owner):
         where_parts = []
         if 'action' in columns:
             where_parts.append("`action` = 'IN'")
-        if 'analysis_stage' in columns:
-            where_parts.append("(`analysis_stage` = 'final' OR `analysis_stage` IS NULL)")
+        # Gate on analysis_status only, NOT analysis_stage: voice check-in items rest at
+        # analysis_stage='preliminary' forever (no capture image for bulkEnrichmentEngine
+        # to promote) — the stage clause hid them from kitchen analysis for voice users.
         if 'analysis_status' in columns:
             where_parts.append("(`analysis_status` = 'ready' OR `analysis_status` IS NULL)")
         where_clause = f"WHERE {' AND '.join(where_parts)}" if where_parts else ''

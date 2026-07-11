@@ -812,8 +812,9 @@ def _get_kitchen_items_for_matching(conn, owner):
                 if (row.get('column_name') or row.get('COLUMN_NAME') or '').strip()
             }
             where_parts = ["action = 'IN'"]
-            if 'analysis_stage' in column_names:
-                where_parts.append("(`analysis_stage` = 'final' OR `analysis_stage` IS NULL)")
+            # Gate on analysis_status only, NOT analysis_stage: voice check-in items rest
+            # at analysis_stage='preliminary' forever (no capture image to promote them),
+            # so the stage clause hid them from the saved-recipe inventory for voice users.
             if 'analysis_status' in column_names:
                 where_parts.append("(`analysis_status` = 'ready' OR `analysis_status` IS NULL)")
             select_fields = "`_id`, `product_name`"
