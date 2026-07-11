@@ -1,0 +1,16 @@
+version = 0.1
+
+[default.build.parameters]
+cached = true
+parallel = true
+
+[default.deploy.parameters]
+stack_name = "trepo-quick-ack-sam-dev"
+resolve_s3 = true
+capabilities = "CAPABILITY_IAM"
+region = "us-east-1"
+profile = "trepo-dev"
+confirm_changeset = false
+s3_prefix = "trepo-quick-ack-sam-dev"
+parameter_overrides = "Env=\"dev\" DBHost=\"database-1.cvig8u6s25dz.us-east-1.rds.amazonaws.com\" DBPort=\"3306\" DBUser=\"admin\" DBName=\"mysqlTutorial\" ActionMode=\"real\" OpenAIModel=\"gpt-5.4-2026-03-05\" TranscriptionModel=\"gpt-4o-mini-transcribe\" TranscriptionLanguage=\"en\" AudioSampleRate=\"24000\" DishEnrichmentMode=\"sync\" DishEditFunctionName=\"unused-dish-edit-function\" HouseholdApiBaseUrl=\"https://7tn3gvwvh7.execute-api.us-east-1.amazonaws.com\""
+image_repositories = []
