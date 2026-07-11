@@ -362,6 +362,9 @@ Coherence rules:
 - Meal plan slots are FOOD dishes, not beverages. If a beverage item exists, it can be omitted.
 - If a slot cannot be filled coherently with the available items, choose a different combination of available items (still only from the list + pantry)."""
     user = f"Kitchen grocery products (use only these, reference by exact product name in recipe ingredients; descriptions in parentheses clarify what each item is): {ingredients_str}\n\nUser focus: {focus}\n\nGenerate a 12-slot meal plan. Slots order: {slot_desc}. Return the JSON object only."
+    # Retry generate AND parse (mirrors recipes_generator): a malformed-JSON LLM
+    # response regenerates instead of throwing, so the alarm means "twice-failed",
+    # not "one bad sample". Rate-limit handling preserved.
     last_exc = None
     for attempt in range(1, 4):
         try:
@@ -370,7 +373,6 @@ Coherence rules:
                 messages=[{'role': 'system', 'content': system}, {'role': 'user', 'content': user}],
                 temperature=0.4,
             )
-            break
         except RateLimitError as e:
             last_exc = e
             if attempt == 3:
@@ -379,10 +381,25 @@ Coherence rules:
             wait = float(match.group(1)) + 0.5 if match else 3.0
             print(f"[meal_plan_generator] Rate limited, retrying in {wait:.1f}s (attempt {attempt}/3)")
             time.sleep(wait)
-    text = (resp.choices[0].message.content or '').strip()
-    if text.startswith('```'):
-        text = text.split('\n', 1)[-1].rsplit('```', 1)[0].strip()
-    return json.loads(text)
+            continue
+        text = (resp.choices[0].message.content or '').strip()
+        if text.startswith('```'):
+            text = text.split('\n', 1)[-1].rsplit('```', 1)[0].strip()
+        try:
+            parsed = json.loads(text)
+            if attempt > 1:
+                print(json.dumps({'evt': 'meal_plan_parse_retry_saved', 'service': 'mealplan', 'attempt': attempt}))
+            return parsed
+        except json.JSONDecodeError as e:
+            last_exc = e
+            print(f"[meal_plan_generator] Malformed JSON (attempt {attempt}/3), regenerating: {e}")
+            if attempt == 3:
+                raise
+            continue
+    # Loop exhausted without returning (all attempts failed).
+    if last_exc:
+        raise last_exc
+    raise RuntimeError('meal plan generation failed with no captured error')
 
 
 def _build_recipe_image_prompt(title):
