@@ -255,8 +255,13 @@ def _get_kitchen_ingredients(conn, owner):
             where_parts.append(owner_where)
             params = list(owner_params)
         where_parts.append("action = 'IN'")
-        if 'analysis_stage' in column_names:
-            where_parts.append("(`analysis_stage` = 'final' OR `analysis_stage` IS NULL)")
+        # Gate on analysis_STATUS only (usable when 'ready'/NULL), NOT analysis_stage.
+        # Voice check-in items are written analysis_stage='preliminary' by bulkKitchenWriter
+        # and NEVER promoted to 'final' — promotion is bulkEnrichmentEngine's image-path
+        # job, and voice adds have no capture image. The old `analysis_stage='final' OR
+        # NULL` clause therefore excluded every voice-checkin kitchen -> count=0 -> empty
+        # meal plans for voice users (recipes_generator has no such clause, which is why
+        # recipes worked for them). Matching recipes_generator's live semantics.
         if 'analysis_status' in column_names:
             where_parts.append("(`analysis_status` = 'ready' OR `analysis_status` IS NULL)")
         where_clause = " AND ".join(where_parts)
