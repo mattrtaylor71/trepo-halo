@@ -34,6 +34,37 @@ OPENAI_MAX_RETRIES = int(os.getenv('OPENAI_MAX_RETRIES', '2'))
 RECIPE_GEN_MAX_INGREDIENTS = int(os.getenv('RECIPE_GEN_MAX_INGREDIENTS', '80'))
 RECIPE_GEN_TIMEOUT_SECONDS = int(os.getenv('RECIPE_GEN_TIMEOUT_SECONDS', '90'))
 SUBSTITUTION_MODEL = os.getenv('OPENAI_SUBSTITUTION_MODEL', os.getenv('OPENAI_MODEL', 'gpt-4o'))
+
+
+def _create_chat(client, **kwargs):
+    """chat.completions.create with self-healing param fallback. gpt-5.x reject
+    some legacy/explicit params (max_tokens, custom temperature) with a 400 that
+    names the offending param; drop exactly that param and retry so future model
+    families self-heal instead of silently failing to the fallback path. Driven by
+    the API's actual response, not brittle model-name matching."""
+    for _ in range(4):
+        try:
+            return client.chat.completions.create(**kwargs)
+        except Exception as exc:
+            # Extract the offending param from the structured body, the exception's
+            # .param attr, or (most robust across SDK versions) the quoted token in
+            # the 400 message, e.g. "'temperature' does not support 0.4".
+            param = None
+            body = getattr(exc, 'body', None)
+            if isinstance(body, dict):
+                err = body.get('error') if isinstance(body.get('error'), dict) else body
+                param = err.get('param')
+            if not param:
+                param = getattr(exc, 'param', None)
+            if not param:
+                m = re.search(r"'([A-Za-z_]+)'", str(exc))
+                if m:
+                    param = m.group(1)
+            if not param or param not in kwargs:
+                raise
+            print(json.dumps({'evt': 'openai_param_dropped', 'service': 'recipes_generator', 'param': param}))
+            kwargs.pop(param, None)
+    return client.chat.completions.create(**kwargs)
 MAX_AI_SUBSTITUTION_MISSING_INGREDIENTS = max(0, int(os.getenv('RECIPES_MAX_AI_SUBSTITUTION_MISSING_INGREDIENTS', '2')))
 DB_CONNECT_TIMEOUT = int(os.getenv('DB_CONNECT_TIMEOUT_SECONDS', '5'))
 DB_READ_TIMEOUT = int(os.getenv('DB_READ_TIMEOUT_SECONDS', '10'))
@@ -614,7 +645,8 @@ Only include substitutions that are genuinely plausible in a home kitchen. If no
         'kitchen_items': kitchen_items,
     })
     try:
-        response = client.chat.completions.create(
+        response = _create_chat(
+            client,
             model=SUBSTITUTION_MODEL,
             temperature=0.2,
             messages=[
@@ -863,7 +895,8 @@ Return the JSON object only."""
     # Retry the generate+parse 1x immediately before giving up.
     last_err = None
     for _attempt in range(2):
-        resp = client.chat.completions.create(
+        resp = _create_chat(
+            client,
             model=os.getenv('OPENAI_MODEL', 'gpt-4o'),
             messages=[{'role': 'system', 'content': system}, {'role': 'user', 'content': user}],
             temperature=0.4,
