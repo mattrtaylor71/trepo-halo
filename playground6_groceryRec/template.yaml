@@ -1722,7 +1722,10 @@ Resources:
           DB_PASS:  !Ref DBPass
           DB_NAME:  !Ref DBName
           OPENAI_API_KEY: !Ref OpenAIApiKey
-          OPENAI_MODEL: gpt-4.1-mini
+          OPENAI_MODEL: gpt-5.5
+          # Substitution helper pinned to the prior model (unbenchmarked path,
+          # keep-stable); main 20-recipe generation runs on gpt-5.5.
+          OPENAI_SUBSTITUTION_MODEL: gpt-4.1-mini
           ENABLE_LLM_INVENTORY_MATCHING: !Ref EnableLlmInventoryMatching
           OPENAI_INVENTORY_MODEL: !Ref OpenAIInventoryModel
           OPENAI_INVENTORY_TIMEOUT_SECONDS: '8'
