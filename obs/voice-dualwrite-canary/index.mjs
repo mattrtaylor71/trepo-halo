@@ -70,7 +70,7 @@ const ageHours = (createdDate) => {
 // Common columns only (preserves original values + timestamps); owner_id (if present)
 // is rewritten to the member id. INSERT-if-absent by keyCol. Returns true if the key is
 // present in destTable afterward.
-async function healInto(conn, { sharedTable, destTable, keyCol, keyVal, memberId }) {
+async function healInto(conn, { sharedTable, destTable, keyCol, keyVal, memberId, sourceWhere }) {
   if (!(await tableExists(conn, destTable))) return false; // cannot heal into a table that doesn't exist
   const [sc, dc] = [await columnsOf(conn, sharedTable), await columnsOf(conn, destTable)];
   const common = [...sc].filter((c) => dc.has(c));
@@ -78,10 +78,15 @@ async function healInto(conn, { sharedTable, destTable, keyCol, keyVal, memberId
   const colList = common.map((c) => `\`${c}\``).join(", ");
   const selectList = common.map((c) => (c === "owner_id" ? "?" : `\`${c}\``)).join(", ");
   const hasOwner = common.includes("owner_id");
+  // sourceWhere (e.g. "action = 'ADDED'") pins the heal to a still-LIVE shared row —
+  // if the row flipped to a removed state between detect and heal, the INSERT ... SELECT
+  // matches nothing and we don't resurrect a deleted item. Unqualified col resolves to s.
+  const liveClause = sourceWhere ? `  AND ${sourceWhere}\n` : "";
   const sql =
     `INSERT INTO \`${destTable}\` (${colList})\n` +
     `SELECT ${selectList} FROM \`${sharedTable}\` s\n` +
     `WHERE s.\`${keyCol}\` = ?\n` +
+    liveClause +
     `  AND NOT EXISTS (SELECT 1 FROM \`${destTable}\` d WHERE d.\`${keyCol}\` = ?)\n` +
     `LIMIT 1`;
   const params = hasOwner ? [memberId, keyVal, keyVal] : [keyVal, keyVal];
@@ -108,8 +113,14 @@ async function checkDishes(conn) {
 }
 
 async function checkDiscards(conn) {
+  // ONLY audit LIVE discards (action='IN'). A cleared/undone discard is marked
+  // action='OUT' in shared_discards (clearRecentDiscards) rather than deleted, so
+  // auditing all rows would resurrect discards the user cleared — same removed-state
+  // blindness class as shopping. (Dishes need no such filter: both the app's
+  // dishes_api._delete_dish and voice deleteDishLog HARD-DELETE shared_dishes, so a
+  // deleted dish leaves no orphan shared row to resurrect.)
   const [rows] = await conn.execute(
-    `SELECT _id, user_id, owner_id, _createdDate FROM shared_discards WHERE _device LIKE 'voice%' AND _createdDate > NOW() - INTERVAL ${LOOKBACK_HOURS} HOUR AND _id NOT LIKE ?`,
+    `SELECT _id, user_id, owner_id, _createdDate FROM shared_discards WHERE _device LIKE 'voice%' AND action = 'IN' AND _createdDate > NOW() - INTERVAL ${LOOKBACK_HOURS} HOUR AND _id NOT LIKE ?`,
     [`${SELF_TEST_PREFIX}%`]
   );
   const misses = [];
@@ -119,14 +130,20 @@ async function checkDiscards(conn) {
     const has = (await tableExists(conn, table)) &&
       (await conn.execute(`SELECT COUNT(*) c FROM \`${table}\` WHERE _id = ?`, [r._id]))[0][0].c > 0;
     if (!has) misses.push({ key: r._id, owner, ageHours: ageHours(r._createdDate),
-      sharedTable: "shared_discards", keyCol: "_id", keyVal: r._id, targets: [{ table, memberId: owner }] });
+      sharedTable: "shared_discards", keyCol: "_id", keyVal: r._id, sourceWhere: "action = 'IN'",
+      targets: [{ table, memberId: owner }] });
   }
   return misses;
 }
 
 async function checkShopping(conn) {
+  // ONLY audit rows still LIVE (action='ADDED'). A user removing an item in the app
+  // deletes the {member}_new_list copies but (legacy bug) leaves shared_shopping_list
+  // as-is; once listHandler marks removals action='REMOVED', this filter makes the
+  // canary ignore them so we never resurrect a deliberately-deleted item. (Voice
+  // removals hard-delete the shared row, so they drop out here too.)
   const [rows] = await conn.execute(
-    `SELECT household_item_uuid, owner_id, _owner, _createdDate FROM shared_shopping_list WHERE _device = 'voice-assistant' AND _createdDate > NOW() - INTERVAL ${LOOKBACK_HOURS} HOUR AND _id NOT LIKE ? AND COALESCE(household_item_uuid, '') NOT LIKE ?`,
+    `SELECT household_item_uuid, owner_id, _owner, _createdDate FROM shared_shopping_list WHERE _device = 'voice-assistant' AND action = 'ADDED' AND _createdDate > NOW() - INTERVAL ${LOOKBACK_HOURS} HOUR AND _id NOT LIKE ? AND COALESCE(household_item_uuid, '') NOT LIKE ?`,
     [`${SELF_TEST_PREFIX}%`, `${SELF_TEST_PREFIX}%`]
   );
   const misses = [];
@@ -143,6 +160,7 @@ async function checkShopping(conn) {
     }
     if (!found) misses.push({ key: r.household_item_uuid, owner, ageHours: ageHours(r._createdDate),
       sharedTable: "shared_shopping_list", keyCol: "household_item_uuid", keyVal: r.household_item_uuid,
+      sourceWhere: "action = 'ADDED'", // heal ONLY if the shared row is still live at heal time (guards a detect→heal race)
       targets: members.map((m) => ({ table: `${m}_new_list`, memberId: m })) });
   }
   return misses;
@@ -155,7 +173,7 @@ async function reconcileMiss(conn, miss) {
   let anyPresent = false;
   for (const t of miss.targets) {
     try {
-      const present = await healInto(conn, { sharedTable: miss.sharedTable, destTable: t.table, keyCol: miss.keyCol, keyVal: miss.keyVal, memberId: t.memberId });
+      const present = await healInto(conn, { sharedTable: miss.sharedTable, destTable: t.table, keyCol: miss.keyCol, keyVal: miss.keyVal, memberId: t.memberId, sourceWhere: miss.sourceWhere });
       anyPresent = anyPresent || present;
     } catch (e) {
       console.error(JSON.stringify({ evt: "voice_dualwrite_heal_error", table: t.table, key: miss.keyVal, error: String(e && (e.stack || e.message) || e) }));
