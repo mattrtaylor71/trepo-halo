@@ -378,6 +378,7 @@ exports.handler = async (event) => {
         }
       }
 
+      console.log(JSON.stringify({ evt: 'list_op', op: 'add', ownerId, uuid: sharedUUID, insertId: result.insertId ?? null }));
       return response(200, {
         message: 'List item added',
         insertId: result.insertId ?? null,
@@ -452,6 +453,7 @@ exports.handler = async (event) => {
         addedItems.push({ product_name: itemName, store: itemStore, itemUUID: sharedUUID });
       }
 
+      console.log(JSON.stringify({ evt: 'list_op', op: 'add_batch', ownerId, count: addedItems.length }));
       return response(200, {
         message: `Added ${addedItems.length} items`,
         count: addedItems.length,
@@ -495,6 +497,19 @@ exports.handler = async (event) => {
             console.error('[DUAL-WRITE] shared_list DELETE failed (non-fatal):', e.message);
           }
         }
+        // Mark the VOICE shared table (shared_shopping_list) REMOVED so the dual-write
+        // canary stops treating the item as live and RESURRECTING it hourly. UPDATE
+        // (not DELETE) preserves audit history; the canary ignores non-ADDED rows.
+        // Always runs (independent of the legacy shared_list dual-write flag).
+        try {
+          await pool.execute(
+            "UPDATE shared_shopping_list SET action = 'REMOVED', updated_at = NOW() WHERE (household_item_uuid = ? OR _id = ?) AND action = 'ADDED'",
+            [removeKey, removeKey]
+          );
+        } catch (e) {
+          console.error('[DUAL-WRITE] shared_shopping_list REMOVED-mark failed (non-fatal):', e.message);
+        }
+        console.log(JSON.stringify({ evt: 'list_op', op: 'remove', ownerId, uuid: removeKey, affectedRows }));
         return response(200, {
           message: 'List item removed',
           affectedRows,
@@ -531,6 +546,20 @@ exports.handler = async (event) => {
             console.error('[DUAL-WRITE] shared_list DELETE by barcode failed (non-fatal):', e.message);
           }
         }
+        // Mark the VOICE shared table REMOVED by barcode across the household so the
+        // canary doesn't resurrect it. (Voice rows are owner-scoped per member.)
+        try {
+          if (memberIds.length) {
+            const ph = memberIds.map(() => '?').join(',');
+            await pool.execute(
+              `UPDATE shared_shopping_list SET action = 'REMOVED', updated_at = NOW() WHERE product_barcode = ? AND owner_id IN (${ph}) AND action = 'ADDED'`,
+              [product_barcode, ...memberIds]
+            );
+          }
+        } catch (e) {
+          console.error('[DUAL-WRITE] shared_shopping_list REMOVED-mark (barcode) failed (non-fatal):', e.message);
+        }
+        console.log(JSON.stringify({ evt: 'list_op', op: 'remove_barcode', ownerId, barcode: product_barcode, affectedRows }));
         return response(200, {
           message: 'List item removed',
           affectedRows,
@@ -658,6 +687,7 @@ exports.handler = async (event) => {
           }
         }
       }
+      console.log(JSON.stringify({ evt: 'list_op', op: 'reorder', ownerId, count: orderedItems.length }));
       return response(200, { message: 'Reorder applied', count: orderedItems.length });
     }
 
