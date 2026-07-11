@@ -203,6 +203,11 @@ Resources:
         - Statement:
             Effect: Allow
             Action:
+              - dynamodb:GetItem
+            Resource: !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/TrepoOuraState
+        - Statement:
+            Effect: Allow
+            Action:
               - lambda:InvokeFunction
             Resource: !Sub arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${DishEditFunctionName}
         - !If
@@ -248,6 +253,11 @@ Resources:
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref SessionMemoryTable
+        - Statement:
+            Effect: Allow
+            Action:
+              - dynamodb:GetItem
+            Resource: !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/TrepoOuraState
         - Statement:
             Effect: Allow
             Action:
@@ -390,6 +400,27 @@ Resources:
           - HasAssetBucketName
           - S3CrudPolicy:
               BucketName: !Ref AssetBucketName
+          - !Ref AWS::NoValue
+        # image-postprocess dispatches recipe/meal-plan REGEN after populating a
+        # voice-checked-in item's images (it holds the *_GENERATOR_ARN envs). Its
+        # role was missing these InvokeFunction grants that the worker/stream have
+        # — 72 AccessDenied (voice-checkin regen dispatch dead). Same conditional
+        # pattern as VoiceAckAsyncWorkerFunction.
+        - !If
+          - HasMealPlanGeneratorArn
+          - Statement:
+              Effect: Allow
+              Action:
+                - lambda:InvokeFunction
+              Resource: !Ref MealPlanGeneratorArn
+          - !Ref AWS::NoValue
+        - !If
+          - HasRecipesGeneratorArn
+          - Statement:
+              Effect: Allow
+              Action:
+                - lambda:InvokeFunction
+              Resource: !Ref RecipesGeneratorArn
           - !Ref AWS::NoValue
 Outputs:
   ApiUrl:
