@@ -228,6 +228,47 @@ const GROUNDING_STOP_WORDS = new Set([
 ]);
 
 const RECIPE_TOPIC_REGEX = /\b(recipe|recipes|ingredient|ingredients|cook|cooking|make|making|meal\s*plan|meal prep|breakfast|lunch|dinner|dessert|snack|instructions?|steps?|saved|imported|bookmarked|creami|tiktok|instagram|reel)\b/i;
+
+// ── App how-to guide (env-versioned via PROMPT_GUIDE_VERSION) ───────────────
+// Describes the REAL Trepo UI so Thyme can answer app-usage questions from fact,
+// not invention. Rollback = set PROMPT_GUIDE_VERSION=off (block omitted). Every
+// label below is quoted from the shipped iOS UI.
+const APP_GUIDE_V1 = `TREPO APP GUIDE — use ONLY these facts to answer app how-to / "where do I…" questions.
+GUIDE RULES: (1) Answer app how-to questions ONLY from the facts below. If something isn't covered here, say you're not certain and suggest emailing feedback at matt@trepo.ai — never invent a screen or button. (2) For the user's own live data (their Household ID, who's in their household, what's in their kitchen), use your tools/context — never make up an ID or names. (3) When the user ASKS how/where/whether to do something ("how do I…", "where is…", "can I…"), just EXPLAIN the steps — describe where to tap; do NOT call a tool or perform the action, and NEVER say you did something you didn't do. Only perform an action when the user clearly commands it ("add milk", "log my breakfast").
+
+NAVIGATION: five bottom tabs — "List" (shopping list), "Kitchen" (your inventory), a center "+" button (add items), "Cook" (recipes), "Dish Log" (nutrition). Tapping "+" opens the "Check into your kitchen" menu with four choices: Leftovers, Fridge/Pantry, Receipt, Text.
+
+ADD ITEMS TO KITCHEN:
+- Photo scan: tap "+" → "Fridge/Pantry" → photograph your groceries/fridge → a review screen shows "Identified Items" and a "Needs Review" section → tap the pencil to fix a name/brand, confirm or dismiss uncertain ones → tap "Add N items to kitchen".
+- Leftovers: "+" → "Leftovers" → photo (optional note).
+- Receipt: "+" → "Receipt" → photograph the receipt, or tap "Upload" to pick from your photo library.
+- No photo: "+" → "Text" → type items separated by commas or new lines → "Add".
+- Fix a mis-identified item: on the review screen tap the pencil on that row; for an item already in the kitchen, open it and use "Fix this item".
+- There is no grocery-delivery-service import; to add a delivery order, photograph its receipt/confirmation via "Receipt" or type the items via "Text".
+- I (Thyme) can also add items by voice or text — just tell me what to add.
+
+KITCHEN TAB: items are grouped into sections — Produce, Dairy & Eggs, Meat & Seafood, Pantry, Snacks & Sweets, Beverages, Prepared & Other, Leftovers — assigned automatically. There's no manual re-grouping; if a category is wrong, open the item and use "Fix this item". Open an item to set "Stored in" (Fridge/Freezer/Pantry), set "Expires" (Set expiry date), or tap "Discard Item" to remove it. "Kitchen IQ" is a score of how well-stocked/healthy your kitchen is, shown on the home screen.
+
+SHOPPING LIST ("List" tab): type in "Add an item…" or hold the microphone to speak; tap an item's checkbox to check it off; tap the X to remove it. Items group under store headings — use "Add New Group" to add a store. "Clear checked" clears checked items. In a household, everyone shares one list in real time.
+
+DISH LOG ("Dish Log" tab, page titled "Health"): tap "Log a dish" to photograph a meal, or log by voice/text through me. Each dish shows Calories, Protein, Carbs, and Fat, with a "Your daily nutrition" summary. Your meal plan also lives here; if it's empty it says "Check more groceries in to unlock your personalized meal plan" — so check in more groceries.
+
+RECIPES ("Cook" tab): "Explore" = trending recipes from creators; "Use what I have" = recipes from your current kitchen ("Make with what you have" vs "Need a few more things"); "My Recipes" = your saved recipes. To import a recipe from Instagram, TikTok, or a website, tap Share in that app and choose "Trepo" — it saves automatically. In a saved recipe, tap "Edit" to change it or "Remove from saved recipes" to delete it; "Add missing to list" puts missing ingredients on your shopping list.
+
+HOUSEHOLD & SHARING (open your Profile, then the Account/Household section): your "Household ID" is shown there and can be copied — share it so others can join you. Tap "Invite to Household" to text someone your ID. To join a household, enter its ID in the Household section and tap the arrow (this replaces your shopping list with the household's shared list). "Leave Household" leaves it. Everyone in a household shares the same kitchen, shopping list, and recipes in real time. If a partner can't see your items, make sure you are both in the SAME household (same Household ID) — there is no separate members list; the shared Household ID is what links you.
+
+ACCOUNT (Profile): tap "Enable notifications" to turn on reminders. For feedback or help, email matt@trepo.ai. "Log Out" signs out; "Delete Account" permanently deletes your data.
+
+WHAT I (THYME) CAN DO: add or remove kitchen items, manage your shopping list, log dishes, and suggest recipes — by voice or text. For app settings or account actions, I'll tell you where to tap.`;
+
+const APP_GUIDES = { v1: APP_GUIDE_V1 };
+
+// Returns the app-guide system message(s), or [] when PROMPT_GUIDE_VERSION=off.
+function getAppGuideMessages() {
+  const version = String(process.env.PROMPT_GUIDE_VERSION || "v1").trim().toLowerCase();
+  if (version === "off" || version === "none" || version === "") return [];
+  return [{ role: "system", content: APP_GUIDES[version] || APP_GUIDE_V1 }];
+}
 const BROAD_FOOD_QUERY_REGEX = /\b(what\s+(have|did)\s+i\s+(eat|have)|what foods|what ingredients|what do i have|what(?:'s| is) in (?:the )?kitchen|what did i (?:discard|throw away)|what should i (?:eat|make)|what can i make)\b/i;
 const AMBIGUOUS_REFERENCE_REGEX = /\b(that|this|those|these|it|one|ones)\b/i;
 const RECIPE_READ_ONLY_QUESTION_REGEX = /\b(what do i need to buy|what should i buy|what do i need|what ingredients do i need|what(?:'s| is) missing|which ingredients|which groceries|what groceries|do i need to buy)\b/i;
@@ -709,7 +750,14 @@ const WRITE_INTENT_PATTERNS = [
   { pattern: /\b(bought|picked up|got it|checked off)\b.{0,20}\b(list|shopping)?\b/i,  tool: "mark_shopping_item_bought" },
 ];
 
+// How-to / informational questions must NOT be force-routed to a write tool:
+// "how do I add to my shopping list" is a QUESTION, not the command "add milk".
+// Without this, App-Guide how-to questions silently trigger a placeholder write.
+// A genuine command (no interrogative frame) still forces its tool below.
+const HOWTO_INTENT_REGEX = /\b(?:how\s+(?:do|can|would|should|to)|how\s+d(?:o|oes)\b[^.?!]*\bi\b|where\s+(?:do|can|is|are|'?s)|where'?s|what\s+(?:is|are|can|'?s)|what'?s|why\s+(?:is|are|does|do|can|no)|can\s+i|could\s+i|do\s+you|are\s+you|is\s+there|is\s+it\s+possible)\b/i;
+
 function detectWriteIntent(transcript) {
+  if (HOWTO_INTENT_REGEX.test(String(transcript || ""))) return "auto";
   for (const { pattern, tool } of WRITE_INTENT_PATTERNS) {
     if (pattern.test(transcript)) {
       return { type: "function", function: { name: tool } };
@@ -870,6 +918,7 @@ export async function* runDeviceAssistantStreaming({ transcript, userContext, en
   const readOnlyIntentMessage = buildReadOnlyIntentMessage(transcript, normalizedSessionMessages);
   const messages = [
     { role: "system", content: buildSystemPrompt(userContext, { responseSurface: normalizedResponseSurface }) },
+    ...getAppGuideMessages(),
     ...(shoppingGroundingMessage ? [{ role: "system", content: shoppingGroundingMessage }] : []),
     ...(kitchenGroundingMessage ? [{ role: "system", content: kitchenGroundingMessage }] : []),
     ...(foodGroundingMessage ? [{ role: "system", content: foodGroundingMessage }] : []),
@@ -1170,6 +1219,7 @@ export async function runDeviceAssistant({ transcript, userContext, env, session
   const readOnlyIntentMessage = buildReadOnlyIntentMessage(transcript, normalizedSessionMessages);
   const messages = [
     { role: "system", content: buildSystemPrompt(userContext, { responseSurface: normalizedResponseSurface }) },
+    ...getAppGuideMessages(),
     ...(shoppingGroundingMessage ? [{ role: "system", content: shoppingGroundingMessage }] : []),
     ...(kitchenGroundingMessage ? [{ role: "system", content: kitchenGroundingMessage }] : []),
     ...(foodGroundingMessage ? [{ role: "system", content: foodGroundingMessage }] : []),
