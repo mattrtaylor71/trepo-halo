@@ -736,9 +736,16 @@ const ACTION_CLAIM_RULES = [
     patterns: [
       /\b(meal|dish|food|breakfast|lunch|dinner|brunch|snack)\b[^.?!\n]{0,40}\blogged\b/i,
       /\blogged\b[^.?!\n]{0,40}\b(meal|dish|food|breakfast|lunch|dinner|brunch|snack|it|that|your)\b/i,
-      /\bi(?:'ve| have)\s+logged\b/i,
       /\b(has|have|had|is|was|were|been)\s+logged\b/i,
       /\badded\b[^.?!\n]{0,30}\bto\s+your\s+(?:dish|meal)\s+log\b/i,
+      // Sentence-initial completed-action confirmations that name the food
+      // DIRECTLY ("Logged: two waffles") — the shape that slipped Brad's 07-09
+      // turn (the meal-word patterns above require dish/meal/food/breakfast/etc.,
+      // which "Eggo waffles"/"espresso" are not). Excludes "logged out/in/up" and
+      // instructional/offer forms ("you can log a dish", "want me to log…") which
+      // use present-tense "log" — so it coexists with the App Guide how-to text.
+      /^\s*(?:(?:ok(?:ay)?|done|great|sure|perfect|got\s*it|all\s*set|no\s*problem|there|alright)[\s,!.—-]+)*(?:i(?:'ve|\s+have|\s+just)?\s+)?(logged|added|saved|recorded|noted)\b(?!\s+(?:out|in|up|off)\b)(?:\s*[:\-—]|\s+(?:your|the|a|an|two|one|both|it\b|that\b|\d))/i,
+      /\bi(?:'ve|\s+have|\s+just)?\s+logged\b(?!\s+(?:out|in)\b)/i,
     ],
   },
   {
@@ -789,7 +796,7 @@ const ACTION_CLAIM_RULES = [
 const WRITE_TOOL_NAMES = new Set(ACTION_CLAIM_RULES.flatMap((r) => [...r.okTools]));
 
 // Returns the matching claim rule (domain + expected tool) or null.
-function detectActionClaim(text) {
+export function detectActionClaim(text) {
   const value = String(text || "");
   for (const rule of ACTION_CLAIM_RULES) {
     if (rule.patterns.some((pattern) => pattern.test(value))) {
