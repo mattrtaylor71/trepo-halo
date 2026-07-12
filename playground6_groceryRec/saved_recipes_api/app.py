@@ -3852,6 +3852,38 @@ def _personalize_saved_recipes(owner, request_id=None, recipe_ids=None):
 # never carried into the saved copy.
 _EXPLORE_SYNTHETIC_URL_RE = re.compile(
     r'^https?://(?:www\.)?trepo\.ai/explore/([0-9a-fA-F-]{36})/?$', re.IGNORECASE)
+# The app submits curated-recipe saves as an Instagram PROFILE URL that opens the
+# Trepo IG page for humans while carrying the recipe id in a query param IG
+# ignores: https://www.instagram.com/trepohq?trepo_recipe={id}
+_EXPLORE_IG_PROFILE_HOSTS = {'instagram.com', 'www.instagram.com'}
+_EXPLORE_IG_PROFILE_PATH = '/trepohq'
+
+
+def _explore_synthetic_id(raw_url):
+    """Parse a curated-recipe id from either synthetic scheme, reading the RAW
+    submitted URL BEFORE any canonicalization can strip the query string:
+      - https://trepo.ai/explore/{id}
+      - https://www.instagram.com/trepohq?trepo_recipe={id}
+    Returns (explore_id_or_None, is_trepo_profile). is_trepo_profile is True for ANY
+    instagram.com/trepohq URL (even with a missing/unknown param) so the caller can
+    return 422 instead of EVER scraping the profile page."""
+    text = _safe_text(raw_url).strip()
+    if not text:
+        return None, False
+    m = _EXPLORE_SYNTHETIC_URL_RE.match(text)
+    if m:
+        return m.group(1), False
+    try:
+        parsed = urlparse(text if '://' in text else f'https://{text}')
+    except Exception:
+        return None, False
+    host = (parsed.hostname or '').lower()
+    path = (parsed.path or '').rstrip('/').lower()
+    if host in _EXPLORE_IG_PROFILE_HOSTS and path == _EXPLORE_IG_PROFILE_PATH:
+        rid = (parse_qs(parsed.query or '').get('trepo_recipe') or [None])[0]
+        return (_safe_text(rid) or None), True
+    return None, False
+
 
 _EXPLORE_SELECT_COLS = (
     "id, title, ingredients, instructions, notes, image_url, original_image_url, "
@@ -3924,20 +3956,42 @@ def _explore_extraction_from_row(row, submitted_url):
 
 
 def _explore_shortcircuit_extraction(conn, url, request_id=None):
-    """If the submitted URL maps to an explore_recipes row, return a pre-structured
-    extraction (skips scrape/Apify/refine). Otherwise return None so the caller
-    falls through to the normal extraction path. Best-effort: any hiccup -> None,
-    and normalize errors (e.g. non-URL text) are left for the normal path to
-    surface with the proper 4xx."""
+    """If the submitted URL maps to a curated explore_recipes row, return a
+    pre-structured extraction (skips scrape/Apify/refine). Synthetic schemes
+    (trepo.ai/explore/{id} and instagram.com/trepohq?trepo_recipe={id}) are matched
+    from the RAW url before canonicalization. A Trepo IG-profile URL that cannot be
+    resolved to a recipe raises 422 rather than EVER falling through to a profile
+    scrape (which returns junk). Real explore URLs match by source_url/resolved_url
+    equality. Returns an extraction dict, or None to fall through to normal extract."""
+    explore_id, is_trepo_profile = _explore_synthetic_id(url)
+    if explore_id:
+        row = _lookup_explore_recipe(conn, explore_id=explore_id)
+        if row:
+            extraction = _explore_extraction_from_row(row, url)
+            _log_event(
+                request_id,
+                'saved_recipe_explore_shortcircuit',
+                explore_id=extraction['explore_id'],
+                matched='trepo_profile' if is_trepo_profile else 'synthetic_id',
+                resolved_url=extraction['resolved_url'],
+            )
+            return extraction
+    if is_trepo_profile:
+        # A Trepo IG-profile URL with a missing/unknown recipe id. NEVER scrape a
+        # profile page — surface a clean not-a-recipe 422 instead of falling through.
+        _log_event(
+            request_id,
+            'saved_recipe_explore_profile_unmatched',
+            explore_id=explore_id or '',
+            url=_safe_text(url)[:200],
+        )
+        raise ServiceError("That link doesn't point to a saved recipe.", status_code=422)
+    # Non-synthetic URL: match real explore rows by source_url/resolved_url equality.
     try:
         normalized = _normalize_url(url)
     except Exception:
         return None
-    match = _EXPLORE_SYNTHETIC_URL_RE.match(normalized)
-    if match:
-        row = _lookup_explore_recipe(conn, explore_id=match.group(1))
-    else:
-        row = _lookup_explore_recipe(conn, match_url=normalized)
+    row = _lookup_explore_recipe(conn, match_url=normalized)
     if not row:
         return None
     extraction = _explore_extraction_from_row(row, url)
@@ -3945,7 +3999,7 @@ def _explore_shortcircuit_extraction(conn, url, request_id=None):
         request_id,
         'saved_recipe_explore_shortcircuit',
         explore_id=extraction['explore_id'],
-        matched='synthetic_id' if match else 'source_url',
+        matched='source_url',
         resolved_url=extraction['resolved_url'],
     )
     return extraction
