@@ -2528,34 +2528,52 @@ const KITCHEN_CATEGORY_ENUM = new Set([
   "leftovers", "produce", "dairy_eggs", "meat_seafood",
   "pantry", "snacks_sweets", "beverages", "prepared_other",
 ]);
+// Keyword -> enum. Order matters: PANTRY is scanned before meat/produce/dairy so
+// seasonings, sauces, and staples win over incidental words ("Steak Blend
+// Seasoning", "Fish Sauce", "Chicken Bouillon" are pantry, not meat).
 const KITCHEN_CATEGORY_KEYWORDS = [
   [["leftover"], "leftovers"],
-  [["meat", "seafood", "fish", "poultry", "beef", "pork", "bacon", "sausage", "chicken", "deli"], "meat_seafood"],
-  [["dairy", "creamer", "cheese", "milk", "yogurt", "butter", "egg"], "dairy_eggs"],
-  [["beverage", "drink", "juice", "soda", "coffee", "tea", "water"], "beverages"],
-  [["snack", "sweet", "dessert", "candy", "chocolate", "chip", "cookie", "cracker"], "snacks_sweets"],
-  [["produce", "fruit", "vegetable", "veggie", "veg", "dip", "herb"], "produce"],
-  [["pantry", "condiment", "baking", "spice", "season", "oil", "sauce", "canned", "grain", "pasta", "rice", "nut", "dry", "vinegar", "syrup", "honey", "bouillon", "flour", "sugar"], "pantry"],
-  [["prepared", "leftover", "meal", "other", "misc"], "prepared_other"],
+  [["pantry", "condiment", "seasoning", "spice", "blend", "rub", "broth", "stock", "bouillon",
+    "sauce", "marinara", "salsa", "ketchup", "mustard", "mayo", "dressing", "oil", "vinegar",
+    "syrup", "honey", "jam", "jelly", "peanut butter", "baking", "flour", "sugar", "rice",
+    "pasta", "noodle", "grain", "oat", "cereal", "bean", "lentil", "canned"], "pantry"],
+  [["dairy", "creamer", "cheese", "cheddar", "mozzarella", "parmesan", "milk", "yogurt",
+    "yoghurt", "butter", "cream", "egg"], "dairy_eggs"],
+  [["snack", "sweet", "dessert", "candy", "chocolate", "chip", "cookie", "cracker",
+    "pretzel", "popcorn", "granola"], "snacks_sweets"],
+  [["beverage", "drink", "juice", "soda", "coffee", "tea", "water", "kombucha", "lemonade"], "beverages"],
+  [["produce", "fruit", "vegetable", "veggie", "lettuce", "spinach", "tomato", "onion",
+    "potato", "apple", "banana", "berry", "herb", "cilantro"], "produce"],
+  [["meat", "seafood", "fish", "poultry", "beef", "pork", "bacon", "sausage", "chicken",
+    "turkey", "ham", "salmon", "shrimp", "tuna", "deli"], "meat_seafood"],
+  [["prepared", "meal", "entree", "other", "misc"], "prepared_other"],
 ];
 const KITCHEN_STORAGE_CATEGORY_FALLBACK = {
   pantry: "pantry", produce: "produce", snacks: "snacks_sweets",
 };
 
-// Map a raw category guess (+ storage location) onto the app's category enum.
-// Never returns null/empty — defaults to 'prepared_other'.
-export function normalizeKitchenCategory(rawCategory, storageLocation) {
+function scanKitchenCategoryKeywords(value) {
+  const cleaned = String(value == null ? "" : value).toLowerCase().replace(/[^a-z]+/g, " ");
+  if (!cleaned.trim()) return null;
+  for (const [keys, category] of KITCHEN_CATEGORY_KEYWORDS) {
+    if (keys.some((k) => cleaned.includes(k))) return category;
+  }
+  return null;
+}
+
+// Map a raw category guess onto the app's category enum, using in order: the
+// category guess (exact enum, then keywords), then keywords in the PRODUCT NAME,
+// then the storage location, then 'prepared_other'. Never returns null/free-text.
+// BOTH the INSERT (voice check-in) and category-UPDATE tool paths clamp through this.
+export function normalizeKitchenCategory(rawCategory, storageLocation, productName) {
   const raw = (rawCategory == null ? "" : String(rawCategory)).trim().toLowerCase();
   if (KITCHEN_CATEGORY_ENUM.has(raw)) return raw;
-  if (raw) {
-    const cleaned = raw.replace(/[^a-z]+/g, " ");
-    for (const [keys, value] of KITCHEN_CATEGORY_KEYWORDS) {
-      if (keys.some((k) => cleaned.includes(k))) return value;
-    }
-  }
-  const storage = (storageLocation == null ? "" : String(storageLocation)).trim().toLowerCase();
-  if (KITCHEN_STORAGE_CATEGORY_FALLBACK[storage]) return KITCHEN_STORAGE_CATEGORY_FALLBACK[storage];
-  return "prepared_other";
+  return (
+    scanKitchenCategoryKeywords(raw) ||
+    scanKitchenCategoryKeywords(productName) ||
+    KITCHEN_STORAGE_CATEGORY_FALLBACK[(storageLocation == null ? "" : String(storageLocation)).trim().toLowerCase()] ||
+    "prepared_other"
+  );
 }
 
 async function insertKitchenRowAcrossHousehold(connection, context, payload) {
@@ -2565,7 +2583,7 @@ async function insertKitchenRowAcrossHousehold(connection, context, payload) {
   const itemName = formatUserFacingItemName(payload?.item_name);
   const storageGuidance = estimateHeuristicStorageGuidance(payload);
   // Normalize onto the app category enum once; never persist null/free-text.
-  const normalizedCategory = normalizeKitchenCategory(payload.category, payload.location);
+  const normalizedCategory = normalizeKitchenCategory(payload.category, payload.location, itemName || payload.item_name);
 
   if (WRITE_SHARED_ONLY) {
     const tableOwnerId = resolveTableOwnerId(context);
@@ -3654,8 +3672,11 @@ export async function updateKitchenItemDetails(context, itemReference, updates, 
       nextRow.brand = updates.brand;
     }
     if (updates?.category) {
-      kitchenFields.category = updates.category;
-      nextRow.category = updates.category;
+      // Clamp the category-UPDATE path through the same normalizer as the INSERT
+      // path — the update tool otherwise wrote raw free-text (e.g. 'Seasoning').
+      const normalizedCategory = normalizeKitchenCategory(updates.category, nextRow.storage_location, nextRow.product_name);
+      kitchenFields.category = normalizedCategory;
+      nextRow.category = normalizedCategory;
     }
 
     await updateKitchenRowAcrossHousehold(connection, context, row._id, kitchenFields);

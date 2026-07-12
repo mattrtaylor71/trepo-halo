@@ -310,3 +310,31 @@ test("discardKitchenItem flips action=OUT in shared_kitchen + inserts a discard"
   assert.ok(upParams && upParams.includes("OUT"), "action=OUT flip missing from shared_kitchen UPDATE");
   assert.ok(targets(CONN, "INSERT").includes("shared_discards"), "discard row not inserted into shared_discards");
 });
+
+// ---- CATEGORY: product-name inference + UPDATE-path clamp ---------------------
+test("normalizeKitchenCategory infers from product NAME when category is null", () => {
+  assert.equal(da.normalizeKitchenCategory(null, null, "Jasmine Rice"), "pantry");
+  assert.equal(da.normalizeKitchenCategory(null, null, "Elbow Noodles"), "pantry");
+  assert.equal(da.normalizeKitchenCategory(null, null, "Mild Cheddar"), "dairy_eggs");
+  assert.equal(da.normalizeKitchenCategory(null, null, "Whole Milk"), "dairy_eggs");
+  assert.equal(da.normalizeKitchenCategory(null, null, "Tortilla Chips"), "snacks_sweets");
+  assert.equal(da.normalizeKitchenCategory(null, null, "Ground Turkey"), "meat_seafood");
+});
+test("normalizeKitchenCategory: seasonings/sauces are pantry, not meat (order)", () => {
+  assert.equal(da.normalizeKitchenCategory("Seasoning", "pantry", "Cajun Seasoning"), "pantry");
+  assert.equal(da.normalizeKitchenCategory("seasoning", null, "Lemon Pepper Seasoning"), "pantry");
+  assert.equal(da.normalizeKitchenCategory(null, null, "Kinder's Steak Blend Seasoning"), "pantry");
+  assert.equal(da.normalizeKitchenCategory(null, null, "Fish Sauce"), "pantry");
+  assert.equal(da.normalizeKitchenCategory(null, null, "Chicken Bouillon"), "pantry");
+});
+test("normalizeKitchenCategory: explicit enum/category guess wins over name", () => {
+  assert.equal(da.normalizeKitchenCategory("produce", null, "Chicken Breast"), "produce");
+  assert.equal(da.normalizeKitchenCategory("meat_seafood", null, "Rice"), "meat_seafood");
+});
+test("updateKitchenItemDetails clamps a free-text category onto the enum", async () => {
+  CONN = makeConn({ selectRows: [targetRow({ product_name: "Cajun Seasoning" })] });
+  await da.updateKitchenItemDetails(householdCtx(), "row-1", { category: "Seasoning" }, { skipKitchenDependentGeneration: true });
+  const up = mutateParamsFor(CONN, "UPDATE", "shared_kitchen");
+  assert.ok(up && up.includes("pantry"), "category should normalize to 'pantry' in the UPDATE");
+  assert.ok(!up.includes("Seasoning"), "raw free-text 'Seasoning' must not be persisted");
+});
