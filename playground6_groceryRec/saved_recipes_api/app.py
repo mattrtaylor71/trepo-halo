@@ -3843,6 +3843,114 @@ def _personalize_saved_recipes(owner, request_id=None, recipe_ids=None):
         pass
 
 
+# --- Explore short-circuit ----------------------------------------------------
+# When a user saves a URL that already exists as a curated explore_recipes row,
+# skip scrape/Apify/LLM-refine entirely and build the saved recipe straight from
+# that row. explore_recipes lives in the SAME database/schema as saved recipes
+# (both Lambdas use DB_HOST/DB_NAME -> database-1 / mysqlTutorial), so this is a
+# plain read on the shared table. De-attribution is preserved: creator fields are
+# never carried into the saved copy.
+_EXPLORE_SYNTHETIC_URL_RE = re.compile(
+    r'^https?://(?:www\.)?trepo\.ai/explore/([0-9a-fA-F-]{36})/?$', re.IGNORECASE)
+
+_EXPLORE_SELECT_COLS = (
+    "id, title, ingredients, instructions, notes, image_url, original_image_url, "
+    "image_urls, source_url, resolved_url, resolved_url_hash"
+)
+
+
+def _lookup_explore_recipe(conn, explore_id=None, match_url=None):
+    """Read one ready explore_recipes row by id (synthetic-URL path) or by
+    source_url/resolved_url/hash equality (real-URL path). Returns the row dict or
+    None. Read-only; returns None (never raises) on any miss/error."""
+    try:
+        with conn.cursor() as cur:
+            if explore_id:
+                cur.execute(
+                    f"SELECT {_EXPLORE_SELECT_COLS} FROM explore_recipes "
+                    "WHERE id=%s AND status='ready' LIMIT 1",
+                    (explore_id,),
+                )
+                return cur.fetchone()
+            candidate = _safe_text(match_url)
+            if not candidate:
+                return None
+            cur.execute(
+                f"SELECT {_EXPLORE_SELECT_COLS} FROM explore_recipes "
+                "WHERE status='ready' AND (source_url=%s OR resolved_url=%s OR resolved_url_hash=%s) "
+                "LIMIT 1",
+                (candidate, candidate, _sha256(candidate)),
+            )
+            return cur.fetchone()
+    except Exception:
+        return None
+
+
+def _explore_extraction_from_row(row, submitted_url):
+    """Build a pre-structured extraction dict from an explore_recipes row. The
+    'prestructured' key signals _save_saved_recipe_record to skip refine."""
+    structured = {
+        'title': _safe_text(row.get('title')),
+        'ingredients': _clean_string_list(_parse_json_field(row.get('ingredients')) or []),
+        'instructions': _clean_string_list(_parse_json_field(row.get('instructions')) or []),
+        'notes': _clean_string_list(_parse_json_field(row.get('notes')) or []),
+    }
+    image_url = _safe_text(row.get('image_url')) or _safe_text(row.get('original_image_url'))
+    explore_id = _safe_text(row.get('id'))
+    # Stable per-recipe dedup identity, independent of how the save was matched:
+    # prefer the row's own resolved/source URL, else the synthetic explore URL.
+    dedup_url = (
+        _safe_text(row.get('resolved_url'))
+        or _safe_text(row.get('source_url'))
+        or f'https://trepo.ai/explore/{explore_id}'
+    )
+    content = _format_recipe_text(structured)
+    return {
+        'url': _safe_text(submitted_url) or dedup_url,
+        'resolved_url': dedup_url,
+        'platform': 'explore',
+        'content': content,
+        'caption': content,
+        'title': structured['title'],
+        'image_url': image_url,
+        'image_urls': [image_url] if image_url else [],
+        'source': 'explore',
+        'author_name': None,        # de-attribution stays — never carry creator fields
+        'caption_field': 'explore',
+        'warnings': [],
+        'prestructured': structured,
+        'explore_id': explore_id,
+    }
+
+
+def _explore_shortcircuit_extraction(conn, url, request_id=None):
+    """If the submitted URL maps to an explore_recipes row, return a pre-structured
+    extraction (skips scrape/Apify/refine). Otherwise return None so the caller
+    falls through to the normal extraction path. Best-effort: any hiccup -> None,
+    and normalize errors (e.g. non-URL text) are left for the normal path to
+    surface with the proper 4xx."""
+    try:
+        normalized = _normalize_url(url)
+    except Exception:
+        return None
+    match = _EXPLORE_SYNTHETIC_URL_RE.match(normalized)
+    if match:
+        row = _lookup_explore_recipe(conn, explore_id=match.group(1))
+    else:
+        row = _lookup_explore_recipe(conn, match_url=normalized)
+    if not row:
+        return None
+    extraction = _explore_extraction_from_row(row, url)
+    _log_event(
+        request_id,
+        'saved_recipe_explore_shortcircuit',
+        explore_id=extraction['explore_id'],
+        matched='synthetic_id' if match else 'source_url',
+        resolved_url=extraction['resolved_url'],
+    )
+    return extraction
+
+
 def _save_saved_recipe_record(conn, owner, extraction, request_id=None, prepared_images=None):
     resolved_url_hash = _sha256(extraction['resolved_url'])
     existing = _fetch_saved_recipe_by_hash(conn, owner, resolved_url_hash)
@@ -3872,10 +3980,21 @@ def _save_saved_recipe_record(conn, owner, extraction, request_id=None, prepared
             'resolved_url_hash': resolved_url_hash,
         }, 200
 
-    recipe_response, structured_recipe = _analyze_extraction(
-        extraction,
-        request_id=request_id,
-    )
+    prestructured = extraction.get('prestructured')
+    if prestructured:
+        # Explore short-circuit: recipe is already structured, skip LLM refine.
+        structured_recipe = {
+            'title': _safe_text(prestructured.get('title')),
+            'ingredients': _clean_string_list(prestructured.get('ingredients') or []),
+            'instructions': _clean_string_list(prestructured.get('instructions') or []),
+            'notes': _clean_string_list(prestructured.get('notes') or []),
+        }
+        recipe_response = {'recipe': _format_recipe_text(structured_recipe), 'model': 'explore'}
+    else:
+        recipe_response, structured_recipe = _analyze_extraction(
+            extraction,
+            request_id=request_id,
+        )
     if recipe_response['recipe'] == 'Not enough recipe information.':
         raise ServiceError('Not enough recipe information.', status_code=422)
 
@@ -4172,7 +4291,10 @@ def _post_saved_recipe(owner, body, request_id=None):
         _ensure_saved_recipes_table(conn, owner)
         response_result_count = 0
         if submission['kind'] == 'url':
-            extraction = _extract_content(submission['url'], request_id=request_id)
+            # Curated explore recipes short-circuit scrape/Apify/refine entirely.
+            extraction = _explore_shortcircuit_extraction(conn, submission['url'], request_id=request_id)
+            if extraction is None:
+                extraction = _extract_content(submission['url'], request_id=request_id)
             result, _ = _save_saved_recipe_record(conn, owner, extraction, request_id=request_id)
             response = _build_saved_recipe_post_response(owner, [result])
             response_result_count = 1
