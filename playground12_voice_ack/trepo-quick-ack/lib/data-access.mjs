@@ -2521,6 +2521,11 @@ async function insertKitchenRowAcrossHousehold(connection, context, payload) {
 
   if (WRITE_SHARED_ONLY) {
     const tableOwnerId = resolveTableOwnerId(context);
+    // Voice check-ins have NO capture image, so bulkEnrichmentEngine (image-path)
+    // never promotes them past analysis_stage='preliminary' — and the shared_kitchen
+    // column DEFAULT is 'preliminary'. That left every voice item showing the iOS
+    // "ANALYZING" badge forever. Write analysis_stage='final'/status='ready' explicitly
+    // so voice adds are terminal from the start. (Image path keeps preliminary->final.)
     await connection.execute(
       `INSERT INTO \`${SHARED_KITCHEN_TABLE}\` (
         _id, _owner, _device, _createdDate, _updatedDate,
@@ -2528,8 +2533,9 @@ async function insertKitchenRowAcrossHousehold(connection, context, payload) {
         images, s3_key, action, product_expiration,
         job_id, user_id, storage_location, is_opened,
         remaining_quantity, quantity_value, quantity_unit,
-        fill_percent, storage_guidance, owner_id
-      ) VALUES (?, ?, ?, NOW(), NOW(), ?, ?, ?, ?, ?, ?, 'IN', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        fill_percent, storage_guidance, owner_id,
+        analysis_stage, analysis_status
+      ) VALUES (?, ?, ?, NOW(), NOW(), ?, ?, ?, ?, ?, ?, 'IN', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'final', 'ready')`,
       [
         rowId,
         tableOwnerId,
