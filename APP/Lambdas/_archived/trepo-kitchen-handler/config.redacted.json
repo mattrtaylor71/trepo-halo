@@ -1,0 +1,23 @@
+{
+  "FunctionName": "trepo-kitchen-handler",
+  "Runtime": "nodejs22.x",
+  "Handler": "kitchenHandler.handler",
+  "Role": "arn:aws:iam::566667681926:role/service-role/trepo-kitchen-handler-role-2s79ajds",
+  "MemorySize": 128,
+  "Timeout": 3,
+  "Architectures": [
+    "x86_64"
+  ],
+  "Layers": null,
+  "EnvVarKeys": [
+    "DB_HOST",
+    "DB_NAME",
+    "DB_PASSWORD",
+    "DB_USER"
+  ],
+  "EnvVarNote": "Values REDACTED. DB_* = standard grocery-backend RDS creds (retrievable from any sibling fn env, e.g. SavedRecipesApiFunction). No unique secrets.",
+  "CodeSha256": "g8SpiSqMUFAGELwdbMWvfbA9z8pdpCT5cPx6sQqedqA=",
+  "LastModified": "2025-11-14T23:53:12.000+0000",
+  "VpcConfig": null,
+  "DeadLetterConfig": null
+}
