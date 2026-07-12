@@ -2512,12 +2512,53 @@ function estimateHeuristicStorageGuidance(payload) {
   return { summary: "A typical home-kitchen window for this item is about 5-14 days once opened or properly stored.", min_days: 5, max_days: 14, timing_start: "after_opening", storage_zone: "mixed", confidence: 0.35, source: "heuristic" };
 }
 
+// The iOS app filters its kitchen sections by an exact lowercase snake_case
+// category enum. Thyme's free-text category guess ("Condiment", "Produce/Dip")
+// or a null guess otherwise leaves the row uncategorized/invisible. Normalize
+// every voice check-in onto the enum: map the guess, fall back to storage
+// location, and default to prepared_other — NEVER write a null/free-text value.
+const KITCHEN_CATEGORY_ENUM = new Set([
+  "leftovers", "produce", "dairy_eggs", "meat_seafood",
+  "pantry", "snacks_sweets", "beverages", "prepared_other",
+]);
+const KITCHEN_CATEGORY_KEYWORDS = [
+  [["leftover"], "leftovers"],
+  [["meat", "seafood", "fish", "poultry", "beef", "pork", "bacon", "sausage", "chicken", "deli"], "meat_seafood"],
+  [["dairy", "creamer", "cheese", "milk", "yogurt", "butter", "egg"], "dairy_eggs"],
+  [["beverage", "drink", "juice", "soda", "coffee", "tea", "water"], "beverages"],
+  [["snack", "sweet", "dessert", "candy", "chocolate", "chip", "cookie", "cracker"], "snacks_sweets"],
+  [["produce", "fruit", "vegetable", "veggie", "veg", "dip", "herb"], "produce"],
+  [["pantry", "condiment", "baking", "spice", "season", "oil", "sauce", "canned", "grain", "pasta", "rice", "nut", "dry", "vinegar", "syrup", "honey", "bouillon", "flour", "sugar"], "pantry"],
+  [["prepared", "leftover", "meal", "other", "misc"], "prepared_other"],
+];
+const KITCHEN_STORAGE_CATEGORY_FALLBACK = {
+  pantry: "pantry", produce: "produce", snacks: "snacks_sweets",
+};
+
+// Map a raw category guess (+ storage location) onto the app's category enum.
+// Never returns null/empty — defaults to 'prepared_other'.
+export function normalizeKitchenCategory(rawCategory, storageLocation) {
+  const raw = (rawCategory == null ? "" : String(rawCategory)).trim().toLowerCase();
+  if (KITCHEN_CATEGORY_ENUM.has(raw)) return raw;
+  if (raw) {
+    const cleaned = raw.replace(/[^a-z]+/g, " ");
+    for (const [keys, value] of KITCHEN_CATEGORY_KEYWORDS) {
+      if (keys.some((k) => cleaned.includes(k))) return value;
+    }
+  }
+  const storage = (storageLocation == null ? "" : String(storageLocation)).trim().toLowerCase();
+  if (KITCHEN_STORAGE_CATEGORY_FALLBACK[storage]) return KITCHEN_STORAGE_CATEGORY_FALLBACK[storage];
+  return "prepared_other";
+}
+
 async function insertKitchenRowAcrossHousehold(connection, context, payload) {
   const rowId = crypto.randomUUID();
   const jobId = `voice-${rowId}`;
   const structuredState = parseStructuredState(payload);
   const itemName = formatUserFacingItemName(payload?.item_name);
   const storageGuidance = estimateHeuristicStorageGuidance(payload);
+  // Normalize onto the app category enum once; never persist null/free-text.
+  const normalizedCategory = normalizeKitchenCategory(payload.category, payload.location);
 
   if (WRITE_SHARED_ONLY) {
     const tableOwnerId = resolveTableOwnerId(context);
@@ -2542,7 +2583,7 @@ async function insertKitchenRowAcrossHousehold(connection, context, payload) {
         "voice-assistant",
         itemName,
         payload.brand || null,
-        payload.category || null,
+        normalizedCategory,
         payload.description || null,
         null,
         null,
@@ -2604,7 +2645,7 @@ async function insertKitchenRowAcrossHousehold(connection, context, payload) {
         "voice-assistant",
         itemName,
         payload.brand || null,
-        payload.category || null,
+        normalizedCategory,
         payload.description || null,
         null,
         null,

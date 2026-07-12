@@ -246,3 +246,49 @@ test("updateShoppingItemStore updates shared + BOTH members (household)", async 
   assert.ok(up.includes("Costco"), "store field value missing from UPDATE params");
   assert.ok(up.includes("uuid-1"), "household_item_uuid key missing from UPDATE params");
 });
+
+// ---- CATEGORY NORMALIZATION (voice check-in never writes null/free-text) ------
+test("normalizeKitchenCategory: exact enum values pass through", () => {
+  for (const v of ["leftovers", "produce", "dairy_eggs", "meat_seafood", "pantry", "snacks_sweets", "beverages", "prepared_other"]) {
+    assert.equal(da.normalizeKitchenCategory(v, null), v);
+  }
+});
+test("normalizeKitchenCategory: free-text guesses map onto the enum", () => {
+  assert.equal(da.normalizeKitchenCategory("Condiment", null), "pantry");
+  assert.equal(da.normalizeKitchenCategory("Baking", null), "pantry");
+  assert.equal(da.normalizeKitchenCategory("Beverage", null), "beverages");
+  assert.equal(da.normalizeKitchenCategory("Snacks", null), "snacks_sweets");
+  assert.equal(da.normalizeKitchenCategory("Produce/Dip", null), "produce");
+  assert.equal(da.normalizeKitchenCategory("Dairy/Creamer", null), "dairy_eggs");
+  assert.equal(da.normalizeKitchenCategory("dairy", null), "dairy_eggs");
+  assert.equal(da.normalizeKitchenCategory("Frozen Meat", null), "meat_seafood");
+});
+test("normalizeKitchenCategory: null category falls back to storage, then prepared_other", () => {
+  assert.equal(da.normalizeKitchenCategory(null, "snacks"), "snacks_sweets");
+  assert.equal(da.normalizeKitchenCategory(null, "pantry"), "pantry");
+  assert.equal(da.normalizeKitchenCategory(null, "produce"), "produce");
+  assert.equal(da.normalizeKitchenCategory(null, "fridge"), "prepared_other"); // ambiguous storage
+  assert.equal(da.normalizeKitchenCategory(null, null), "prepared_other");
+  assert.equal(da.normalizeKitchenCategory("", ""), "prepared_other");
+});
+test("normalizeKitchenCategory: unknown free-text defaults to prepared_other (never null)", () => {
+  const out = da.normalizeKitchenCategory("Xyzzy Nonsense", null);
+  assert.ok(out && da.normalizeKitchenCategory("Xyzzy", "freezer") === "prepared_other");
+  assert.equal(out, "prepared_other");
+});
+test("checkInKitchenItem persists a NON-NULL enum category (null guess -> normalized)", async () => {
+  CONN = makeConn();
+  await da.checkInKitchenItem(householdCtx(), { product_name: "Mixed Berry Yogurt Bites", category: null, location: "snacks" });
+  const params = insertParamsFor(CONN, "shared_kitchen");
+  assert.ok(params, "shared_kitchen INSERT missing");
+  // category is the 6th INSERT param (rowId, owner, device, name, brand, category, ...)
+  const category = params[5];
+  assert.ok(category != null && category !== "", "category must never be null/empty");
+  assert.equal(category, "snacks_sweets", "null guess + snacks location should normalize to snacks_sweets");
+});
+test("checkInKitchenItem normalizes a free-text category guess (Condiment -> pantry)", async () => {
+  CONN = makeConn();
+  await da.checkInKitchenItem(householdCtx(), { product_name: "Ketchup", category: "Condiment" });
+  const category = insertParamsFor(CONN, "shared_kitchen")[5];
+  assert.equal(category, "pantry");
+});
