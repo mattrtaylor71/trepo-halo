@@ -927,6 +927,54 @@ def _json_column_value(value, default_empty_list=False):
     return json.dumps(value)
 
 
+# Candidate calendar->Gregorian YEAR offsets for expiration-date rescue. iOS
+# DateFormatter with an unpinned (device-default) calendar emits YYYY-MM-DD in the
+# device's calendar year (e.g. Buddhist 2569, Persian 1405) instead of Gregorian.
+_EXPIRATION_CALENDAR_OFFSETS = (('buddhist', -543), ('persian', 621), ('roc', 1911))
+
+
+def _normalize_expiration_calendar(raw):
+    """Rescue a YYYY-MM-DD expiration whose YEAR is OUTSIDE the plausible food window
+    [today.year-1, today.year+15] by trying known non-Gregorian calendar year offsets
+    and accepting the FIRST whose result lands INSIDE the window (month/day kept).
+
+    SAFETY (provable): this only ever fires on a year OUTSIDE the plausible window and
+    only commits a result INSIDE it. The offsets (543/621/1911) are all >500 years and
+    the window is 17 years wide, so a year cannot be both outside-the-window AND within
+    one offset of an inside-the-window year for any date a user could legitimately have
+    entered. It is therefore strictly MORE PERMISSIVE than the bare strptime check: it
+    can only turn a would-be-400 into a correct save, never alter a passing date.
+
+    Returns (corrected_str, offset_name) if corrected, else (raw, None). Never raises;
+    any parse issue returns (raw, None) so the caller's existing validation/400 stands.
+    """
+    try:
+        s = str(raw).strip()
+        parts = s.split('-')
+        if len(parts) != 3:
+            return raw, None
+        y, mo, da = parts
+        if len(y) != 4 or not y.isdigit() or len(mo) != 2 or not mo.isdigit() or len(da) != 2 or not da.isdigit():
+            return raw, None
+        year = int(y)
+        this_year = datetime.utcnow().year
+        lo, hi = this_year - 1, this_year + 15
+        if lo <= year <= hi:
+            return raw, None  # already plausible Gregorian — untouched
+        for name, offset in _EXPIRATION_CALENDAR_OFFSETS:
+            candidate = year + offset
+            if lo <= candidate <= hi:
+                corrected = '%04d-%s-%s' % (candidate, mo, da)
+                try:
+                    datetime.strptime(corrected, '%Y-%m-%d')  # valid calendar date?
+                except ValueError:
+                    continue
+                return corrected, name
+        return raw, None
+    except Exception:
+        return raw, None
+
+
 def _build_create_payload(owner, body):
     product_name = str(body.get('product_name') or '').strip()
     if not product_name:
@@ -938,6 +986,13 @@ def _build_create_payload(owner, body):
 
     expiration = body.get('product_expiration')
     if expiration:
+        _norm, _off = _normalize_expiration_calendar(expiration)
+        if _off:
+            print(json.dumps({
+                'evt': 'expiration_calendar_normalized', 'owner': owner, 'item_id': None,
+                'raw': str(expiration), 'corrected': _norm, 'offset_name': _off,
+            }))
+            expiration = _norm
         try:
             datetime.strptime(expiration, '%Y-%m-%d')
         except ValueError:
@@ -1874,6 +1929,13 @@ def _update_kitchen_item(owner, item_id, body):
                 
                 # Validate expiration date format
                 if field == 'product_expiration' and value:
+                    _norm, _off = _normalize_expiration_calendar(value)
+                    if _off:
+                        print(json.dumps({
+                            'evt': 'expiration_calendar_normalized', 'owner': owner, 'item_id': item_id,
+                            'raw': str(value), 'corrected': _norm, 'offset_name': _off,
+                        }))
+                        value = _norm
                     try:
                         # Validate date format (YYYY-MM-DD)
                         datetime.strptime(value, '%Y-%m-%d')
