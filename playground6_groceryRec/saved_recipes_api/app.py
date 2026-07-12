@@ -33,6 +33,12 @@ USE_SHARED_TABLES = os.getenv('USE_SHARED_TABLES', 'false').lower() == 'true'
 # edit only touches the acting user's own copy. Set to 'true' only to restore household sharing.
 SAVED_RECIPE_HOUSEHOLD_FANOUT = os.getenv('SAVED_RECIPE_HOUSEHOLD_FANOUT', 'false').lower() == 'true'
 
+# Shared-table migration Phase 1: dual-write each saved recipe to shared_saved_recipes
+# (owner_id-keyed) IN ADDITION to the per-user table. Reads untouched. Default OFF —
+# flip ON only after parity verification. A missed dual-write = redundant data, never lost.
+DUAL_WRITE_SAVED_RECIPES = os.getenv('DUAL_WRITE_SAVED_RECIPES', 'false').lower() == 'true'
+_SHARED_SAVED_RECIPES_TABLE = 'shared_saved_recipes'
+
 _LAYER_PYTHON = Path(__file__).resolve().parents[1] / 'recipe_inventory_layer' / 'python'
 if _LAYER_PYTHON.exists() and str(_LAYER_PYTHON) not in sys.path:
     sys.path.insert(0, str(_LAYER_PYTHON))
@@ -387,6 +393,58 @@ def _get_household_member_ids(conn, acting_user_id):
         members = [_safe_owner_token(r.get('user_id')) for r in (cur.fetchall() or [])]
     members = [m for m in members if m]
     return list(dict.fromkeys(members)) or [safe]
+
+
+def _dual_write_saved_recipe_to_shared(conn, owner, recipe_id, request_id=None):
+    """Migration dual-write: mirror a just-saved recipe into shared_saved_recipes
+    (owner_id-keyed; per-owner dedupe on resolved_url_hash). saved_recipes is
+    user-private, so owner_id = the acting owner (no member fan-out). Non-blocking:
+    errors are logged + swallowed — a missed dual-write is redundant data, never a
+    failed user save. Off by default (DUAL_WRITE_SAVED_RECIPES)."""
+    if not DUAL_WRITE_SAVED_RECIPES:
+        return
+    try:
+        row = _fetch_saved_recipe_by_id(conn, owner, recipe_id)
+        if not row:
+            return
+        # _SAVED_RECIPE_SELECT_FIELDS omits resolved_url_hash — recompute identically.
+        resolved_url_hash = row.get('resolved_url_hash') or _sha256(
+            row.get('resolved_url') or row.get('source_url') or recipe_id)
+
+        def _j(v):
+            if v is None:
+                return None
+            return v if isinstance(v, str) else json.dumps(v)
+
+        with conn.cursor() as cur:
+            cur.execute(
+                f"""INSERT INTO `{_SHARED_SAVED_RECIPES_TABLE}` (
+                        owner_id, _id, _owner, source_type, source_url, resolved_url, resolved_url_hash,
+                        title, image_url, image_urls, source_image_url, source_image_urls, image_storage_key,
+                        ingredients, instructions, notes, raw_caption, raw_content,
+                        extraction_source, author_name, caption_field, status
+                    ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                    ON DUPLICATE KEY UPDATE
+                        title=VALUES(title), image_url=VALUES(image_url), image_urls=VALUES(image_urls),
+                        source_image_url=VALUES(source_image_url), source_image_urls=VALUES(source_image_urls),
+                        image_storage_key=VALUES(image_storage_key), ingredients=VALUES(ingredients),
+                        instructions=VALUES(instructions), notes=VALUES(notes), raw_caption=VALUES(raw_caption),
+                        raw_content=VALUES(raw_content), extraction_source=VALUES(extraction_source),
+                        author_name=VALUES(author_name), caption_field=VALUES(caption_field),
+                        status=VALUES(status), _updatedDate=NOW()""",
+                (
+                    owner, row.get('_id'), row.get('_owner'), row.get('source_type'), row.get('source_url'),
+                    row.get('resolved_url'), resolved_url_hash, row.get('title'), row.get('image_url'),
+                    _j(row.get('image_urls')), row.get('source_image_url'), _j(row.get('source_image_urls')),
+                    row.get('image_storage_key'), _j(row.get('ingredients')), _j(row.get('instructions')),
+                    _j(row.get('notes')), row.get('raw_caption'), row.get('raw_content'),
+                    row.get('extraction_source'), row.get('author_name'), row.get('caption_field'),
+                    row.get('status') or 'ready',
+                ),
+            )
+        conn.commit()
+    except Exception as exc:
+        _log_event(request_id, 'saved_recipe_shared_dualwrite_failed', owner=owner, recipe_id=recipe_id, error=str(exc))
 
 
 def _fan_out_saved_recipe_to_household(conn, primary_owner, recipe_id, request_id=None):
@@ -3578,6 +3636,7 @@ def _handle_async_saved_recipe_text_task(event, request_id=None):
             _, overlay_row = _serialize_saved_recipe_with_availability(
                 conn, owner, row, kitchen_context=kitchen_context, request_id=request_id)
             _persist_owner_recipe_availability_rows(conn, [overlay_row])
+            _dual_write_saved_recipe_to_shared(conn, owner, recipe_id, request_id=request_id)
             try:
                 _fan_out_saved_recipe_to_household(conn, owner, recipe_id, request_id=request_id)
             except Exception as fan_exc:
@@ -4125,6 +4184,8 @@ def _save_saved_recipe_record(conn, owner, extraction, request_id=None, prepared
         resolved_url=extraction['resolved_url'],
         extraction_source=extraction['source'],
     )
+    # Migration dual-write to shared_saved_recipes (flag-gated, non-blocking).
+    _dual_write_saved_recipe_to_shared(conn, owner, recipe_id, request_id=request_id)
     # Fan out to household members
     try:
         _fan_out_saved_recipe_to_household(conn, owner, recipe_id, request_id=request_id)
