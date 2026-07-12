@@ -158,6 +158,53 @@ def _get_household_member_ids(conn, acting_user_id):
     return list(dict.fromkeys(members)) or [safe_user_id]
 
 
+# ---- Shared-table migration M4: dual-write metrics snapshots to shared_metrics ----
+# Off by default (DUAL_WRITE_METRICS). Mirrors one snapshot row (by _id) into the
+# owner_id-keyed shared_metrics append log via INSERT...SELECT, so the mirror is a
+# faithful copy of whatever this writer wrote; ON DUPLICATE KEY re-syncs on re-call
+# so an in-place snapshot UPDATE (async kitchen-analysis fill-in) is reflected.
+# Non-blocking: errors are swallowed + surfaced as a metric-filterable
+# {evt:'dual_write_miss', family:'metrics'} marker. (Duplicated across the 4 metrics
+# writers — keep byte-equivalent; follow-up: hoist to a shared layer.)
+DUAL_WRITE_METRICS = os.getenv('DUAL_WRITE_METRICS', 'false').lower() == 'true'
+_SHARED_METRICS_TABLE = 'shared_metrics'
+_SHARED_METRICS_COLS = (
+    '_id', '_owner', '_createdDate', 'IQ', 'Points', 'UPF', 'harmful_ingredients',
+    'IQ_what', 'IQ_suggestions', 'UPF_what', 'UPF_suggestions',
+    'harmful_ingredients_what', 'harmful_ingredients_suggestions',
+    'kitchen_analysis_status', 'kitchen_analysis_content', 'kitchen_analysis_generated_at',
+    'kitchen_analysis_error',
+)
+
+
+def _dual_write_metrics_to_shared(conn, owner, metrics_table, metrics_id, request_id=None):
+    if not DUAL_WRITE_METRICS:
+        return
+    try:
+        cols = ', '.join(f'`{c}`' for c in _SHARED_METRICS_COLS)
+        src = ', '.join(f's.`{c}`' for c in _SHARED_METRICS_COLS)
+        upd = ', '.join(f'`{c}`=VALUES(`{c}`)' for c in _SHARED_METRICS_COLS if c != '_id')
+        sql = (
+            f"INSERT INTO `{_SHARED_METRICS_TABLE}` (`owner_id`, {cols}) "
+            f"SELECT %s, {src} FROM `{metrics_table}` s WHERE s.`_id` = %s "
+            f"ON DUPLICATE KEY UPDATE `owner_id`=VALUES(`owner_id`), {upd}"
+        )
+        with conn.cursor() as cur:
+            cur.execute(sql, (owner, metrics_id))
+        conn.commit()
+    except Exception as exc:
+        try:
+            import sys
+            print(json.dumps({
+                'evt': 'dual_write_miss', 'family': 'metrics',
+                'owner_id': str(owner) if owner is not None else None,
+                'metrics_id': str(metrics_id) if metrics_id is not None else None,
+                'error': (str(exc)[:500] if exc is not None else ''),
+            }), file=sys.stderr)
+        except Exception:
+            pass
+
+
 def _metrics_table_name(owner):
     safe = _sanitize_owner(owner)
     if not safe:
@@ -487,6 +534,7 @@ def _insert_metrics_snapshot(conn, owner, table_name, previous, new_points):
                 kitchen_analysis_error,
             ]
         )
+    _dual_write_metrics_to_shared(conn, owner, table_name, entry_id)
 
 
 def _public_reward(reward, include_urls=False):
