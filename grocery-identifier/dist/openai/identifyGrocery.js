@@ -1,11 +1,30 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.GroceryItemSchema = void 0;
+exports.GroceryItemSchema = exports.CATEGORY_ENUM_ENABLED = exports.CATEGORY_ENUM = void 0;
+exports.enrichByName = enrichByName;
 exports.isLikelyNonGroceryItem = isLikelyNonGroceryItem;
 exports.identifyGroceryItem = identifyGroceryItem;
 const zod_1 = require("zod");
 const client_1 = require("./client");
 const extractLabelEvidence_1 = require("./extractLabelEvidence");
+const geminiFallback_1 = require("./geminiFallback");
+// ── AI-driven category (Task 3): constrain the identify `category` field to the 8
+// app enums directly, so the model does the smart categorization and the keyword
+// normalizer (kitchen_api/category_normalizer.py + quick-ack) becomes a SAFETY NET,
+// not the decision-maker. FLAG-GATED for instant rollback (env
+// CATEGORY_ENUM_PROMPT_VERSION): off/unset => current freetext behavior (inert).
+// Scope is category-ONLY: no other identify field is touched. detected_category
+// (label evidence) is intentionally left freetext — the main `category` enum wins
+// chooseCategory() (the 8 values are not "generic"), and constraining evidence would
+// be a broader change to inferProductType(). Zod stays permissive (z.string) so a
+// schema-escape can never crash identify — the normalizer clamps it.
+exports.CATEGORY_ENUM = [
+    "leftovers", "produce", "dairy_eggs", "meat_seafood",
+    "pantry", "snacks_sweets", "beverages", "prepared_other",
+];
+exports.CATEGORY_ENUM_ENABLED = ["v1", "enum", "true", "on"].includes(String(process.env.CATEGORY_ENUM_PROMPT_VERSION || "").toLowerCase());
+const CATEGORY_ENUM_GUIDANCE = "\n\nCATEGORY — choose EXACTLY ONE of these 8 values, by what the product fundamentally IS, NOT by incidental words in its name: leftovers, produce, dairy_eggs, meat_seafood, pantry, snacks_sweets, beverages, prepared_other." +
+    "\nRules + hard examples: Potato Bread / Blueberry Bread = pantry (it IS bread, shelf-stable). Blueberry Muffins / cakes / cookies / pastries = snacks_sweets. Green Onion Pancakes and other frozen/prepared foods = prepared_other. A bag of potatoes / loose bananas / a bunch of celery or herbs = produce. Strawberry yogurt = dairy_eggs. Chicken broth = pantry. Fresh raw meat/poultry/fish = meat_seafood. Any drink = beverages. Home leftover food = leftovers. When a produce word appears in a processed product's name (potato bread, blueberry muffin, green onion pancake), pick the PROCESSED category, not produce.";
 exports.GroceryItemSchema = zod_1.z.object({
     brand: zod_1.z.string().nullable().optional(),
     product_name: zod_1.z.string().nullable().optional(),
@@ -106,7 +125,9 @@ const groceryItemJsonSchema = {
         brand: { type: ["string", "null"] },
         product_name: { type: ["string", "null"] },
         variant: { type: ["string", "null"] },
-        category: { type: ["string", "null"] },
+        category: exports.CATEGORY_ENUM_ENABLED
+            ? { type: ["string", "null"], enum: [...exports.CATEGORY_ENUM, null] }
+            : { type: ["string", "null"] },
         product_type: { type: ["string", "null"] },
         producer: { type: ["string", "null"] },
         vintage: { type: ["string", "null"] },
@@ -304,7 +325,7 @@ CRITICAL RULES:
 - Category: ${details.category || 'Unknown'}
 
 Return ONLY JSON.`;
-    const response = await openai.responses.create({
+    const openaiRequest = {
         model: (0, client_1.getOpenAIModel)(),
         reasoning: { effort: "low" },
         max_output_tokens: 1000,
@@ -326,10 +347,11 @@ Return ONLY JSON.`;
                 content: [{ type: "input_text", text: userPrompt }],
             },
         ],
-    });
+    };
     let parsed;
     try {
-        parsed = (0, client_1.parseJsonResponse)(response);
+        // OpenAI primary -> Gemini fallback (flag-gated) on quota/5xx/malformed-output.
+        parsed = await (0, geminiFallback_1.withGeminiFallback)("enrich_by_name", async () => (0, client_1.parseJsonResponse)(await openai.responses.create(openaiRequest)), () => ({ systemPrompt, userPrompt, schema: ingredientLookupJsonSchema }));
     }
     catch {
         return null;
@@ -338,6 +360,16 @@ Return ONLY JSON.`;
     parsed.harmful_ingredients = normalizeStringList(parsed.harmful_ingredients);
     parsed.upf = normalizeUpf(parsed.upf);
     return IngredientLookupSchema.parse(parsed);
+}
+/**
+ * Text-only enrichment entry point: given a product identity (name/brand/variant/
+ * category), return {ingredients, upf, harmful_ingredients} with no image required.
+ * OpenAI primary -> Gemini fallback (flag-gated), same as the in-identify lookup.
+ * Exposed for the voice-item enrich-by-name backfill; NOT wired into the voice
+ * write path yet (that's the durable follow-up, Option B).
+ */
+async function enrichByName(details) {
+    return lookupIngredientsByName((0, client_1.getOpenAIClient)(), details);
 }
 function cleanNullable(value) {
     const trimmed = value?.trim();
@@ -617,59 +649,67 @@ async function identifyGroceryItem(input, options = {}) {
         else if (leftovers) {
             systemText += `\n\nLEFTOVERS MODE: This is a photo of leftover FOOD or DRINK the user is saving — NOT a packaged grocery product. Name the item by what the food/drink actually IS, as specifically as the image allows (e.g. 'Black Coffee', 'Chicken Fried Rice', 'Half a Burrito'). A confident contextual guess beats a generic label — e.g. a Starbucks cup is 'Black Coffee' (or 'Iced Coffee' etc), not 'Prepared Food'. NEVER use 'Prepared Food', 'Leftovers', or 'Prepared Food Leftovers' as the product_name — the item is already tagged as a leftover elsewhere. Put container details (cup, tupperware) in variant, not the name. Only if the contents are truly unidentifiable, use a best-effort descriptive name like 'Mixed Leftover Meal'.`;
         }
+        // AI-driven category guidance (flag-gated; category-only, appended last so it
+        // applies in all modes). Pairs with the enum schema constraint above.
+        if (exports.CATEGORY_ENUM_ENABLED) {
+            systemText += CATEGORY_ENUM_GUIDANCE;
+        }
         const model = (0, client_1.getOpenAIModel)();
         // Fast in-handler retry: a single "No structured output" / ZodError blip
-        // otherwise fails the invocation (the Merlot-saga class). Retry the
-        // model call + parse once immediately before giving up.
+        // otherwise fails the invocation (the Merlot-saga class). Retry once immediately.
         let result;
         let _identifyLastErr = null;
         for (let _identifyAttempt = 0; _identifyAttempt < 2; _identifyAttempt += 1) {
-          try {
-        const response = await openai.responses.create({
-            model,
-            ...((/^(o[1-9]|gpt-5)/.test(model)) ? { reasoning: { effort: "medium" } } : {}),
-            max_output_tokens: 2200,
-            text: {
-                format: {
-                    type: "json_schema",
-                    name: "grocery_item",
-                    strict: true,
-                    schema: groceryItemJsonSchema,
-                },
-            },
-            input: [
-                {
-                    role: "system",
-                    content: [
+            try {
+                const response = await openai.responses.create({
+                    model,
+                    ...((/^(o[1-9]|gpt-5)/.test(model)) ? { reasoning: { effort: "medium" } } : {}),
+                    max_output_tokens: 2200,
+                    text: {
+                        format: {
+                            type: "json_schema",
+                            name: "grocery_item",
+                            strict: true,
+                            schema: groceryItemJsonSchema,
+                        },
+                    },
+                    input: [
                         {
-                            type: "input_text",
-                            text: systemText,
+                            role: "system",
+                            content: [
+                                {
+                                    type: "input_text",
+                                    text: systemText,
+                                },
+                            ],
+                        },
+                        {
+                            role: "user",
+                            content: [
+                                {
+                                    type: "input_text",
+                                    text: `Analyze this grocery or beverage product image and extract the product identity, label details, likely price range, and a few concise product alternatives. Use the image plus the first-pass label evidence below. Do not invent store links or pretend to browse.\n\n${buildEvidencePrompt(labelEvidence)}`,
+                                },
+                                buildImageContent(input),
+                            ],
                         },
                     ],
-                },
-                {
-                    role: "user",
-                    content: [
-                        {
-                            type: "input_text",
-                            text: `Analyze this grocery or beverage product image and extract the product identity, label details, likely price range, and a few concise product alternatives. Use the image plus the first-pass label evidence below. Do not invent store links or pretend to browse.\n\n${buildEvidencePrompt(labelEvidence)}`,
-                        },
-                        buildImageContent(input),
-                    ],
-                },
-            ],
-        });
-        const parsed = (0, client_1.parseJsonResponse)(response);
-        result = mergeLabelEvidenceIntoItem(exports.GroceryItemSchema.parse(parsed), labelEvidence);
-        if (_identifyAttempt > 0) {
-            console.log(JSON.stringify({ evt: "openai_fast_retry_saved", service: "grocery_identify", op: "identify_deep" }));
-        }
-        break;
-          } catch (_identifyErr) {
-            _identifyLastErr = _identifyErr;
-            if (_identifyAttempt === 0) { await new Promise((r) => setTimeout(r, 2500)); continue; }
-            throw _identifyLastErr;
-          }
+                });
+                const parsed = (0, client_1.parseJsonResponse)(response);
+                result = mergeLabelEvidenceIntoItem(exports.GroceryItemSchema.parse(parsed), labelEvidence);
+                if (_identifyAttempt > 0) {
+                    console.log(JSON.stringify({ evt: "openai_fast_retry_saved", service: "grocery_identify", op: "identify_deep" }));
+                }
+                break;
+            }
+            catch (_identifyErr) {
+                _identifyLastErr = _identifyErr;
+                if (_identifyAttempt === 0) {
+                    await new Promise((r) => setTimeout(r, 2500));
+                    continue;
+                }
+                throw _identifyLastErr;
+            }
         }
         // Normalize UPF flag (model may emit "Yes"/null/etc.)
         result.upf = normalizeUpf(result.upf);

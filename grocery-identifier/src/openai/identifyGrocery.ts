@@ -2,6 +2,28 @@ import type OpenAI from "openai";
 import { z } from "zod";
 import { getOpenAIClient, getOpenAIModel, parseJsonResponse } from "./client";
 import { extractLabelEvidence, LabelEvidence } from "./extractLabelEvidence";
+import { withGeminiFallback } from "./geminiFallback";
+
+// ── AI-driven category (Task 3): constrain the identify `category` field to the 8
+// app enums directly, so the model does the smart categorization and the keyword
+// normalizer (kitchen_api/category_normalizer.py + quick-ack) becomes a SAFETY NET,
+// not the decision-maker. FLAG-GATED for instant rollback (env
+// CATEGORY_ENUM_PROMPT_VERSION): off/unset => current freetext behavior (inert).
+// Scope is category-ONLY: no other identify field is touched. detected_category
+// (label evidence) is intentionally left freetext — the main `category` enum wins
+// chooseCategory() (the 8 values are not "generic"), and constraining evidence would
+// be a broader change to inferProductType(). Zod stays permissive (z.string) so a
+// schema-escape can never crash identify — the normalizer clamps it.
+export const CATEGORY_ENUM = [
+  "leftovers", "produce", "dairy_eggs", "meat_seafood",
+  "pantry", "snacks_sweets", "beverages", "prepared_other",
+] as const;
+export const CATEGORY_ENUM_ENABLED = ["v1", "enum", "true", "on"].includes(
+  String(process.env.CATEGORY_ENUM_PROMPT_VERSION || "").toLowerCase()
+);
+const CATEGORY_ENUM_GUIDANCE =
+  "\n\nCATEGORY — choose EXACTLY ONE of these 8 values, by what the product fundamentally IS, NOT by incidental words in its name: leftovers, produce, dairy_eggs, meat_seafood, pantry, snacks_sweets, beverages, prepared_other." +
+  "\nRules + hard examples: Potato Bread / Blueberry Bread = pantry (it IS bread, shelf-stable). Blueberry Muffins / cakes / cookies / pastries = snacks_sweets. Green Onion Pancakes and other frozen/prepared foods = prepared_other. A bag of potatoes / loose bananas / a bunch of celery or herbs = produce. Strawberry yogurt = dairy_eggs. Chicken broth = pantry. Fresh raw meat/poultry/fish = meat_seafood. Any drink = beverages. Home leftover food = leftovers. When a produce word appears in a processed product's name (potato bread, blueberry muffin, green onion pancake), pick the PROCESSED category, not produce.";
 
 export const GroceryItemSchema = z.object({
   brand: z.string().nullable().optional(),
@@ -120,7 +142,9 @@ const groceryItemJsonSchema = {
     brand: { type: ["string", "null"] },
     product_name: { type: ["string", "null"] },
     variant: { type: ["string", "null"] },
-    category: { type: ["string", "null"] },
+    category: CATEGORY_ENUM_ENABLED
+      ? { type: ["string", "null"], enum: [...CATEGORY_ENUM, null] }
+      : { type: ["string", "null"] },
     product_type: { type: ["string", "null"] },
     producer: { type: ["string", "null"] },
     vintage: { type: ["string", "null"] },
@@ -335,7 +359,7 @@ CRITICAL RULES:
 
 Return ONLY JSON.`;
 
-  const response = await openai.responses.create({
+  const openaiRequest: any = {
     model: getOpenAIModel(),
     reasoning: { effort: "low" },
     max_output_tokens: 1000,
@@ -346,7 +370,7 @@ Return ONLY JSON.`;
         strict: true,
         schema: ingredientLookupJsonSchema,
       },
-    } as any,
+    },
     input: [
       {
         role: "system",
@@ -357,11 +381,16 @@ Return ONLY JSON.`;
         content: [{ type: "input_text", text: userPrompt }],
       },
     ],
-  } as any);
+  };
 
   let parsed: any;
   try {
-    parsed = parseJsonResponse<IngredientLookup>(response);
+    // OpenAI primary -> Gemini fallback (flag-gated) on quota/5xx/malformed-output.
+    parsed = await withGeminiFallback<IngredientLookup>(
+      "enrich_by_name",
+      async () => parseJsonResponse<IngredientLookup>(await openai.responses.create(openaiRequest)),
+      () => ({ systemPrompt, userPrompt, schema: ingredientLookupJsonSchema })
+    );
   } catch {
     return null;
   }
@@ -371,6 +400,19 @@ Return ONLY JSON.`;
   parsed.upf = normalizeUpf(parsed.upf);
 
   return IngredientLookupSchema.parse(parsed);
+}
+
+/**
+ * Text-only enrichment entry point: given a product identity (name/brand/variant/
+ * category), return {ingredients, upf, harmful_ingredients} with no image required.
+ * OpenAI primary -> Gemini fallback (flag-gated), same as the in-identify lookup.
+ * Exposed for the voice-item enrich-by-name backfill; NOT wired into the voice
+ * write path yet (that's the durable follow-up, Option B).
+ */
+export async function enrichByName(
+  details: Pick<GroceryItem, 'product_name' | 'brand' | 'variant' | 'category'>
+): Promise<IngredientLookup | null> {
+  return lookupIngredientsByName(getOpenAIClient(), details);
 }
 
 function cleanNullable(value: string | null | undefined): string | null {
@@ -688,6 +730,12 @@ export async function identifyGroceryItem(input: IdentifyImageInput, options: { 
     }
     else if (leftovers) {
       systemText += `\n\nLEFTOVERS MODE: This is a photo of leftover FOOD or DRINK the user is saving — NOT a packaged grocery product. Name the item by what the food/drink actually IS, as specifically as the image allows (e.g. 'Black Coffee', 'Chicken Fried Rice', 'Half a Burrito'). A confident contextual guess beats a generic label — e.g. a Starbucks cup is 'Black Coffee' (or 'Iced Coffee' etc), not 'Prepared Food'. NEVER use 'Prepared Food', 'Leftovers', or 'Prepared Food Leftovers' as the product_name — the item is already tagged as a leftover elsewhere. Put container details (cup, tupperware) in variant, not the name. Only if the contents are truly unidentifiable, use a best-effort descriptive name like 'Mixed Leftover Meal'.`;
+    }
+
+    // AI-driven category guidance (flag-gated; category-only, appended last so it
+    // applies in all modes). Pairs with the enum schema constraint above.
+    if (CATEGORY_ENUM_ENABLED) {
+      systemText += CATEGORY_ENUM_GUIDANCE;
     }
 
     const model = getOpenAIModel();
