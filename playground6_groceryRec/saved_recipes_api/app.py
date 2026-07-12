@@ -444,6 +444,21 @@ def _dual_write_saved_recipe_to_shared(conn, owner, recipe_id, request_id=None):
             )
         conn.commit()
     except Exception as exc:
+        # LOUD, metric-filterable miss marker. The dual-write is non-blocking/
+        # swallowed, so the parity count is our only signal a mirror is missing —
+        # surface every miss to stderr under a stable {evt:'dual_write_miss'}
+        # shape so a CloudWatch metric filter alarms without waiting for the
+        # daily parity check.
+        try:
+            print(json.dumps({
+                'evt': 'dual_write_miss',
+                'family': 'saved_recipes',
+                'owner_id': str(owner) if owner is not None else None,
+                'recipe_id': str(recipe_id) if recipe_id is not None else None,
+                'error': (str(exc)[:500] if exc is not None else ''),
+            }), file=sys.stderr)
+        except Exception:
+            pass
         _log_event(request_id, 'saved_recipe_shared_dualwrite_failed', owner=owner, recipe_id=recipe_id, error=str(exc))
 
 
