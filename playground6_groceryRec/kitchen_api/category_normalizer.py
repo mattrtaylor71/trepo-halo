@@ -19,22 +19,28 @@ KITCHEN_CATEGORY_ENUM = {
     "pantry", "snacks_sweets", "beverages", "prepared_other",
 }
 
-# Order matters: PANTRY is scanned before meat/produce/dairy so seasonings,
-# sauces, and staples win over incidental words ("Steak Blend Seasoning",
-# "Fish Sauce", "Chicken Bouillon" are pantry, not meat).
+# Order matters: PANTRY + SNACKS_SWEETS are scanned before produce/meat/dairy so
+# shelf-stable bakery + baked sweets win over incidental produce/meat nouns
+# ("Potato Bread"->pantry not produce, "Blueberry Muffins"->snacks not produce,
+# "Steak Blend Seasoning"->pantry not meat, "Fish Sauce"->pantry not meat).
+# NB: bare "sweet" was REMOVED from snacks (it wrongly caught produce: "Sweet
+# Potato/Corn/Onion"); bakery uses "buns" not "bun" (avoids "bunch") and omits bare
+# "pie" (avoids "pieces"). Keep byte-equivalent with the JS map.
 KITCHEN_CATEGORY_KEYWORDS = [
     (["leftover"], "leftovers"),
     (["pantry", "condiment", "seasoning", "spice", "blend", "rub", "broth", "stock", "bouillon",
       "sauce", "marinara", "salsa", "ketchup", "mustard", "mayo", "dressing", "oil", "vinegar",
       "syrup", "honey", "jam", "jelly", "peanut butter", "baking", "flour", "sugar", "rice",
-      "pasta", "noodle", "grain", "oat", "cereal", "bean", "lentil", "canned"], "pantry"),
+      "pasta", "noodle", "grain", "oat", "cereal", "bean", "lentil", "canned",
+      "bread", "bagel", "tortilla", "buns", "roll", "pita", "naan", "english muffin", "wrap"], "pantry"),
     (["dairy", "creamer", "cheese", "cheddar", "mozzarella", "parmesan", "milk", "yogurt",
       "yoghurt", "butter", "cream", "egg"], "dairy_eggs"),
-    (["snack", "sweet", "dessert", "candy", "chocolate", "chip", "cookie", "cracker",
-      "pretzel", "popcorn", "granola"], "snacks_sweets"),
+    (["snack", "dessert", "candy", "chocolate", "chip", "cookie", "cracker",
+      "pretzel", "popcorn", "granola",
+      "muffin", "cake", "pastry", "brownie", "donut", "doughnut", "croissant", "biscuit", "waffle", "pancake"], "snacks_sweets"),
     (["beverage", "drink", "juice", "soda", "coffee", "tea", "water", "kombucha", "lemonade"], "beverages"),
     (["produce", "fruit", "vegetable", "veggie", "lettuce", "spinach", "tomato", "onion",
-      "potato", "apple", "banana", "berry", "herb", "cilantro"], "produce"),
+      "potato", "apple", "banana", "berry", "berries", "corn", "herb", "cilantro"], "produce"),
     (["meat", "seafood", "fish", "poultry", "beef", "pork", "bacon", "sausage", "chicken",
       "turkey", "ham", "salmon", "shrimp", "tuna", "deli"], "meat_seafood"),
     (["prepared", "meal", "entree", "other", "misc"], "prepared_other"),
