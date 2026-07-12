@@ -703,6 +703,7 @@ const WRITE_INTENT_PATTERNS = [
   { pattern: /\b(clear|empty|wipe)\b.{0,20}\b(list|shopping|grocery)\b/i,              tool: "clear_shopping_list" },
   { pattern: /\b(check.?in|add.{0,10}kitchen|stock|restock)\b/i,                       tool: "check_in_item" },
   { pattern: /\b(discard|threw away|throw away|toss out|get rid of)\b/i,                tool: "discard_item" },
+  { pattern: /\b(remove|removed|take out|took out|pull|use up|used up)\b.{0,30}\b(kitchen|pantry|fridge|freezer)\b/i, tool: "discard_item" },
   { pattern: /\b(mark|it.s|it is).{0,10}\bopen/i,                                      tool: "mark_item_opened" },
   { pattern: /\b(log|had|ate|just ate|i ate|i had|eaten|for (breakfast|lunch|dinner|snack))\b/i, tool: "log_dish_from_voice" },
   { pattern: /\b(bought|picked up|got it|checked off)\b.{0,20}\b(list|shopping)?\b/i,  tool: "mark_shopping_item_bought" },
@@ -760,6 +761,25 @@ const ACTION_CLAIM_RULES = [
       // "checked in" AND "checked into" (into is one token, so \bin\b fails there).
       /\bchecked\s+in(?:to)?\b[^.?!\n]{0,50}\b(kitchen|pantry|fridge)\b/i,
       /\bchecked[\s-]*in\b[^.?!\n]{0,30}\b(kitchen|pantry|fridge|item|it|that)\b/i,
+    ],
+  },
+  {
+    // Removal claims were UNGUARDED — a "removed/discarded it" reply with no
+    // discard_item call (e.g. a name-match miss that threw not-found) sailed
+    // through as a green confirmation. That is why 0/3 of Zach's week-long
+    // removal requests landed while Thyme confirmed every one.
+    domain: "kitchen_remove",
+    expectedTool: "discard_item",
+    okTools: new Set(["discard_item", "clear_kitchen_inventory"]),
+    failText: "I couldn't find that to remove — it may not be in your kitchen, or try naming it the way it's saved.",
+    // The negative lookahead keeps SHOPPING-list removals ("removed X from your
+    // shopping list") from matching the kitchen-remove rule — that domain uses a
+    // different tool (remove_from_shopping_list) and has no rule of its own here.
+    patterns: [
+      /\b(removed|discarded|tossed|took\s+out|taken\s+out|threw\s+(?:it\s+)?(?:out|away)|thrown\s+(?:it\s+)?(?:out|away)|got(?:ten)?\s+rid\s+of|used\s+up)\b(?![^.?!\n]*\b(?:list|shopping|cart|grocer)\b)[^.?!\n]{0,45}\b(kitchen|pantry|fridge|freezer|inventory|stock)\b/i,
+      /\bi(?:'ve| have)\s+(removed|discarded|tossed|taken\s+out|thrown\s+(?:it\s+)?(?:out|away)|gotten\s+rid\s+of)\b(?![^.?!\n]*\b(?:list|shopping|cart|grocer)\b)/i,
+      /\b(removed|discarded|tossed|took\s+out|threw\s+(?:it\s+)?(?:out|away)|got\s+rid\s+of)\b(?![^.?!\n]*\b(?:list|shopping|cart|grocer)\b)[^.?!\n]{0,30}\b(it|that|them|those|the|your)\b/i,
+      /\b(has|have|been)\s+(removed|discarded|taken\s+out|tossed)\b(?![^.?!\n]*\b(?:list|shopping|cart|grocer)\b)[^.?!\n]{0,30}\b(kitchen|pantry|fridge|from|it|that)\b/i,
     ],
   },
 ];

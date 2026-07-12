@@ -2396,10 +2396,17 @@ async function updateKitchenRowAcrossHousehold(connection, context, rowId, field
     }
     assignments.push("`_updatedDate` = NOW()");
     values.push(rowId);
-    await connection.execute(
+    const [updateResult] = await connection.execute(
       `UPDATE \`${SHARED_KITCHEN_TABLE}\` SET ${assignments.join(", ")} WHERE _id = ?`,
       values
     );
+    // Phantom-write guard: `_updatedDate = NOW()` is always in the SET, so a
+    // matched row ALWAYS reports affectedRows >= 1. Zero rows means the target
+    // wasn't there — fail loudly instead of letting a no-op masquerade as success
+    // (the removal-path lesson: a silent 0-row flip read back as "removed").
+    if ((updateResult?.affectedRows ?? 0) < 1) {
+      throw new Error(`kitchen row update matched 0 rows (id=${rowId}) — item not found`);
+    }
     return;
   }
 

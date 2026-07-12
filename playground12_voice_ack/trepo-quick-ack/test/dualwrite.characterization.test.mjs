@@ -292,3 +292,21 @@ test("checkInKitchenItem normalizes a free-text category guess (Condiment -> pan
   const category = insertParamsFor(CONN, "shared_kitchen")[5];
   assert.equal(category, "pantry");
 });
+
+// ---- REMOVAL PATH (honest failure, no phantom success) -----------------------
+test("discardKitchenItem throws (honest) when the item is not found — no phantom success", async () => {
+  CONN = makeConn({ selectRows: [] }); // resolution finds nothing
+  await assert.rejects(
+    da.discardKitchenItem(householdCtx(), { item_name: "Nonexistent Thing" }, "test", { skipKitchenDependentGeneration: true }),
+    /couldn'?t find|not found/i
+  );
+  // Nothing should have been flipped OUT when nothing resolved.
+  assert.equal(mutateParamsFor(CONN, "UPDATE", "shared_kitchen"), null, "no OUT flip should happen when nothing resolved");
+});
+test("discardKitchenItem flips action=OUT in shared_kitchen + inserts a discard", async () => {
+  CONN = makeConn({ selectRows: [targetRow({ product_name: "Colby Jack Cheese" })] });
+  await da.discardKitchenItem(householdCtx(), { item_name: "Colby Jack Cheese" }, "eaten", { skipKitchenDependentGeneration: true });
+  const upParams = mutateParamsFor(CONN, "UPDATE", "shared_kitchen");
+  assert.ok(upParams && upParams.includes("OUT"), "action=OUT flip missing from shared_kitchen UPDATE");
+  assert.ok(targets(CONN, "INSERT").includes("shared_discards"), "discard row not inserted into shared_discards");
+});
