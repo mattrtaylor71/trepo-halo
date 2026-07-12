@@ -16,6 +16,7 @@ from datetime import datetime
 from decimal import Decimal
 from openai import OpenAI
 from master_feed import write_master_feed_event
+from category_normalizer import normalize_kitchen_category
 
 # Database configuration keys (read lazily to avoid init failures)
 _DB_ENV_VARS = ['DB_HOST', 'DB_USER', 'DB_PASS', 'DB_NAME']
@@ -186,6 +187,12 @@ def _shared_kitchen_update(conn, item_id, updates_dict):
     with conn.cursor() as cur:
         if not updates_dict:
             return
+        # Single UPDATE choke point → clamp any category write (PATCH/correction/
+        # enrichment) onto the app enum, same map as the INSERT path.
+        if 'category' in updates_dict:
+            updates_dict = dict(updates_dict)
+            updates_dict['category'] = normalize_kitchen_category(
+                updates_dict.get('category'), updates_dict.get('storage_location'), updates_dict.get('product_name'))
         set_parts = []
         values = []
         for k, v in updates_dict.items():
@@ -981,7 +988,9 @@ def _build_create_payload(owner, body):
         'product_name': product_name,
         'brand': body.get('brand'),
         'variant': body.get('variant'),
-        'category': body.get('category'),
+        # Clamp free-text/Title-Case category onto the app enum at the write surface
+        # (image/identify path sends 'Condiment'/'Pantry'/'Bulk grocery scan' etc.).
+        'category': normalize_kitchen_category(body.get('category'), storage_location, product_name),
         'remaining_quantity': _clean_nullable_string(body.get('remaining_quantity')),
         'quantity_value': quantity_value,
         'quantity_unit': _clean_nullable_string(body.get('quantity_unit')),
@@ -1358,7 +1367,7 @@ upf: {item_dict.get('upf', 'no')}
 User correction: "{correction_text}"
 
 Return JSON with these fields updated to match the corrected item:
-product_name, brand, category (one of: produce/dairy_eggs/meat_seafood/pantry/beverages/snacks_sweets/prepared_other/condiments_sauces/frozen/leftovers), description, ingredients (array), nutrition_summary, upf ("yes"/"no"), harmful_ingredients (array), healthier_alternatives (array of objects with name/brand/why_healthier). IMPORTANT: If the current category is 'leftovers', keep it as 'leftovers' unless the user's correction clearly indicates otherwise."""
+product_name, brand, category (EXACTLY one of: leftovers/produce/dairy_eggs/meat_seafood/pantry/snacks_sweets/beverages/prepared_other — no other values; seasonings/sauces are pantry), description, ingredients (array), nutrition_summary, upf ("yes"/"no"), harmful_ingredients (array), healthier_alternatives (array of objects with name/brand/why_healthier). IMPORTANT: If the current category is 'leftovers', keep it as 'leftovers' unless the user's correction clearly indicates otherwise."""
 
     client = _openai_client()
     response = client.chat.completions.create(

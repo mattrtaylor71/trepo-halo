@@ -1,0 +1,70 @@
+"""Kitchen category normalizer — Python port of the JS
+`normalizeKitchenCategory` in
+playground12_voice_ack/trepo-quick-ack/lib/data-access.mjs (commit 87eb7c9+).
+
+The image/ios-app capture path writes the identify model's free-text category
+guess (e.g. 'Condiment', 'Pantry', 'Bulk grocery scan') straight into
+shared_kitchen. The iOS app groups by an EXACT lowercase enum, so free-text /
+Title-Case values are invisible. This clamps every kitchen_api write onto the
+enum, mirroring the voice path.
+
+⚠️ DUPLICATION: the keyword map below is kept BYTE-EQUIVALENT to the JS map in
+data-access.mjs. If you change one, change both. (Follow-up: hoist to a shared
+layer so there is a single source of truth.)
+"""
+import re
+
+KITCHEN_CATEGORY_ENUM = {
+    "leftovers", "produce", "dairy_eggs", "meat_seafood",
+    "pantry", "snacks_sweets", "beverages", "prepared_other",
+}
+
+# Order matters: PANTRY is scanned before meat/produce/dairy so seasonings,
+# sauces, and staples win over incidental words ("Steak Blend Seasoning",
+# "Fish Sauce", "Chicken Bouillon" are pantry, not meat).
+KITCHEN_CATEGORY_KEYWORDS = [
+    (["leftover"], "leftovers"),
+    (["pantry", "condiment", "seasoning", "spice", "blend", "rub", "broth", "stock", "bouillon",
+      "sauce", "marinara", "salsa", "ketchup", "mustard", "mayo", "dressing", "oil", "vinegar",
+      "syrup", "honey", "jam", "jelly", "peanut butter", "baking", "flour", "sugar", "rice",
+      "pasta", "noodle", "grain", "oat", "cereal", "bean", "lentil", "canned"], "pantry"),
+    (["dairy", "creamer", "cheese", "cheddar", "mozzarella", "parmesan", "milk", "yogurt",
+      "yoghurt", "butter", "cream", "egg"], "dairy_eggs"),
+    (["snack", "sweet", "dessert", "candy", "chocolate", "chip", "cookie", "cracker",
+      "pretzel", "popcorn", "granola"], "snacks_sweets"),
+    (["beverage", "drink", "juice", "soda", "coffee", "tea", "water", "kombucha", "lemonade"], "beverages"),
+    (["produce", "fruit", "vegetable", "veggie", "lettuce", "spinach", "tomato", "onion",
+      "potato", "apple", "banana", "berry", "herb", "cilantro"], "produce"),
+    (["meat", "seafood", "fish", "poultry", "beef", "pork", "bacon", "sausage", "chicken",
+      "turkey", "ham", "salmon", "shrimp", "tuna", "deli"], "meat_seafood"),
+    (["prepared", "meal", "entree", "other", "misc"], "prepared_other"),
+]
+
+KITCHEN_STORAGE_CATEGORY_FALLBACK = {
+    "pantry": "pantry", "produce": "produce", "snacks": "snacks_sweets",
+}
+
+
+def _scan_kitchen_category_keywords(value):
+    cleaned = re.sub(r"[^a-z]+", " ", ("" if value is None else str(value)).lower())
+    if not cleaned.strip():
+        return None
+    for keys, category in KITCHEN_CATEGORY_KEYWORDS:
+        if any(k in cleaned for k in keys):
+            return category
+    return None
+
+
+def normalize_kitchen_category(raw_category, storage_location=None, product_name=None):
+    """Map a raw category guess onto the app's category enum, using in order: the
+    category guess (exact enum, then keywords), then keywords in the PRODUCT NAME,
+    then the storage location, then 'prepared_other'. Never returns None/free-text."""
+    raw = ("" if raw_category is None else str(raw_category)).strip().lower()
+    if raw in KITCHEN_CATEGORY_ENUM:
+        return raw
+    return (
+        _scan_kitchen_category_keywords(raw)
+        or _scan_kitchen_category_keywords(product_name)
+        or KITCHEN_STORAGE_CATEGORY_FALLBACK.get(("" if storage_location is None else str(storage_location)).strip().lower())
+        or "prepared_other"
+    )
