@@ -262,6 +262,48 @@ def _recipes_table(owner):
     return f"{safe}_recipes"
 
 
+# ---- Shared-table migration M4: dual-write the recipes 'current' cache row to shared_recipes ----
+# One-row-per-owner cache (shared PK = owner_id). Off by default (DUAL_WRITE_RECIPES).
+# Copies the per-user 'current' row into shared_recipes via INSERT...SELECT so the
+# mirror is a faithful copy of the latest write; ON DUPLICATE KEY UPDATE (owner_id PK)
+# re-syncs on every state transition. Non-blocking: errors swallowed + surfaced as a
+# metric-filterable {evt:'dual_write_miss', family:'recipes'} marker.
+DUAL_WRITE_RECIPES = os.getenv('DUAL_WRITE_RECIPES', 'false').lower() == 'true'
+_SHARED_RECIPES_TABLE = 'shared_recipes'
+_SHARED_RECIPES_COLS = (
+    '_id', '_owner', 'status', 'kitchen_only', 'need_grocery', 'error_message',
+    '_createdDate', '_updatedDate',
+)
+
+
+def _dual_write_recipes_to_shared(conn, owner):
+    if not DUAL_WRITE_RECIPES:
+        return
+    try:
+        table = _recipes_table(owner)
+        cols = ', '.join(f'`{c}`' for c in _SHARED_RECIPES_COLS)
+        src = ', '.join(f's.`{c}`' for c in _SHARED_RECIPES_COLS)
+        upd = ', '.join(f'`{c}`=VALUES(`{c}`)' for c in _SHARED_RECIPES_COLS)
+        sql = (
+            f"INSERT INTO `{_SHARED_RECIPES_TABLE}` (`owner_id`, {cols}) "
+            f"SELECT %s, {src} FROM `{table}` s WHERE s.`_id`='current' "
+            f"ON DUPLICATE KEY UPDATE `owner_id`=VALUES(`owner_id`), {upd}"
+        )
+        with conn.cursor() as cur:
+            cur.execute(sql, (owner,))
+        conn.commit()
+    except Exception as exc:
+        try:
+            import sys
+            print(json.dumps({
+                'evt': 'dual_write_miss', 'family': 'recipes',
+                'owner_id': str(owner) if owner is not None else None,
+                'error': (str(exc)[:500] if exc is not None else ''),
+            }), file=sys.stderr)
+        except Exception:
+            pass
+
+
 def _sanitize_user_id(user_id):
     return re.sub(r'[^a-zA-Z0-9_-]', '', (user_id or ''))
 
@@ -449,6 +491,7 @@ def _set_status(conn, owner, status, error_message=None):
             (status, error_message)
         )
         conn.commit()
+    _dual_write_recipes_to_shared(conn, owner)
 
 
 def _set_empty(conn, owner):
@@ -467,6 +510,7 @@ def _set_empty(conn, owner):
             (json.dumps([]), json.dumps([]))
         )
         conn.commit()
+    _dual_write_recipes_to_shared(conn, owner)
 
 
 def _format_kitchen_for_prompt(items):
@@ -999,6 +1043,7 @@ def handler(event, context):
                         (target_owner,)
                     )
                     conn.commit()
+                    _dual_write_recipes_to_shared(conn, target_owner)
                 else:
                     # A row that already holds recipes must NEVER be gutted or hidden by
                     # a crash/timeout mid-regeneration. Treat existing content as
@@ -1096,6 +1141,8 @@ def handler(event, context):
                     WHERE _id = 'current'
                 """, (json.dumps(kitchen_only_list), json.dumps(need_grocery_list)))
             conn.commit()
+        for target_owner in target_owners:
+            _dual_write_recipes_to_shared(conn, target_owner)
         _mark_recipe_refresh_complete(conn, target_owners)
         print(f'[recipes_generator] Done owner={owner}')
 

@@ -164,6 +164,49 @@ def _meal_plan_table(owner):
     return f"{safe}_meal_plan"
 
 
+# ---- Shared-table migration M4: dual-write the meal_plan 'current' cache row to shared_meal_plan ----
+# One-row-per-owner cache (shared PK = owner_id). Off by default (DUAL_WRITE_MEAL_PLAN).
+# Copies the per-user 'current' row into shared_meal_plan via INSERT...SELECT so the
+# mirror is a faithful copy of the latest write; ON DUPLICATE KEY UPDATE (owner_id PK)
+# re-syncs on every state transition. Non-blocking: errors swallowed + surfaced as a
+# metric-filterable {evt:'dual_write_miss', family:'meal_plan'} marker. (Duplicated in
+# meal_plan_api — keep byte-equivalent; follow-up: hoist to a shared layer.)
+DUAL_WRITE_MEAL_PLAN = os.getenv('DUAL_WRITE_MEAL_PLAN', 'false').lower() == 'true'
+_SHARED_MEAL_PLAN_TABLE = 'shared_meal_plan'
+_SHARED_MEAL_PLAN_COLS = (
+    '_id', '_owner', 'status', 'focus', 'explanation_title', 'explanation_paragraph',
+    'plan', 'error_message', '_createdDate', '_updatedDate',
+)
+
+
+def _dual_write_meal_plan_to_shared(conn, owner):
+    if not DUAL_WRITE_MEAL_PLAN:
+        return
+    try:
+        table = _meal_plan_table(owner)
+        cols = ', '.join(f'`{c}`' for c in _SHARED_MEAL_PLAN_COLS)
+        src = ', '.join(f's.`{c}`' for c in _SHARED_MEAL_PLAN_COLS)
+        upd = ', '.join(f'`{c}`=VALUES(`{c}`)' for c in _SHARED_MEAL_PLAN_COLS)
+        sql = (
+            f"INSERT INTO `{_SHARED_MEAL_PLAN_TABLE}` (`owner_id`, {cols}) "
+            f"SELECT %s, {src} FROM `{table}` s WHERE s.`_id`='current' "
+            f"ON DUPLICATE KEY UPDATE `owner_id`=VALUES(`owner_id`), {upd}"
+        )
+        with conn.cursor() as cur:
+            cur.execute(sql, (owner,))
+        conn.commit()
+    except Exception as exc:
+        try:
+            import sys
+            print(json.dumps({
+                'evt': 'dual_write_miss', 'family': 'meal_plan',
+                'owner_id': str(owner) if owner is not None else None,
+                'error': (str(exc)[:500] if exc is not None else ''),
+            }), file=sys.stderr)
+        except Exception:
+            pass
+
+
 def _sanitize_user_id(user_id):
     return re.sub(r'[^a-zA-Z0-9_-]', '', (user_id or ''))
 
@@ -314,6 +357,7 @@ def _set_status(conn, owner, status, error_message=None):
             (status, error_message)
         )
         conn.commit()
+    _dual_write_meal_plan_to_shared(conn, owner)
 
 
 def _set_empty(conn, owner, focus):
@@ -334,6 +378,7 @@ def _set_empty(conn, owner, focus):
             (focus, json.dumps([]))
         )
         conn.commit()
+    _dual_write_meal_plan_to_shared(conn, owner)
 
 
 def _generate_plan_with_gpt(ingredients_list, focus):
@@ -636,6 +681,8 @@ def handler(event, context):
                     WHERE _id = 'current'
                 """, (focus, explanation_title, explanation_paragraph, json.dumps(plan)))
             conn.commit()
+        for target_owner in target_owners:
+            _dual_write_meal_plan_to_shared(conn, target_owner)
         print(f'[meal_plan_generator] Done owner={owner}')
     except Exception as e:
         print(f'[meal_plan_generator] Error: {e}')
