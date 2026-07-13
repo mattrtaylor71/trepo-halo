@@ -7,7 +7,15 @@ const { DynamoDBDocumentClient, PutCommand } = require('@aws-sdk/lib-dynamodb');
 const client = DynamoDBDocumentClient.from(new DynamoDBClient({}));
 const TABLE = process.env.TABLE_NAME || 'TrepoAnalyticsEvents';
 
-const ALLOWED_EVT = new Set(['analysis_failed', 'backend_error']);
+const ALLOWED_EVT = new Set(['analysis_failed', 'backend_error', 'ai_op']);
+// Additional soft-failure markers that should surface in the errors feed. Each is
+// normalised to a backend_error item with a derived service so it groups sensibly.
+const SOFT_EVT_SERVICE = {
+  shopping_peruser_write_miss: 'voice',
+  discard_peruser_write_miss: 'voice',
+  bulk_gemini_failover: 'capture',
+  recipe_batch_partial_failure: 'recipes',
+};
 const FREE_TEXT_MARKER = 'Background processing error';
 
 function truncate(v, n) {
@@ -47,6 +55,17 @@ function markerFromLogEvent(message) {
   if (parsed && ALLOWED_EVT.has(parsed.evt)) {
     return parsed;
   }
+  // Soft-failure markers (voice write-miss, gemini failover, recipe partial): normalise
+  // to a backend_error so they land in the errors feed with a sensible service + code.
+  if (parsed && SOFT_EVT_SERVICE[parsed.evt]) {
+    return {
+      ...parsed,
+      evt: 'backend_error',
+      service: parsed.service || SOFT_EVT_SERVICE[parsed.evt],
+      op: parsed.op || parsed.evt,
+      code: parsed.code || parsed.evt,
+    };
+  }
   // Free-text fallback marker for legacy "Background processing error" lines.
   if (typeof message === 'string' && message.includes(FREE_TEXT_MARKER)) {
     return {
@@ -58,7 +77,7 @@ function markerFromLogEvent(message) {
   }
   // Free-text fallback for the second worker failure path: "[IdentifyAsync] Job <id> failed:" / "[BulkCommit] Job <id> failed:".
   if (typeof message === 'string') {
-    const m = message.match(/\[(IdentifyAsync|BulkCommit)\] Job (\S+) failed:/);
+    const m = message.match(/\[(IdentifyAsync|BulkCommit)\] Job (\S+)(?: identify)? failed:/);
     if (m) {
       return {
         evt: 'backend_error',
@@ -97,11 +116,21 @@ function buildItem(marker, logEvent, logGroup) {
   setProp('log_group', logGroup);
   setProp('kind', marker.kind);
   setProp('stage', marker.stage);
+  // ai_op markers: per-LLM-call telemetry (model, latency, status, io previews).
+  setProp('model', marker.model);
+  setProp('status', marker.status);
+  setProp('input', truncate(marker.input, 400));
+  setProp('output', truncate(marker.output, 1200));
+  if (marker.latency_ms !== undefined && marker.latency_ms !== null) {
+    props.latency_ms = Number(marker.latency_ms) || 0;
+  }
+  if (marker.tokens_in != null) props.tokens_in = Number(marker.tokens_in) || 0;
+  if (marker.tokens_out != null) props.tokens_out = Number(marker.tokens_out) || 0;
 
   return {
     owner_id: ownerId,
     ts_id: `${iso}#${suffix8(rawMsg, marker)}`,
-    event_name: 'backend_error',
+    event_name: marker.evt === 'ai_op' ? 'ai_op' : 'backend_error',
     device_id: 'backend',
     app_version: 'backend',
     timestamp: iso,
