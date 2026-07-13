@@ -126,6 +126,10 @@ _SAVED_RECIPE_SELECT_FIELDS = """_id, _owner, source_type, source_url, resolved_
                        author_name, caption_field, status, _createdDate, _updatedDate"""
 _OWNER_KITCHEN_STATE_TABLE = 'owner_kitchen_state'
 _OWNER_RECIPE_AVAILABILITY_TABLE = 'owner_recipe_availability'
+# Max saved recipes to LLM-match synchronously in one /personalize call. Cache-read
+# serves the rest instantly; a cold recompute beyond this cap defers to the next call
+# so a single request can never exceed the API-gateway timeout.
+_MAX_PERSONALIZE_SYNC_COMPUTE = int(os.getenv('MAX_PERSONALIZE_SYNC_COMPUTE', '20'))
 _INGREDIENT_NOISE_TOKENS = {
     'a', 'an', 'and', 'fresh', 'organic', 'large', 'small', 'medium', 'lean', 'extra', 'virgin',
     'boneless', 'skinless', 'shredded', 'chopped', 'diced', 'minced', 'sliced', 'ground',
@@ -3970,7 +3974,26 @@ def _personalize_saved_recipes(owner, request_id=None, recipe_ids=None):
         serialized_rows = [_serialize_row(row) for row in rows]
         if recipe_ids:
             serialized_rows = [r for r in serialized_rows if r.get('id') in recipe_ids]
-        availability_map = _compute_saved_recipe_availability_batch(serialized_rows, kitchen_context, request_id=request_id)
+
+        # Cache-read: availability is deterministic for a given (recipe, kitchen_version),
+        # so reuse fresh cached rows and only run the LLM matcher on cache misses / stale
+        # entries. Warm calls (kitchen unchanged) do zero LLM work. The per-call compute is
+        # capped so a cold recompute can never exceed the API-gateway timeout — any overflow
+        # is left uncached this call and fills in on the next call.
+        current_version = int((kitchen_context or {}).get('kitchen_version') or 0)
+        all_ids = [r.get('id') for r in serialized_rows if r.get('id')]
+        cached_map = _get_cached_recipe_availability(conn, owner, all_ids, min_kitchen_version=current_version)
+        pending = [r for r in serialized_rows if r.get('id') and r.get('id') not in cached_map]
+        to_compute = pending[:_MAX_PERSONALIZE_SYNC_COMPUTE]
+        computed_map = (
+            _compute_saved_recipe_availability_batch(to_compute, kitchen_context, request_id=request_id)
+            if to_compute else {}
+        )
+        availability_map = dict(cached_map)
+        availability_map.update(computed_map)
+        _log_event(request_id, 'saved_personalize_availability', owner=owner,
+                   total=len(all_ids), from_cache=len(cached_map),
+                   computed=len(computed_map), deferred=max(0, len(pending) - len(to_compute)))
         personalization_list = []
         overlay_rows = []
         for serialized in serialized_rows:
@@ -3990,7 +4013,7 @@ def _personalize_saved_recipes(owner, request_id=None, recipe_ids=None):
                 'substitution_summary': avail.get('substitution_summary'),
                 'substitution_status': avail.get('substitution_status'),
             })
-            if avail and recipe_id:
+            if avail and recipe_id and recipe_id in computed_map:
                 overlay_rows.append(_build_owner_recipe_availability_record(owner, 'saved', recipe_id, avail))
         _persist_owner_recipe_availability_rows(conn, overlay_rows)
         return _success({'owner': owner, 'recipes': personalization_list})
