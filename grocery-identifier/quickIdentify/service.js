@@ -1650,7 +1650,24 @@ async function identifyItemDeep(input, options = {}) {
 }
 
 async function identifyItemBulkDeep(input, options = {}) {
-  return identifyItemGeminiBulk(input, options);
+  // Bulk fridge/pantry identify runs on Gemini (best at multi-item photos). If Gemini
+  // fails (timeout/outage) after its retries, we already have the user's uploaded image
+  // — so FAIL OVER to the OpenAI bulk pipeline rather than losing the whole scan. Only a
+  // total Gemini outage reaches the catch; the common case still uses Gemini.
+  try {
+    return await identifyItemGeminiBulk(input, options);
+  } catch (geminiError) {
+    const msg = (geminiError && (geminiError.message || String(geminiError))) || 'unknown Gemini error';
+    console.error(`[BulkIdentify] Gemini bulk failed, failing over to OpenAI bulk: ${msg}`);
+    try {
+      if (typeof options.onStage === 'function') {
+        options.onStage({ stage: 'switching_engines', message: 'Switching engines to finish your scan…', progress: 45 });
+      }
+    } catch (_) { /* stage reporting is best-effort */ }
+    // Marker so we can measure how often the fallback fires (grep: bulk_gemini_failover).
+    try { console.log(JSON.stringify({ evt: 'bulk_gemini_failover', reason: msg.slice(0, 300) })); } catch (_) {}
+    return await identifyItems(input, { ...options, mode: 'bulk' });
+  }
 }
 
 async function identifyItemReceiptDeep(input, options = {}) {

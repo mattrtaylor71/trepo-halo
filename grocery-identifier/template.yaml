@@ -72,6 +72,12 @@ Globals:
         GEMINI_RECEIPT_TIMEOUT_MS: "180000"
         GEMINI_RECEIPT_ATTEMPTS: "2"
         GEMINI_RECEIPT_MAX_DIMENSION: "1600"
+        # Bulk fridge/pantry identify: fail fast (was 180s x3 = 9min hang) so a flaky
+        # Gemini falls over to the OpenAI bulk pipeline quickly instead of stranding the scan.
+        GEMINI_BULK_TIMEOUT_MS: "75000"
+        GEMINI_BULK_ATTEMPTS: "2"
+        # Re-drive a failed identify job (persisted image) up to N times before surfacing failure.
+        IDENTIFY_MAX_REDRIVE: "2"
         OPENAI_IMAGE_VERIFY_MODEL: "gpt-5.4-2026-03-05"
         OPENAI_IMAGE_VERIFY_ATTEMPTS: "5"
         OPENAI_IMAGE_VERIFY_MIN_MATCHES: "3"
