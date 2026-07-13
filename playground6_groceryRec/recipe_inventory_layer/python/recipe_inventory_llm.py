@@ -155,6 +155,14 @@ def _inventory_model():
     )
 
 
+def _chat_temperature_kwargs(model):
+    # gpt-5.x / o-series reject a non-default temperature; omit it for them.
+    m = (model or '').lower()
+    if m.startswith('gpt-5') or m.startswith('o1') or m.startswith('o3') or m.startswith('o4'):
+        return {}
+    return {'temperature': 0}
+
+
 def _openai_client():
     api_key = _safe_text(os.getenv('OPENAI_API_KEY'))
     if not api_key:
@@ -443,8 +451,9 @@ Format: {"r":{"recipe_id":{"m":[["h","Chicken Breasts"],["p"],["m",null,"Greek Y
 
 Rules:
 - Pantry staples (salt, pepper, oil, water, butter, cooking spray, basic spices/seasonings) → "p"
-- Only "h" when the kitchen item clearly satisfies the ingredient
-- No false-positive noun swaps (frozen cherries ≠ cherry tomatoes)
+- Use "h" when a kitchen item IS the ingredient, INCLUDING the same food under a different name, brand, or regional/equivalent form. Same-ingredient examples that MUST be "h": tamari = soy sauce; scallion = green onion; cilantro = coriander; garbanzo = chickpea; prawns = shrimp; passata = tomato sauce; confectioners sugar = powdered sugar. Put that kitchen item's exact display_name.
+- "m" with a substitute is ONLY for a genuinely DIFFERENT ingredient that could stand in (e.g., Greek yogurt for sour cream). Never demote a true same-ingredient match to a substitute.
+- Still no false-positive noun swaps between DIFFERENT foods (frozen cherries ≠ cherry tomatoes; green onion ≠ green bell pepper)
 - One entry per ingredient, same order as input"""
 
 
@@ -578,14 +587,15 @@ def match_recipes(recipes, kitchen_context, request_id=None, log_fn=None, source
     }
     started_at = time.monotonic()
     try:
+        _model = _inventory_model()
         response = client.chat.completions.create(
-            model=_inventory_model(),
-            temperature=0,
+            model=_model,
             response_format={'type': 'json_object'},
             messages=[
                 {'role': 'system', 'content': _system_prompt()},
                 {'role': 'user', 'content': json.dumps(payload)},
             ],
+            **_chat_temperature_kwargs(_model),
         )
         meta['latency_ms'] = int((time.monotonic() - started_at) * 1000)
         meta['used_llm'] = True
@@ -737,12 +747,12 @@ def _compact_llm_call_single(client, model, kitchen_items, recipe, kitchen_conte
     try:
         response = client.chat.completions.create(
             model=model,
-            temperature=0,
             response_format={'type': 'json_object'},
             messages=[
                 {'role': 'system', 'content': _compact_system_prompt()},
                 {'role': 'user', 'content': json.dumps(payload)},
             ],
+            **_chat_temperature_kwargs(model),
         )
         body = _best_effort_json_parse(_safe_text(response.choices[0].message.content), {})
         raw_results = body.get('r') or {}
@@ -834,7 +844,7 @@ def match_recipes_fast(recipes, kitchen_context, request_id=None, log_fn=None, s
     normalized = dict(deterministic_results)  # start with deterministic, upgrade with LLM
     llm_success_count = 0
 
-    max_workers = min(len(recipes), 5)
+    max_workers = min(len(recipes), int(os.getenv('OPENAI_INVENTORY_MAX_WORKERS', '12')))
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = {
             executor.submit(

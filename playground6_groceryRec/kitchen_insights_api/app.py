@@ -734,7 +734,7 @@ Return a JSON object:
 }}
 
 Rules:
-- matched_ingredients must be items from the kitchen list above (exact or close match)
+- matched_ingredients must be items from the kitchen list above. Treat the same ingredient under a different name/brand/form as a match (tamari = soy sauce, scallion = green onion, cilantro = coriander, prawns = shrimp); do NOT count a genuinely different food as a match.
 - Prefer recipes with 0-1 missing ingredients
 - Keep recipe names short (2-4 words)
 - Return ONLY valid JSON"""
@@ -742,14 +742,13 @@ Rules:
     try:
         client = OpenAI(api_key=api_key)
         response = client.chat.completions.create(
-            model="gpt-4o-mini",
+            model=os.getenv("KITCHEN_INSIGHTS_RECIPE_MODEL", "gpt-5.4-mini"),
             messages=[
                 {"role": "system", "content": "You are a recipe matching assistant. Always respond with valid JSON only."},
                 {"role": "user", "content": prompt},
             ],
             response_format={"type": "json_object"},
-            temperature=0.7,
-            max_tokens=1024,
+            max_completion_tokens=1024,
         )
         data = json.loads(response.choices[0].message.content)
         recipes = data.get('recipes', [])
