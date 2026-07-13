@@ -940,6 +940,12 @@ def search_recipes(qs):
             ]
             _persist_overlay_rows(conn, [overlay_row for _, overlay_row in serialized_rows])
             rows = [recipe for recipe, _ in serialized_rows]
+        else:
+            # No owner (the iOS client sends only q+limit): still serialize so
+            # ingredients/instructions/notes/image_urls come back as JSON arrays,
+            # not raw DB strings. Without this, ExploreRecipeDTO.ingredients ([String]?)
+            # fails to decode a string → "data isn't in the correct format".
+            rows = [_serialize_row(row) for row in rows]
         return _ok({"query": q, "results": rows})
     finally:
         conn.close()
