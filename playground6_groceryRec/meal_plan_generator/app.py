@@ -432,8 +432,17 @@ Coherence rules:
             text = text.split('\n', 1)[-1].rsplit('```', 1)[0].strip()
         try:
             parsed = json.loads(text)
+            # Count-retry: the model sometimes returns <12 recipes (an instruction-
+            # following miss, not truncation — there's no max_tokens cap). Regenerate
+            # rather than serve an incomplete plan; on the final attempt, serve what we
+            # got (caller still logs insufficient_recipes) so we never hard-fail.
+            n_recipes = len(parsed.get('recipes') or []) if isinstance(parsed, dict) else 0
+            if n_recipes < 12 and attempt < 3:
+                last_exc = None
+                print(f"[meal_plan_generator] Got {n_recipes}/12 recipes (attempt {attempt}/3), regenerating")
+                continue
             if attempt > 1:
-                print(json.dumps({'evt': 'meal_plan_parse_retry_saved', 'service': 'mealplan', 'attempt': attempt}))
+                print(json.dumps({'evt': 'meal_plan_retry_saved', 'service': 'mealplan', 'attempt': attempt, 'recipes': n_recipes}))
             return parsed
         except json.JSONDecodeError as e:
             last_exc = e

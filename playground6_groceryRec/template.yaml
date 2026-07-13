@@ -1431,7 +1431,9 @@ Resources:
           DB_PASS:  !Ref DBPass
           DB_NAME:  !Ref DBName
           OPENAI_API_KEY: !Ref OpenAIApiKey
-          OPENAI_MODEL: gpt-4.1-mini
+          # 2026-07-13: gpt-4.1-mini→gpt-5.4-mini for better instruction-following
+          # (the "11 of 12 recipes" count-miss). Paired with a count-retry in app.py.
+          OPENAI_MODEL: gpt-5.4-mini
           MEAL_PLAN_IMAGE_SLOT_COUNT: "3"
       Policies:
         - Statement:
