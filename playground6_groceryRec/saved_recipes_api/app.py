@@ -3277,6 +3277,64 @@ def _format_recipe_text(recipe):
     return '\n'.join(lines).strip()
 
 
+def _repair_truncated_json(text):
+    """Best-effort salvage of a truncated/unterminated JSON object.
+
+    Closes an open string and any unbalanced braces/brackets so a model
+    response that was cut off mid-generation still yields the recipe fields it
+    did emit, instead of exploding the whole save with a 502.
+    """
+    s = _safe_text(text).strip()
+    start = s.find('{')
+    if start < 0:
+        return None
+    s = s[start:]
+    in_str = False
+    esc = False
+    stack = []
+    for ch in s:
+        if esc:
+            esc = False
+            continue
+        if ch == '\\' and in_str:
+            esc = True
+            continue
+        if ch == '"':
+            in_str = not in_str
+            continue
+        if in_str:
+            continue
+        if ch in '{[':
+            stack.append(ch)
+        elif ch == '}':
+            if stack and stack[-1] == '{':
+                stack.pop()
+        elif ch == ']':
+            if stack and stack[-1] == '[':
+                stack.pop()
+    repaired = s
+    if in_str:
+        repaired += '"'
+    repaired = repaired.rstrip().rstrip(',')
+    for opener in reversed(stack):
+        repaired += '}' if opener == '{' else ']'
+    try:
+        return json.loads(repaired)
+    except Exception:
+        return None
+
+
+def _loads_recipe_json(text):
+    """Parse recipe JSON, tolerating a truncated/unterminated model response."""
+    cleaned = _safe_text(text)
+    if not cleaned:
+        return None
+    try:
+        return json.loads(cleaned)
+    except Exception:
+        return _repair_truncated_json(cleaned)
+
+
 def _refine_recipe_structured(content, request_id=None, source_context=None):
     source_text = _safe_text(content)
     if not source_text:
@@ -3284,29 +3342,52 @@ def _refine_recipe_structured(content, request_id=None, source_context=None):
 
     started = time.time()
     model = os.getenv('OPENAI_MODEL', 'gpt-4.1-mini')
-    try:
-        client = _openai_client()
-        response = client.chat.completions.create(
-            model=model,
-            temperature=0.1,
-            messages=[
-                {'role': 'system', 'content': _recipe_json_prompt()},
-                {'role': 'user', 'content': source_text},
-            ],
-        )
-        text = _strip_code_fences(response.choices[0].message.content)
-        payload = json.loads(text)
-    except Exception as exc:
+    client = _openai_client()
+    messages = [
+        {'role': 'system', 'content': _recipe_json_prompt()},
+        {'role': 'user', 'content': source_text},
+    ]
+
+    # Attempt 1 forces JSON mode so the model cannot emit malformed/unterminated
+    # JSON. On a parse miss we retry once WITHOUT json_object (fallback for models
+    # that reject it) and best-effort-repair a truncated object. A rare
+    # unrecoverable response degrades to a 422 retry prompt instead of the 502
+    # that was tripping the main-grocery 5xx alarm.
+    payload = None
+    last_error = None
+    max_attempts = 2
+    for attempt in range(1, max_attempts + 1):
+        try:
+            kwargs = {
+                'model': model,
+                'temperature': 0.1,
+                'messages': messages,
+            }
+            if attempt == 1:
+                kwargs['response_format'] = {'type': 'json_object'}
+            response = client.chat.completions.create(**kwargs)
+            payload = _loads_recipe_json(_strip_code_fences(response.choices[0].message.content))
+            if payload is not None:
+                break
+            last_error = 'model returned unparseable recipe JSON'
+        except Exception as exc:
+            last_error = str(exc)
         _log_event(
             request_id,
-            'recipe_refine_failed',
+            'recipe_refine_retry' if attempt < max_attempts else 'recipe_refine_failed',
             model=model,
+            attempt=attempt,
             platform=(source_context or {}).get('platform'),
             resolved_url=(source_context or {}).get('resolved_url'),
             latency_ms=int((time.time() - started) * 1000),
-            failure_reason=str(exc),
+            failure_reason=last_error,
         )
-        raise ServiceError(f'OpenAI refinement failed: {exc}', status_code=502)
+
+    if payload is None:
+        raise ServiceError(
+            'Could not read this recipe right now — please try again.',
+            status_code=422,
+        )
 
     recipe = {
         'title': _safe_text(payload.get('title'))[:255],
