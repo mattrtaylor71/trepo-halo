@@ -1917,57 +1917,58 @@ Rules:
 def _extract_recipe_fragment_from_image(prepared_image, request_id=None, image_index=None):
     client = _openai_client()
     image_reference = f"data:{prepared_image['content_type']};base64,{base64.b64encode(prepared_image['image_bytes']).decode('ascii')}"
-    started = time.time()
-    try:
-        response = client.chat.completions.create(
-            model=_OPENAI_VISION_MODEL,
-            temperature=0.1,
-            messages=[
-                {'role': 'system', 'content': _recipe_image_transcription_prompt()},
-                {
-                    'role': 'user',
-                    'content': [
+    # A transient OpenAI blip was flagging VALID recipe images as not_recipe → the whole
+    # save failed permanently (real case: a Kimchi Beef Stew recipe rejected ~11x, then
+    # read fine on retry). Retry the vision model, then FAIL OVER to the flagship (a
+    # stronger read) before giving up — only a genuinely non-recipe image reaches the 422.
+    fallback_model = os.getenv('OPENAI_RECIPE_VISION_FALLBACK_MODEL', 'gpt-5.4-2026-03-05')
+    attempts = [(_OPENAI_VISION_MODEL, 0.0), (_OPENAI_VISION_MODEL, 0.5), (fallback_model, 0.4)]
+    last_reason = 'not_recipe'
+    for attempt_idx, (model, delay) in enumerate(attempts):
+        if delay:
+            time.sleep(delay)
+        started = time.time()
+        try:
+            kwargs = {
+                'model': model,
+                'messages': [
+                    {'role': 'system', 'content': _recipe_image_transcription_prompt()},
+                    {'role': 'user', 'content': [
                         {'type': 'text', 'text': 'Extract the recipe from this image.'},
                         {'type': 'image_url', 'image_url': {'url': image_reference}},
-                    ],
-                },
-            ],
-        )
-        text = _strip_code_fences(response.choices[0].message.content)
-        payload = json.loads(text)
-    except Exception as exc:
-        _log_event(
-            request_id,
-            'saved_recipe_image_extract_failed',
-            model=_OPENAI_VISION_MODEL,
-            image_index=image_index,
-            latency_ms=int((time.time() - started) * 1000),
-            failure_reason=str(exc),
-        )
-        raise ServiceError(f'Image recipe extraction failed: {exc}', status_code=502)
-
-    content = _safe_text(payload.get('transcribed_text'))
-    if bool(payload.get('not_recipe')) or not content:
-        raise ServiceError('Not enough recipe information.', status_code=422)
-
-    synthetic_url = _manual_recipe_url('image', _sha256(content))
-    author_name = _safe_text(payload.get('author_name')) or None
-    _log_event(
-        request_id,
-        'saved_recipe_image_extract_success',
-        model=_OPENAI_VISION_MODEL,
-        image_index=image_index,
-        latency_ms=int((time.time() - started) * 1000),
-    )
-    return {
-        'image_index': image_index,
-        'title_hint': _safe_text(payload.get('title_hint')),
-        'author_name': author_name,
-        'content': content,
-        'fingerprint': prepared_image['fingerprint'],
-        'source_image_url': prepared_image.get('source_image_url'),
-        'prepared_image': prepared_image,
-    }
+                    ]},
+                ],
+            }
+            # gpt-5.x / o-series reject a custom temperature; only set it for the 4.x model.
+            if not str(model).startswith('gpt-5') and not str(model).startswith('o'):
+                kwargs['temperature'] = 0.1
+            response = client.chat.completions.create(**kwargs)
+            payload = json.loads(_strip_code_fences(response.choices[0].message.content))
+        except Exception as exc:
+            last_reason = str(exc)
+            _log_event(request_id, 'saved_recipe_image_extract_retry', model=model,
+                       image_index=image_index, attempt=attempt_idx + 1, failure_reason=last_reason)
+            continue
+        content = _safe_text(payload.get('transcribed_text'))
+        if not bool(payload.get('not_recipe')) and content:
+            author_name = _safe_text(payload.get('author_name')) or None
+            _log_event(request_id, 'saved_recipe_image_extract_success', model=model,
+                       image_index=image_index, attempt=attempt_idx + 1,
+                       latency_ms=int((time.time() - started) * 1000))
+            return {
+                'image_index': image_index,
+                'title_hint': _safe_text(payload.get('title_hint')),
+                'author_name': author_name,
+                'content': content,
+                'fingerprint': prepared_image['fingerprint'],
+                'source_image_url': prepared_image.get('source_image_url'),
+                'prepared_image': prepared_image,
+            }
+        last_reason = 'not_recipe' if payload.get('not_recipe') else 'empty_transcription'
+        _log_event(request_id, 'saved_recipe_image_extract_retry', model=model,
+                   image_index=image_index, attempt=attempt_idx + 1, failure_reason=last_reason)
+    # All attempts, including the flagship failover, agree it's not a usable recipe.
+    raise ServiceError('Not enough recipe information.', status_code=422)
 
 
 def _build_image_recipe_extraction(content, title_hint='', author_name=None, source='openai_vision'):
