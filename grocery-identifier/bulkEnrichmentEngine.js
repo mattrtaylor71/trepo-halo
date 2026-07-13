@@ -190,6 +190,17 @@ async function maybeEnrichPersistedBulkItem({ owner, itemId, preliminaryItem, in
     return { attempted: true, status: analysis ? "enriched" : "finalized_from_seed" };
   } catch (error) {
     const enrichmentError = error instanceof Error ? error.message : "Unknown enrichment error";
+
+    // Item was deleted or superseded before enrichment ran — common during rapid
+    // bulk re-scan sessions where provisional item ids get replaced. The kitchen API
+    // returns "not found". This is NOT a stuck item: there is nothing to enrich and
+    // nothing to mark final. Skip benignly and do NOT emit a backend_error (it would
+    // pollute the errors feed / trip the enrich alarm with a non-failure).
+    if (/not\s*found/i.test(enrichmentError)) {
+      console.log(`[BulkEnrichment] Item gone before enrichment (deleted/superseded), skipping: owner=${owner} item=${itemId}`);
+      return { attempted: false, status: "skipped_item_gone", message: enrichmentError };
+    }
+
     console.error(`[BulkEnrichment] Enrichment failed for owner=${owner} item=${itemId}:`, enrichmentError);
 
     // Failure path MUST still mark the item final (terminal) so it can never
