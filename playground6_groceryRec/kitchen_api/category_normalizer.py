@@ -71,6 +71,13 @@ def normalize_kitchen_category(raw_category, storage_location=None, product_name
     category guess (exact enum, then keywords), then keywords in the PRODUCT NAME,
     then the storage location, then 'prepared_other'. Never returns None/free-text."""
     raw = ("" if raw_category is None else str(raw_category)).strip().lower()
+    # Hard override: tofu/tempeh/seitan/plant-based proteins are a processed soy/plant
+    # product — NOT produce/a vegetable and NOT meat. Pin them to prepared_other even
+    # when the model confidently guesses 'produce' (user feedback: "this is not a
+    # vegetable"). Leftovers (a home dish) still win.
+    pname = ("" if product_name is None else str(product_name)).lower()
+    if raw != 'leftovers' and re.search(r'\b(tofu|tempeh|seitan)\b', pname):
+        return 'prepared_other'
     if raw in KITCHEN_CATEGORY_ENUM:
         return raw
     return (

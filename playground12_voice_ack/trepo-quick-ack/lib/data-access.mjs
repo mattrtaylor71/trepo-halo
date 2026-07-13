@@ -2578,6 +2578,11 @@ function scanKitchenCategoryKeywords(value) {
 // BOTH the INSERT (voice check-in) and category-UPDATE tool paths clamp through this.
 export function normalizeKitchenCategory(rawCategory, storageLocation, productName) {
   const raw = (rawCategory == null ? "" : String(rawCategory)).trim().toLowerCase();
+  // Hard override: tofu/tempeh/seitan/plant-based proteins are a processed soy/plant
+  // product — NOT produce/a vegetable and NOT meat. Pin to prepared_other even over a
+  // confident 'produce' guess (user feedback: "this is not a vegetable"). Leftovers win.
+  const pname = (productName == null ? "" : String(productName)).toLowerCase();
+  if (raw !== "leftovers" && /\b(tofu|tempeh|seitan)\b/.test(pname)) return "prepared_other";
   if (KITCHEN_CATEGORY_ENUM.has(raw)) return raw;
   return (
     scanKitchenCategoryKeywords(raw) ||
