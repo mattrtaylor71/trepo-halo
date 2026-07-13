@@ -749,7 +749,9 @@ export async function identifyGroceryItem(input: IdentifyImageInput, options: { 
     const response = await openai.responses.create({
       model,
       ...((/^(o[1-9]|gpt-5)/.test(model)) ? { reasoning: { effort: "medium" } } : {}),
-      max_output_tokens: 2200,
+      // Headroom so reasoning tokens (drawn from this budget on gpt-5.x) don't starve the
+      // structured output → "No structured output". 2200 occasionally ran dry under medium.
+      max_output_tokens: 4000,
       text: {
         format: {
           type: "json_schema",

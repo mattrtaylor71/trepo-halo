@@ -193,23 +193,30 @@ async function maybeEnrichPersistedBulkItem({ owner, itemId, preliminaryItem, in
     console.error(`[BulkEnrichment] Enrichment failed for owner=${owner} item=${itemId}:`, enrichmentError);
 
     // Failure path MUST still mark the item final (terminal) so it can never
-    // remain stuck at analysis_stage='preliminary'. Log any patch failure
-    // loudly instead of swallowing it.
+    // remain stuck at analysis_stage='preliminary'. Retry the finalize patch a few
+    // times with backoff — a single transient kitchen_api blip was leaving items
+    // stuck (failed_and_unpatched). Only give up after all retries fail.
+    const finalizePayload = {
+      analysis_stage: "final",
+      analysis_status: "ready",
+      analysis_source: "grocery_identifier_bulk_enrichment",
+      storage_guidance: storageGuidance,
+      ...(storageZoneToLocation(storageGuidance && storageGuidance.storage_zone)
+        ? { storage_location_if_empty: storageZoneToLocation(storageGuidance.storage_zone) }
+        : {}),
+      provisional_payload: {
+        ...(initialPayload?.provisional_payload || {}),
+        enrichment_status: "failed",
+        enrichment_error: enrichmentError,
+      },
+    };
     try {
-      await patchKitchenItem(owner, itemId, {
-        analysis_stage: "final",
-        analysis_status: "ready",
-        analysis_source: "grocery_identifier_bulk_enrichment",
-        storage_guidance: storageGuidance,
-        ...(storageZoneToLocation(storageGuidance && storageGuidance.storage_zone)
-          ? { storage_location_if_empty: storageZoneToLocation(storageGuidance.storage_zone) }
-          : {}),
-        provisional_payload: {
-          ...(initialPayload?.provisional_payload || {}),
-          enrichment_status: "failed",
-          enrichment_error: enrichmentError,
-        },
-      });
+      let lastErr = null;
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        try { await patchKitchenItem(owner, itemId, finalizePayload); lastErr = null; break; }
+        catch (e) { lastErr = e; await new Promise((r) => setTimeout(r, 400 * (attempt + 1))); }
+      }
+      if (lastErr) throw lastErr;
     } catch (patchError) {
       const patchMessage = patchError instanceof Error ? patchError.message : "Unknown patch error";
       console.error(`[BulkEnrichment] Failure-path patch ALSO failed for owner=${owner} item=${itemId}:`, patchMessage);
