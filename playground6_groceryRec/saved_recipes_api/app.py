@@ -3332,7 +3332,12 @@ Return valid JSON only with this exact schema:
 
 Rules:
 - Extract only recipe-relevant information.
-- If there is not enough information to produce a useful recipe, return:
+- An ingredient list is a valid, useful recipe on its own. If the source has a
+  usable list of ingredients but no explicit cooking steps, that is STILL enough:
+  return the title + ingredients and leave "instructions" as []. Do NOT set
+  not_enough just because steps are missing.
+- Only set not_enough=true when there is genuinely nothing to save — no usable
+  ingredients AND no usable instructions:
   {"title":"","ingredients":[],"instructions":[],"notes":[],"not_enough":true}
 - Keep ingredients and instructions concise but useful.
 - Do not return markdown fences or prose outside the JSON object."""
@@ -3488,6 +3493,11 @@ def _refine_recipe_structured(content, request_id=None, source_context=None):
     }
     if not recipe['not_enough'] and not recipe['title'] and not recipe['ingredients'] and not recipe['instructions']:
         recipe['not_enough'] = True
+    # Ingredients-only recipes are valid saves (product decision 2026-07-13). The
+    # refine model is inconsistent about honoring this in the prompt, so override:
+    # if it flagged not_enough but there ARE usable ingredients, keep the recipe.
+    if recipe['not_enough'] and recipe['ingredients']:
+        recipe['not_enough'] = False
 
     _log_event(
         request_id,
