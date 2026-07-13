@@ -296,6 +296,12 @@ Resources:
       Runtime: nodejs20.x
       Timeout: 900
       MemorySize: 2048
+      Environment:
+        Variables:
+          # Cost fix (2026-07-13): the enrich re-identify runs on gpt-5.4-mini. Identity is
+          # kept from the capture-time identify (buildPatchPayload); only detail fields come
+          # from here, so mini is safe. Overrides Globals OPENAI_MODEL for THIS function only.
+          OPENAI_MODEL: gpt-5.4-mini
       Policies:
         - LambdaInvokePolicy:
             FunctionName: !Sub "${AWS::StackName}-enrich-kitchen-item"
