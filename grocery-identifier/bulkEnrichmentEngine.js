@@ -213,6 +213,16 @@ async function maybeEnrichPersistedBulkItem({ owner, itemId, preliminaryItem, in
     } catch (patchError) {
       const patchMessage = patchError instanceof Error ? patchError.message : "Unknown patch error";
       console.error(`[BulkEnrichment] Failure-path patch ALSO failed for owner=${owner} item=${itemId}:`, patchMessage);
+      // Truly-stuck item (enrichment failed AND the finalize patch failed) — the user's
+      // item may never enrich. Emit a backend_error so it surfaces in the errors dashboard.
+      // Only this terminal case is marked; the recoverable OpenAI-retry dribble is not.
+      try {
+        console.error(JSON.stringify({
+          evt: 'backend_error', service: 'enrich', op: 'enrich_kitchen_item',
+          code: 'failed_and_unpatched', owner_id: owner, job_id: itemId,
+          error: String(enrichmentError || patchMessage || 'enrich failed_and_unpatched').slice(0, 300),
+        }));
+      } catch (_) { /* marker best-effort */ }
       return {
         attempted: true,
         status: "failed_and_unpatched",
