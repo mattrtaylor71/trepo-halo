@@ -123,7 +123,7 @@ _CONVERTIBLE_PHONE_EXTENSIONS = {'heic', 'heif', 'avif'}
 _SAVED_RECIPE_SELECT_FIELDS = """_id, _owner, source_type, source_url, resolved_url, title, image_url, image_urls,
                        source_image_url, source_image_urls, image_storage_key,
                        ingredients, instructions, notes, raw_caption, raw_content, extraction_source,
-                       author_name, caption_field, status, _createdDate, _updatedDate"""
+                       author_name, caption_field, status, meal_category, _createdDate, _updatedDate"""
 _OWNER_KITCHEN_STATE_TABLE = 'owner_kitchen_state'
 _OWNER_RECIPE_AVAILABILITY_TABLE = 'owner_recipe_availability'
 # Max saved recipes to LLM-match synchronously in one /personalize call. Cache-read
@@ -426,8 +426,8 @@ def _dual_write_saved_recipe_to_shared(conn, owner, recipe_id, request_id=None):
                         owner_id, _id, _owner, source_type, source_url, resolved_url, resolved_url_hash,
                         title, image_url, image_urls, source_image_url, source_image_urls, image_storage_key,
                         ingredients, instructions, notes, raw_caption, raw_content,
-                        extraction_source, author_name, caption_field, status
-                    ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                        extraction_source, author_name, caption_field, status, meal_category
+                    ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                     ON DUPLICATE KEY UPDATE
                         title=VALUES(title), image_url=VALUES(image_url), image_urls=VALUES(image_urls),
                         source_image_url=VALUES(source_image_url), source_image_urls=VALUES(source_image_urls),
@@ -435,7 +435,7 @@ def _dual_write_saved_recipe_to_shared(conn, owner, recipe_id, request_id=None):
                         instructions=VALUES(instructions), notes=VALUES(notes), raw_caption=VALUES(raw_caption),
                         raw_content=VALUES(raw_content), extraction_source=VALUES(extraction_source),
                         author_name=VALUES(author_name), caption_field=VALUES(caption_field),
-                        status=VALUES(status), _updatedDate=NOW()""",
+                        status=VALUES(status), meal_category=VALUES(meal_category), _updatedDate=NOW()""",
                 (
                     owner, row.get('_id'), row.get('_owner'), row.get('source_type'), row.get('source_url'),
                     row.get('resolved_url'), resolved_url_hash, row.get('title'), row.get('image_url'),
@@ -443,7 +443,7 @@ def _dual_write_saved_recipe_to_shared(conn, owner, recipe_id, request_id=None):
                     row.get('image_storage_key'), _j(row.get('ingredients')), _j(row.get('instructions')),
                     _j(row.get('notes')), row.get('raw_caption'), row.get('raw_content'),
                     row.get('extraction_source'), row.get('author_name'), row.get('caption_field'),
-                    row.get('status') or 'ready',
+                    row.get('status') or 'ready', row.get('meal_category'),
                 ),
             )
         conn.commit()
@@ -642,6 +642,86 @@ def _ensure_saved_recipes_table(conn, owner):
     _ensure_column(conn, table, 'source_image_url', "`source_image_url` VARCHAR(1000) NULL AFTER `image_urls`")
     _ensure_column(conn, table, 'source_image_urls', "`source_image_urls` JSON NULL AFTER `source_image_url`")
     _ensure_column(conn, table, 'image_storage_key', "`image_storage_key` VARCHAR(1000) NULL AFTER `source_image_urls`")
+    # Meal-category grouping in "My Recipes" (breakfast/lunch/dinner/snacks/other).
+    _ensure_column(conn, table, 'meal_category', "`meal_category` VARCHAR(16) NULL AFTER `status`")
+
+
+# Same 4-value taxonomy the recipe generator uses for "Use What I Have", so saved
+# and generated recipes group consistently. 'other' is a last-resort bucket only.
+RECIPE_MEAL_CATEGORIES = ('breakfast', 'lunch', 'dinner', 'snacks')
+
+
+def _meal_category_heuristic(title, ingredients):
+    """Keyword fallback used only when the LLM classify call fails. Returns one of
+    the 4 categories or None (never a round-robin guess — a wrong label is worse
+    than no label, which renders as 'other')."""
+    hay = ' '.join([str(title or '').lower()] + [str(i or '').lower() for i in (ingredients or [])])
+    keyword_groups = [
+        ('breakfast', ('breakfast', 'omelet', 'omelette', 'oatmeal', 'pancake', 'waffle', 'bagel',
+                       'french toast', 'cereal', 'granola', 'frittata', 'hash brown', 'scramble', 'egg')),
+        ('snacks', ('snack', 'dessert', 'cookie', 'brownie', 'cake', 'muffin', 'dip', 'bites',
+                    'energy ball', 'protein ball', 'trail mix', 'parfait', 'popcorn', 'chips',
+                    'cracker', 'smoothie', 'granola bar')),
+        ('lunch', ('lunch', 'sandwich', 'wrap', 'salad', 'soup', 'quesadilla', 'panini')),
+        ('dinner', ('dinner', 'pasta', 'curry', 'stir-fry', 'stir fry', 'skillet', 'roast',
+                    'casserole', 'lasagna', 'risotto', 'chili', 'enchilada', 'steak')),
+    ]
+    for category, keywords in keyword_groups:
+        if any(k in hay for k in keywords):
+            return category
+    return None
+
+
+def _classify_meal_category(title, ingredients, request_id=None):
+    """Classify a recipe into one meal category. LLM-primary (accurate), heuristic
+    fallback on LLM failure, 'other' as a last resort. Used both on save and by the
+    one-time backfill."""
+    title = _safe_text(title)
+    ings = [_safe_text(i) for i in (ingredients or []) if _safe_text(i)]
+    if not title and not ings:
+        return 'other'
+    try:
+        client = _openai_client()
+        model = os.getenv('OPENAI_MEAL_CATEGORY_MODEL') or os.getenv('OPENAI_MODEL', 'gpt-4.1-mini')
+        system = (
+            "You classify a recipe into exactly one meal category. "
+            "Respond ONLY with JSON: {\"meal_category\": \"<value>\"} where value is one of: "
+            "breakfast, lunch, dinner, snacks. Use 'snacks' for desserts, sweets, baked goods, "
+            "dips, drinks, and small bites. Pick the single best fit."
+        )
+        user = f"Title: {title}\nIngredients: {', '.join(ings[:20])}"
+        response = client.chat.completions.create(
+            model=model,
+            temperature=0,
+            response_format={'type': 'json_object'},
+            messages=[{'role': 'system', 'content': system}, {'role': 'user', 'content': user}],
+        )
+        payload = json.loads(_strip_code_fences(response.choices[0].message.content) or '{}')
+        category = _safe_text(payload.get('meal_category')).lower()
+        if category in RECIPE_MEAL_CATEGORIES:
+            return category
+    except Exception as exc:
+        _log_event(request_id, 'meal_category_llm_failed', error=str(exc))
+    return _meal_category_heuristic(title, ings) or 'other'
+
+
+def _apply_saved_recipe_meal_category(conn, owner, recipe_id, title, ingredients, request_id=None):
+    """Classify + persist meal_category onto the owner's saved-recipe row. Called
+    right BEFORE the shared dual-write so the mirror picks it up. Non-blocking: a
+    failure leaves meal_category NULL (renders as 'other'; backfill/next-write fixes)."""
+    try:
+        category = _classify_meal_category(title, ingredients, request_id=request_id)
+        table = _saved_recipes_table(owner)
+        with conn.cursor() as cur:
+            cur.execute(
+                f"UPDATE `{table}` SET meal_category = %s WHERE _id = %s AND _owner = %s",
+                (category, recipe_id, owner),
+            )
+        conn.commit()
+        return category
+    except Exception as exc:
+        _log_event(request_id, 'meal_category_persist_failed', owner=owner, recipe_id=recipe_id, error=str(exc))
+        return None
 
 
 def _ensure_owner_kitchen_state_table(conn):
@@ -3736,6 +3816,12 @@ def _handle_async_saved_recipe_text_task(event, request_id=None):
             _, overlay_row = _serialize_saved_recipe_with_availability(
                 conn, owner, row, kitchen_context=kitchen_context, request_id=request_id)
             _persist_owner_recipe_availability_rows(conn, [overlay_row])
+            _apply_saved_recipe_meal_category(
+                conn, owner, recipe_id,
+                structured_recipe['title'] or extraction.get('title'),
+                structured_recipe['ingredients'],
+                request_id=request_id,
+            )
             _dual_write_saved_recipe_to_shared(conn, owner, recipe_id, request_id=request_id)
             try:
                 _fan_out_saved_recipe_to_household(conn, owner, recipe_id, request_id=request_id)
@@ -4302,6 +4388,14 @@ def _save_saved_recipe_record(conn, owner, extraction, request_id=None, prepared
         platform=extraction['platform'],
         resolved_url=extraction['resolved_url'],
         extraction_source=extraction['source'],
+    )
+    # Classify meal category (breakfast/lunch/dinner/snacks) for "My Recipes" grouping,
+    # BEFORE the dual-write so the shared mirror carries it too.
+    _apply_saved_recipe_meal_category(
+        conn, owner, recipe_id,
+        structured_recipe['title'] or extraction.get('title'),
+        structured_recipe['ingredients'],
+        request_id=request_id,
     )
     # Migration dual-write to shared_saved_recipes (flag-gated, non-blocking).
     _dual_write_saved_recipe_to_shared(conn, owner, recipe_id, request_id=request_id)
