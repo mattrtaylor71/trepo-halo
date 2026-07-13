@@ -31,6 +31,10 @@ INGREDIENT_NOISE_TOKENS = {
     'heavy', 'full', 'half', 'quarter', 'third', 'basically', 'overflowing', 'not',
     'really', 'very', 'super', 'like', 'the', 'your', 'my', 'any', 'all', 'no',
     'amount', 'generou', 'generous',
+    # 'purpose' only ever appears in "all-purpose" (flour); stripping it keeps
+    # "all-purpose flour" -> ["flour"] so it classifies as a pantry staple,
+    # consistent with plain "flour"/"plain flour" (was inconsistently 'missing').
+    'purpose',
 }
 PANTRY_CANONICAL_INGREDIENTS = {
     'salt', 'kosher salt', 'sea salt', 'table salt', 'flaky salt',

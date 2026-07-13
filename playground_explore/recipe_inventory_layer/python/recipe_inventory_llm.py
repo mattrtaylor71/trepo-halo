@@ -1,3 +1,4 @@
+# Ingredient matching layer — merge + noise tokens update 2026-05-18
 import json
 import os
 import re
@@ -23,6 +24,17 @@ INGREDIENT_NOISE_TOKENS = {
     'deseeded', 'peeled', 'trimmed', 'rinsed', 'drained', 'crushed', 'pressed', 'grated',
     'juiced', 'zested', 'squeezed', 'melted', 'softened', 'thawed', 'warmed', 'chilled',
     'room', 'temperature', 'beaten', 'whisked', 'sifted', 'toasted', 'roasted',
+    # Quantity/descriptor words from natural-language recipe amounts
+    'little', 'less', 'than', 'just', 'under', 'over', 'around', 'approximately',
+    'generous', 'heaping', 'scant', 'level', 'splash', 'drizzle', 'handful', 'bit',
+    'some', 'few', 'several', 'couple', 'good', 'big', 'tiny', 'slight', 'light',
+    'heavy', 'full', 'half', 'quarter', 'third', 'basically', 'overflowing', 'not',
+    'really', 'very', 'super', 'like', 'the', 'your', 'my', 'any', 'all', 'no',
+    'amount', 'generou', 'generous',
+    # 'purpose' only ever appears in "all-purpose" (flour); stripping it keeps
+    # "all-purpose flour" -> ["flour"] so it classifies as a pantry staple,
+    # consistent with plain "flour"/"plain flour" (was inconsistently 'missing').
+    'purpose',
 }
 PANTRY_CANONICAL_INGREDIENTS = {
     'salt', 'kosher salt', 'sea salt', 'table salt', 'flaky salt',
@@ -50,34 +62,6 @@ INGREDIENT_CONFLICT_TOKENS = {
     'sauce', 'seasoning', 'seasonings', 'shrimp', 'spinach', 'stock', 'strawberry', 'sugar',
     'tomatillo', 'tomato', 'tuna', 'turkey', 'vinegar', 'yogurt',
 }
-
-# A generic category token (e.g. "cheese") is redundant — NOT a real conflict — when a
-# specific variety of that category (e.g. "parmesan") is already present in the match
-# context. Without this, the conflict-token guard wrongly blocks valid matches like
-# kitchen "Parmesan" vs recipe "parmesan cheese". It must NOT loosen genuine conflicts:
-# kitchen "cream" vs recipe "cream cheese" still fails (no cheese variety present).
-CATEGORY_VARIETY_TOKENS = {
-    'cheese': {
-        'parmesan', 'parmigiano', 'reggiano', 'cheddar', 'mozzarella', 'feta', 'gouda',
-        'brie', 'provolone', 'gruyere', 'asiago', 'romano', 'pecorino', 'ricotta',
-        'mascarpone', 'manchego', 'colby', 'swiss', 'havarti', 'gorgonzola', 'fontina',
-        'halloumi', 'paneer', 'cotija', 'burrata', 'camembert', 'edam', 'emmental',
-        'jarlsberg', 'muenster', 'queso',
-    },
-}
-
-
-def strip_redundant_category_conflicts(conflict_tokens, context_tokens):
-    """Drop category conflict tokens (e.g. 'cheese') that are redundant because a specific
-    variety of that category (e.g. 'parmesan') is present in context_tokens."""
-    if not conflict_tokens:
-        return conflict_tokens
-    return {
-        t for t in conflict_tokens
-        if not (CATEGORY_VARIETY_TOKENS.get(t) and (context_tokens & CATEGORY_VARIETY_TOKENS[t]))
-    }
-
-
 DEFAULT_MATCH_TYPE = 'llm_match'
 
 
@@ -110,6 +94,22 @@ def _singularize_token(token):
     return token
 
 
+_COMPOUND_WORD_SPLITS = {
+    'flaxseed': ['flax', 'seed'], 'chickpea': ['chick', 'pea'], 'cornstarch': ['corn', 'starch'],
+    'cornmeal': ['corn', 'meal'], 'oatmeal': ['oat', 'meal'], 'applesauce': ['apple', 'sauce'],
+    'buttermilk': ['butter', 'milk'], 'sourdough': ['sour', 'dough'], 'breadcrumb': ['bread', 'crumb'],
+    'popcorn': ['pop', 'corn'], 'arrowroot': ['arrow', 'root'], 'beeswax': ['bee', 'wax'],
+    'cheesecloth': ['cheese', 'cloth'], 'eggplant': ['egg', 'plant'], 'grapefruit': ['grape', 'fruit'],
+    'horseradish': ['horse', 'radish'], 'peppercorn': ['pepper', 'corn'], 'sugarcane': ['sugar', 'cane'],
+    'sunflower': ['sun', 'flower'], 'watercress': ['water', 'cress'], 'watermelon': ['water', 'melon'],
+    'wheatgerm': ['wheat', 'germ'], 'sweetpotato': ['sweet', 'potato'], 'sourcream': ['sour', 'cream'],
+    'creamcheese': ['cream', 'cheese'], 'peanutbutter': ['peanut', 'butter'],
+    'almondbutter': ['almond', 'butter'], 'cashewbutter': ['cashew', 'butter'],
+    'coconutmilk': ['coconut', 'milk'], 'almondmilk': ['almond', 'milk'],
+    'oatmilk': ['oat', 'milk'], 'soymilk': ['soy', 'milk'], 'ricemilk': ['rice', 'milk'],
+}
+
+
 def ingredient_tokens(text):
     cleaned = unescape(_safe_text(text).lower())
     cleaned = re.sub(r'\([^)]*\)', ' ', cleaned)
@@ -124,7 +124,11 @@ def ingredient_tokens(text):
         token = _singularize_token(raw)
         if not token or token in INGREDIENT_NOISE_TOKENS:
             continue
-        tokens.append(token)
+        # Split known compound words so "flaxseed" → ["flax", "seed"]
+        if token in _COMPOUND_WORD_SPLITS:
+            tokens.extend(_COMPOUND_WORD_SPLITS[token])
+        else:
+            tokens.append(token)
     return tokens
 
 
@@ -172,6 +176,33 @@ def _openai_client():
     return OpenAI(api_key=api_key, timeout=timeout_seconds, max_retries=max_retries)
 
 
+# A generic category token (e.g. "cheese") is redundant — NOT a real conflict — when a
+# specific variety of that category (e.g. "parmesan") is already present in the match
+# context. Without this, the conflict-token guard wrongly blocks valid matches like
+# kitchen "Parmesan" vs recipe "parmesan cheese". It must NOT loosen genuine conflicts:
+# kitchen "cream" vs recipe "cream cheese" still fails (no cheese variety present).
+_CATEGORY_VARIETY_TOKENS = {
+    'cheese': {
+        'parmesan', 'parmigiano', 'reggiano', 'cheddar', 'mozzarella', 'feta', 'gouda',
+        'brie', 'provolone', 'gruyere', 'asiago', 'romano', 'pecorino', 'ricotta',
+        'mascarpone', 'manchego', 'colby', 'swiss', 'havarti', 'gorgonzola', 'fontina',
+        'halloumi', 'paneer', 'cotija', 'burrata', 'camembert', 'edam', 'emmental',
+        'jarlsberg', 'muenster', 'queso',
+    },
+}
+
+
+def _strip_redundant_category_conflicts(conflict_tokens, context_tokens):
+    """Drop category conflict tokens (e.g. 'cheese') that are redundant because a specific
+    variety of that category (e.g. 'parmesan') is present in context_tokens."""
+    if not conflict_tokens:
+        return conflict_tokens
+    return {
+        t for t in conflict_tokens
+        if not (_CATEGORY_VARIETY_TOKENS.get(t) and (context_tokens & _CATEGORY_VARIETY_TOKENS[t]))
+    }
+
+
 def _score_kitchen_candidate(recipe_tokens, candidate_tokens):
     recipe_set = set(recipe_tokens or [])
     candidate_set = set(candidate_tokens or [])
@@ -182,7 +213,7 @@ def _score_kitchen_candidate(recipe_tokens, candidate_tokens):
     context_tokens = recipe_set | candidate_set
     # Forward: recipe tokens fully contained in kitchen item tokens
     extra_tokens = candidate_set - recipe_set
-    forward_conflicts = strip_redundant_category_conflicts(
+    forward_conflicts = _strip_redundant_category_conflicts(
         {t for t in extra_tokens if t in INGREDIENT_CONFLICT_TOKENS}, context_tokens)
     if recipe_set.issubset(candidate_set) and not forward_conflicts:
         return 200 + (len(recipe_set) * 10) - max(0, len(candidate_set) - len(recipe_set))
@@ -190,7 +221,7 @@ def _score_kitchen_candidate(recipe_tokens, candidate_tokens):
     # Catches cases where recipe has extra prep/quantity words (e.g. "1 pound chicken breast cut into chunks" vs "Chicken Breasts")
     if candidate_set.issubset(recipe_set):
         recipe_extra = recipe_set - candidate_set
-        conflict_in_extra = strip_redundant_category_conflicts(
+        conflict_in_extra = _strip_redundant_category_conflicts(
             {t for t in recipe_extra if t in INGREDIENT_CONFLICT_TOKENS}, context_tokens)
         if not conflict_in_extra:
             return 150 + (len(candidate_set) * 10) - max(0, len(recipe_set) - len(candidate_set))
@@ -637,10 +668,23 @@ def _normalize_compact_llm_result(recipe, compact_matches, kitchen_context, subs
         if is_pantry_ingredient(ingredient):
             match_status = 'pantry'
             kitchen_name = ''
-        # Resolve kitchen item reference
+        # Resolve kitchen item reference (best-effort for display — LLM verdict is trusted)
         matched_kitchen_items = []
         if match_status == 'have' and kitchen_name:
             candidate = by_display_name.get(kitchen_name.lower())
+            if not candidate:
+                # Fuzzy fallback: try token-based matching for display purposes
+                llm_tokens = ingredient_tokens(kitchen_name)
+                if llm_tokens:
+                    best_candidate = None
+                    best_score = -1
+                    for c in (kitchen_context or {}).get('kitchen_candidates') or []:
+                        score = _score_kitchen_candidate(llm_tokens, c.get('tokens') or [])
+                        if score > best_score:
+                            best_score = score
+                            best_candidate = c
+                    if best_candidate:
+                        candidate = best_candidate
             if candidate:
                 matched_kitchen_items.append({
                     'item_id': _safe_text((candidate or {}).get('item_id')) or None,
@@ -648,10 +692,12 @@ def _normalize_compact_llm_result(recipe, compact_matches, kitchen_context, subs
                     'match_type': DEFAULT_MATCH_TYPE,
                 })
             else:
-                # LLM returned a name we can't resolve — mark missing instead
-                match_status = 'missing'
-        if match_status == 'have' and not matched_kitchen_items:
-            match_status = 'missing'
+                # Can't resolve to a specific item but LLM says we have it — trust it
+                matched_kitchen_items.append({
+                    'item_id': None,
+                    'display_name': kitchen_name,
+                    'match_type': 'llm_match',
+                })
         # Resolve substitute reference
         substitute_kitchen_items = []
         if match_status == 'missing' and sub_name:
@@ -726,6 +772,43 @@ def _compact_llm_call_single(client, model, kitchen_items, recipe, kitchen_conte
         return recipe_id, None
 
 
+def _merge_availability(det, llm):
+    """Merge deterministic and LLM results: if either says 'have', it's 'have'.
+    LLM is the base; deterministic upgrades any 'missing' to 'have' where it found a match."""
+    det_matches = {
+        _safe_text(m.get('recipe_ingredient')).lower(): m
+        for m in (det.get('ingredient_matches') or [])
+        if _safe_text(m.get('recipe_ingredient'))
+    }
+    merged_matches = []
+    matched_count = 0
+    missing_count = 0
+    missing_ingredients = []
+    for llm_match in (llm.get('ingredient_matches') or []):
+        ingredient = _safe_text(llm_match.get('recipe_ingredient'))
+        det_match = det_matches.get(ingredient.lower()) if ingredient else None
+        merged = dict(llm_match)
+        # If LLM says missing but deterministic says have → upgrade to have
+        if merged.get('match_status') == 'missing' and det_match and det_match.get('match_status') == 'have':
+            merged['match_status'] = 'have'
+            merged['matched_kitchen_items'] = det_match.get('matched_kitchen_items') or []
+            merged['missing_reason'] = None
+        if merged.get('match_status') in {'have', 'pantry'}:
+            matched_count += 1
+        else:
+            missing_count += 1
+            if ingredient:
+                missing_ingredients.append(ingredient)
+        merged_matches.append(merged)
+    result = dict(llm)
+    result['ingredient_matches'] = merged_matches
+    result['matched_count'] = matched_count
+    result['missing_count'] = missing_count
+    result['missing_ingredients'] = missing_ingredients
+    result['can_make_exact'] = missing_count == 0
+    return result
+
+
 def match_recipes_fast(recipes, kitchen_context, request_id=None, log_fn=None, source_label='inventory', substitution_callback=None):
     """Hybrid matching: deterministic first, then parallel compact LLM calls per recipe."""
     recipes = [dict(recipe or {}) for recipe in (recipes or []) if _safe_text((recipe or {}).get('id') or (recipe or {}).get('_id'))]
@@ -765,7 +848,7 @@ def match_recipes_fast(recipes, kitchen_context, request_id=None, log_fn=None, s
     normalized = dict(deterministic_results)  # start with deterministic, upgrade with LLM
     llm_success_count = 0
 
-    max_workers = min(len(recipes), 5)
+    max_workers = min(len(recipes), int(os.getenv('OPENAI_INVENTORY_MAX_WORKERS', '12')))
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = {
             executor.submit(
@@ -776,7 +859,9 @@ def match_recipes_fast(recipes, kitchen_context, request_id=None, log_fn=None, s
         for future in as_completed(futures):
             recipe_id, llm_result = future.result()
             if llm_result is not None:
-                normalized[recipe_id] = llm_result
+                # Merge: if either LLM or deterministic says "have", it's "have"
+                det_result = deterministic_results.get(recipe_id)
+                normalized[recipe_id] = _merge_availability(det_result, llm_result) if det_result else llm_result
                 llm_success_count += 1
 
     meta['latency_ms'] = int((time.monotonic() - started_at) * 1000)
