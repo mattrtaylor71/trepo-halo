@@ -320,18 +320,25 @@ def _get_kitchen_items_for_matching(conn, owner):
             # Fallback: legacy per-owner table, so dormant owners not yet in
             # shared_kitchen are not shown an empty kitchen.
             legacy = f"{owner}_prod_kitchen"
+            # Legacy per-owner tables have drifted schemas — only reference columns
+            # that actually exist (some predate analysis_stage/status/product_description).
             cur.execute(
-                "SELECT COUNT(*) AS n FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = %s",
+                "SELECT column_name FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = %s",
                 [legacy],
             )
-            if (cur.fetchone() or {}).get("n", 0):
-                cur.execute(
-                    f"SELECT `product_name`, `product_description` FROM `{legacy}` "
-                    "WHERE `action` = 'IN' "
-                    "AND (`analysis_stage` = 'final' OR `analysis_stage` IS NULL) "
-                    "AND (`analysis_status` = 'ready' OR `analysis_status` IS NULL) "
-                    "ORDER BY COALESCE(`_updatedDate`, `_createdDate`) DESC, `_createdDate` DESC"
-                )
+            legacy_cols = {
+                (r.get("column_name") or r.get("COLUMN_NAME") or "").strip()
+                for r in (cur.fetchall() or [])
+            }
+            if "product_name" in legacy_cols and "action" in legacy_cols:
+                fields = "`product_name`" + (", `product_description`" if "product_description" in legacy_cols else "")
+                where = ["`action` = 'IN'"]
+                if "analysis_stage" in legacy_cols:
+                    where.append("(`analysis_stage` = 'final' OR `analysis_stage` IS NULL)")
+                if "analysis_status" in legacy_cols:
+                    where.append("(`analysis_status` = 'ready' OR `analysis_status` IS NULL)")
+                order = " ORDER BY COALESCE(`_updatedDate`, `_createdDate`) DESC, `_createdDate` DESC" if "_createdDate" in legacy_cols else ""
+                cur.execute(f"SELECT {fields} FROM `{legacy}` WHERE {' AND '.join(where)}{order}")
                 rows = cur.fetchall() or []
     items = []
     seen = set()
