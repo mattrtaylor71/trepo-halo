@@ -232,28 +232,40 @@ def _get_recipes(owner):
 
         is_stale = (kitchen_version > recipe_generation_version) if kitchen_version > 0 else False
 
+        # Shared-table read cutover (reversible via env flag, default off = per-owner).
+        # MANDATORY owner_id filter — shared_recipes holds every owner's row.
+        use_shared = os.getenv('READ_SHARED_RECIPES', '').strip().lower() == 'true'
+        empty_response = {
+            'owner': owner,
+            'status': 'empty',
+            'kitchen_only': [],
+            'need_grocery': [],
+            'error_message': None,
+            '_createdDate': None,
+            '_updatedDate': None,
+            'kitchen_version': kitchen_version,
+            'recipe_generation_version': recipe_generation_version,
+            'is_stale': is_stale,
+        }
         with conn.cursor() as cur:
-            cur.execute("""
-                SELECT COUNT(*) AS n FROM information_schema.tables
-                WHERE table_schema = DATABASE() AND table_name = %s
-            """, [table])
-            if cur.fetchone()['n'] == 0:
-                return _success({
-                    'owner': owner,
-                    'status': 'empty',
-                    'kitchen_only': [],
-                    'need_grocery': [],
-                    'error_message': None,
-                    '_createdDate': None,
-                    '_updatedDate': None,
-                    'kitchen_version': kitchen_version,
-                    'recipe_generation_version': recipe_generation_version,
-                    'is_stale': is_stale,
-                })
-            cur.execute(
-                f"SELECT _id, _owner, status, kitchen_only, need_grocery, error_message, _createdDate, _updatedDate FROM `{table}` WHERE _id = 'current'",
-            )
-            row = cur.fetchone()
+            if use_shared:
+                cur.execute(
+                    "SELECT _id, _owner, status, kitchen_only, need_grocery, error_message, _createdDate, _updatedDate "
+                    "FROM shared_recipes WHERE owner_id = %s",
+                    [owner],
+                )
+                row = cur.fetchone()
+            else:
+                cur.execute("""
+                    SELECT COUNT(*) AS n FROM information_schema.tables
+                    WHERE table_schema = DATABASE() AND table_name = %s
+                """, [table])
+                if cur.fetchone()['n'] == 0:
+                    return _success(empty_response)
+                cur.execute(
+                    f"SELECT _id, _owner, status, kitchen_only, need_grocery, error_message, _createdDate, _updatedDate FROM `{table}` WHERE _id = 'current'",
+                )
+                row = cur.fetchone()
         if not row:
             return _success({
                 'owner': owner,
