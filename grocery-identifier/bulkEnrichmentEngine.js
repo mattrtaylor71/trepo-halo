@@ -1,6 +1,7 @@
 const fetch = require("node-fetch");
 const { analyzeProduct } = require("./dist/services/analyzeProduct");
 const { estimateStorageGuidance } = require("./dist/utils/estimateStorageGuidance");
+const { assignEmojiToItem } = require("./dist/openai/assignEmoji");
 const { storageZoneToLocation } = require("./storageGuidance");
 
 // Fields the kitchen API stores in JSON columns. The kitchen API's UPDATE
@@ -175,7 +176,17 @@ async function maybeEnrichPersistedBulkItem({ owner, itemId, preliminaryItem, in
     // buildPatchPayload keeps the confirmed identity (product_name/brand/etc.)
     // from initialPayload and only layers enrichment fields from `analysis`
     // (null analysis -> empty enrichment fields, finalized from the seed identity).
-    await patchKitchenItem(owner, itemId, buildPatchPayload(preliminaryItem, initialPayload, analysis, storageGuidance));
+    const patch = buildPatchPayload(preliminaryItem, initialPayload, analysis, storageGuidance);
+    // Text-added items arrive with no photo (product_image_url null). Give them an
+    // emoji placeholder — the same `emoji:<x>` convention scanned/voice items use —
+    // so they render an icon instead of a blank tile. Only fills when empty, so items
+    // that already have a real image or emoji are never clobbered.
+    if (!patch.product_image_url) {
+      const emoji = await assignEmojiToItem(seed);
+      patch.product_image_url = `emoji:${emoji}`;
+      patch.resized_image_url = `emoji:${emoji}`;
+    }
+    await patchKitchenItem(owner, itemId, patch);
     return { attempted: true, status: analysis ? "enriched" : "finalized_from_seed" };
   } catch (error) {
     const enrichmentError = error instanceof Error ? error.message : "Unknown enrichment error";
