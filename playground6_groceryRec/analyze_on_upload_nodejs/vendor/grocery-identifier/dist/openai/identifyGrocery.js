@@ -619,57 +619,60 @@ async function identifyGroceryItem(input, options = {}) {
         }
         const model = (0, client_1.getOpenAIModel)();
         // Fast in-handler retry: a single "No structured output" / ZodError blip
-        // otherwise fails the invocation (the Merlot-saga class). Retry the
-        // model call + parse once immediately before giving up.
+        // otherwise fails the invocation (the Merlot-saga class). Retry once immediately.
         let result;
         let _identifyLastErr = null;
         for (let _identifyAttempt = 0; _identifyAttempt < 2; _identifyAttempt += 1) {
-          try {
-        const response = await openai.responses.create({
-            model,
-            ...((/^(o[1-9]|gpt-5)/.test(model)) ? { reasoning: { effort: "medium" } } : {}),
-            max_output_tokens: 2200,
-            text: {
-                format: {
-                    type: "json_schema",
-                    name: "grocery_item",
-                    strict: true,
-                    schema: groceryItemJsonSchema,
-                },
-            },
-            input: [
-                {
-                    role: "system",
-                    content: [
+            try {
+                const response = await openai.responses.create({
+                    model,
+                    ...((/^(o[1-9]|gpt-5)/.test(model)) ? { reasoning: { effort: "medium" } } : {}),
+                    max_output_tokens: 2200,
+                    text: {
+                        format: {
+                            type: "json_schema",
+                            name: "grocery_item",
+                            strict: true,
+                            schema: groceryItemJsonSchema,
+                        },
+                    },
+                    input: [
                         {
-                            type: "input_text",
-                            text: systemText,
+                            role: "system",
+                            content: [
+                                {
+                                    type: "input_text",
+                                    text: systemText,
+                                },
+                            ],
+                        },
+                        {
+                            role: "user",
+                            content: [
+                                {
+                                    type: "input_text",
+                                    text: `Analyze this grocery or beverage product image and extract the product identity, label details, likely price range, and a few concise product alternatives. Use the image plus the first-pass label evidence below. Do not invent store links or pretend to browse.\n\n${buildEvidencePrompt(labelEvidence)}`,
+                                },
+                                buildImageContent(input),
+                            ],
                         },
                     ],
-                },
-                {
-                    role: "user",
-                    content: [
-                        {
-                            type: "input_text",
-                            text: `Analyze this grocery or beverage product image and extract the product identity, label details, likely price range, and a few concise product alternatives. Use the image plus the first-pass label evidence below. Do not invent store links or pretend to browse.\n\n${buildEvidencePrompt(labelEvidence)}`,
-                        },
-                        buildImageContent(input),
-                    ],
-                },
-            ],
-        });
-        const parsed = (0, client_1.parseJsonResponse)(response);
-        result = mergeLabelEvidenceIntoItem(exports.GroceryItemSchema.parse(parsed), labelEvidence);
-        if (_identifyAttempt > 0) {
-            console.log(JSON.stringify({ evt: "openai_fast_retry_saved", service: "grocery_identify", op: "identify_deep" }));
-        }
-        break;
-          } catch (_identifyErr) {
-            _identifyLastErr = _identifyErr;
-            if (_identifyAttempt === 0) { await new Promise((r) => setTimeout(r, 2500)); continue; }
-            throw _identifyLastErr;
-          }
+                });
+                const parsed = (0, client_1.parseJsonResponse)(response);
+                result = mergeLabelEvidenceIntoItem(exports.GroceryItemSchema.parse(parsed), labelEvidence);
+                if (_identifyAttempt > 0) {
+                    console.log(JSON.stringify({ evt: "openai_fast_retry_saved", service: "grocery_identify", op: "identify_deep" }));
+                }
+                break;
+            }
+            catch (_identifyErr) {
+                _identifyLastErr = _identifyErr;
+                if (_identifyAttempt === 0) {
+                    await new Promise((r) => setTimeout(r, 2500));
+                    continue;
+                }
+                throw _identifyLastErr;
+            }
         }
         // Normalize UPF flag (model may emit "Yes"/null/etc.)
         result.upf = normalizeUpf(result.upf);

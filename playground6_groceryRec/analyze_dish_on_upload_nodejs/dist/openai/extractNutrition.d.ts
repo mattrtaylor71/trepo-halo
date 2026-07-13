@@ -1,0 +1,75 @@
+import { z } from "zod";
+export declare const NutritionSchema: z.ZodObject<{
+    dish_name: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+    serving_size: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+    calories: z.ZodOptional<z.ZodNullable<z.ZodNumber>>;
+    total_fat: z.ZodOptional<z.ZodNullable<z.ZodNumber>>;
+    saturated_fat: z.ZodOptional<z.ZodNullable<z.ZodNumber>>;
+    trans_fat: z.ZodOptional<z.ZodNullable<z.ZodNumber>>;
+    cholesterol: z.ZodOptional<z.ZodNullable<z.ZodNumber>>;
+    sodium: z.ZodOptional<z.ZodNullable<z.ZodNumber>>;
+    total_carbohydrates: z.ZodOptional<z.ZodNullable<z.ZodNumber>>;
+    dietary_fiber: z.ZodOptional<z.ZodNullable<z.ZodNumber>>;
+    sugars: z.ZodOptional<z.ZodNullable<z.ZodNumber>>;
+    protein: z.ZodOptional<z.ZodNullable<z.ZodNumber>>;
+    vitamin_a: z.ZodOptional<z.ZodNullable<z.ZodNumber>>;
+    vitamin_c: z.ZodOptional<z.ZodNullable<z.ZodNumber>>;
+    calcium: z.ZodOptional<z.ZodNullable<z.ZodNumber>>;
+    iron: z.ZodOptional<z.ZodNullable<z.ZodNumber>>;
+    confidence: z.ZodUnion<[z.ZodNumber, z.ZodEffects<z.ZodString, number, string>, z.ZodEffects<z.ZodObject<{}, "passthrough", z.ZodTypeAny, z.objectOutputType<{}, z.ZodTypeAny, "passthrough">, z.objectInputType<{}, z.ZodTypeAny, "passthrough">>, number, z.objectInputType<{}, z.ZodTypeAny, "passthrough">>, z.ZodEffects<z.ZodAny, number, any>]>;
+    explanation: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+    ingredients: z.ZodDefault<z.ZodOptional<z.ZodArray<z.ZodString, "many">>>;
+    allergens: z.ZodDefault<z.ZodOptional<z.ZodArray<z.ZodString, "many">>>;
+}, "strip", z.ZodTypeAny, {
+    confidence: number;
+    ingredients: string[];
+    allergens: string[];
+    dish_name?: string | null | undefined;
+    serving_size?: string | null | undefined;
+    calories?: number | null | undefined;
+    total_fat?: number | null | undefined;
+    saturated_fat?: number | null | undefined;
+    trans_fat?: number | null | undefined;
+    cholesterol?: number | null | undefined;
+    sodium?: number | null | undefined;
+    total_carbohydrates?: number | null | undefined;
+    dietary_fiber?: number | null | undefined;
+    sugars?: number | null | undefined;
+    protein?: number | null | undefined;
+    vitamin_a?: number | null | undefined;
+    vitamin_c?: number | null | undefined;
+    calcium?: number | null | undefined;
+    iron?: number | null | undefined;
+    explanation?: string | null | undefined;
+}, {
+    dish_name?: string | null | undefined;
+    serving_size?: string | null | undefined;
+    calories?: number | null | undefined;
+    total_fat?: number | null | undefined;
+    saturated_fat?: number | null | undefined;
+    trans_fat?: number | null | undefined;
+    cholesterol?: number | null | undefined;
+    sodium?: number | null | undefined;
+    total_carbohydrates?: number | null | undefined;
+    dietary_fiber?: number | null | undefined;
+    sugars?: number | null | undefined;
+    protein?: number | null | undefined;
+    vitamin_a?: number | null | undefined;
+    vitamin_c?: number | null | undefined;
+    calcium?: number | null | undefined;
+    iron?: number | null | undefined;
+    confidence?: any;
+    explanation?: string | null | undefined;
+    ingredients?: string[] | undefined;
+    allergens?: string[] | undefined;
+}>;
+export type NutritionData = z.infer<typeof NutritionSchema>;
+/** When recharacterizing, pass current row state so the model preserves previous corrections and only applies the new one. */
+export interface ExistingNutritionContext {
+    dish_name?: string | null;
+    explanation?: string | null;
+    serving_size?: string | null;
+    ingredients?: string[] | string | null;
+    allergens?: string[] | string | null;
+}
+export declare function extractNutrition(imageBuffer: Buffer, userCorrection?: string | null, existingContext?: ExistingNutritionContext | null): Promise<NutritionData>;
