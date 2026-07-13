@@ -62,34 +62,6 @@ INGREDIENT_CONFLICT_TOKENS = {
     "sauce", "seasoning", "seasonings", "shrimp", "spinach", "stock", "strawberry", "sugar",
     "tomatillo", "tomato", "tuna", "turkey", "vinegar", "yogurt",
 }
-
-# A generic category token (e.g. "cheese") is redundant — NOT a real conflict — when a
-# specific variety of that category (e.g. "parmesan") is already present in the match
-# context. Without this, the conflict-token guard wrongly blocks valid matches like
-# kitchen "Parmesan" vs recipe "parmesan cheese". It must NOT loosen genuine conflicts:
-# kitchen "cream" vs recipe "cream cheese" still fails (no cheese variety present).
-CATEGORY_VARIETY_TOKENS = {
-    "cheese": {
-        "parmesan", "parmigiano", "reggiano", "cheddar", "mozzarella", "feta", "gouda",
-        "brie", "provolone", "gruyere", "asiago", "romano", "pecorino", "ricotta",
-        "mascarpone", "manchego", "colby", "swiss", "havarti", "gorgonzola", "fontina",
-        "halloumi", "paneer", "cotija", "burrata", "camembert", "edam", "emmental",
-        "jarlsberg", "muenster", "queso",
-    },
-}
-
-
-def strip_redundant_category_conflicts(conflict_tokens, context_tokens):
-    """Drop category conflict tokens (e.g. 'cheese') that are redundant because a specific
-    variety of that category (e.g. 'parmesan') is present in context_tokens."""
-    if not conflict_tokens:
-        return conflict_tokens
-    return {
-        t for t in conflict_tokens
-        if not (CATEGORY_VARIETY_TOKENS.get(t) and (context_tokens & CATEGORY_VARIETY_TOKENS[t]))
-    }
-
-
 OPENAI_TIMEOUT_SECONDS = int(os.getenv("OPENAI_TIMEOUT_SECONDS", "45"))
 OPENAI_MAX_RETRIES = int(os.getenv("OPENAI_MAX_RETRIES", "2"))
 OPENAI_SUBSTITUTION_MODEL = os.getenv("OPENAI_SUBSTITUTION_MODEL", os.getenv("OPENAI_MODEL", "gpt-4.1-mini"))
@@ -327,36 +299,40 @@ def _is_pantry_ingredient(text):
 
 
 def _get_kitchen_items_for_matching(conn, owner):
-    table_name = f"{_safe_owner(owner)}_prod_kitchen"
+    owner = _safe_owner(owner)
     with conn.cursor() as cur:
-        cur.execute("""
-            SELECT COUNT(*) AS n FROM information_schema.tables
-            WHERE table_schema = DATABASE() AND table_name = %s
-        """, [table_name])
-        if (cur.fetchone() or {}).get("n", 0) == 0:
-            return []
-        cur.execute("""
-            SELECT column_name FROM information_schema.columns
-            WHERE table_schema = DATABASE() AND table_name = %s
-              AND column_name IN ('product_description', 'analysis_stage', 'analysis_status')
-        """, [table_name])
-        column_names = {
-            (row.get("column_name") or row.get("COLUMN_NAME") or "").strip()
-            for row in (cur.fetchall() or [])
-            if (row.get("column_name") or row.get("COLUMN_NAME") or "").strip()
-        }
-        where_parts = ["action = 'IN'"]
-        if "analysis_stage" in column_names:
-            where_parts.append("(`analysis_stage` = 'final' OR `analysis_stage` IS NULL)")
-        if "analysis_status" in column_names:
-            where_parts.append("(`analysis_status` = 'ready' OR `analysis_status` IS NULL)")
-        select_fields = "`product_name`"
-        if "product_description" in column_names:
-            select_fields += ", `product_description`"
+        # Live kitchen lives in the shared table (post shared-kitchen migration).
+        # The legacy per-owner `{owner}_prod_kitchen` table stopped updating at the
+        # migration, so read the owner's current IN items from shared_kitchen.
         cur.execute(
-            f"SELECT {select_fields} FROM `{table_name}` WHERE {' AND '.join(where_parts)} ORDER BY COALESCE(`_updatedDate`, `_createdDate`) DESC, `_createdDate` DESC"
+            """
+            SELECT `product_name`, `product_description`
+            FROM `shared_kitchen`
+            WHERE `_owner` = %s AND `action` = 'IN'
+              AND (`analysis_stage` = 'final' OR `analysis_stage` IS NULL)
+              AND (`analysis_status` = 'ready' OR `analysis_status` IS NULL)
+            ORDER BY COALESCE(`_updatedDate`, `_createdDate`) DESC, `_createdDate` DESC
+            """,
+            [owner],
         )
         rows = cur.fetchall() or []
+        if not rows:
+            # Fallback: legacy per-owner table, so dormant owners not yet in
+            # shared_kitchen are not shown an empty kitchen.
+            legacy = f"{owner}_prod_kitchen"
+            cur.execute(
+                "SELECT COUNT(*) AS n FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = %s",
+                [legacy],
+            )
+            if (cur.fetchone() or {}).get("n", 0):
+                cur.execute(
+                    f"SELECT `product_name`, `product_description` FROM `{legacy}` "
+                    "WHERE `action` = 'IN' "
+                    "AND (`analysis_stage` = 'final' OR `analysis_stage` IS NULL) "
+                    "AND (`analysis_status` = 'ready' OR `analysis_status` IS NULL) "
+                    "ORDER BY COALESCE(`_updatedDate`, `_createdDate`) DESC, `_createdDate` DESC"
+                )
+                rows = cur.fetchall() or []
     items = []
     seen = set()
     for row in rows:
@@ -383,19 +359,14 @@ def _score_kitchen_candidate(recipe_tokens, candidate_tokens):
         return -1
     if recipe_set == candidate_set:
         return 300 + len(recipe_set)
-    context_tokens = recipe_set | candidate_set
     # Forward: recipe tokens fully contained in kitchen item tokens
     extra_tokens = candidate_set - recipe_set
-    forward_conflicts = strip_redundant_category_conflicts(
-        {t for t in extra_tokens if t in INGREDIENT_CONFLICT_TOKENS}, context_tokens)
-    if recipe_set.issubset(candidate_set) and not forward_conflicts:
+    if recipe_set.issubset(candidate_set) and not any(token in INGREDIENT_CONFLICT_TOKENS for token in extra_tokens):
         return 200 + (len(recipe_set) * 10) - max(0, len(candidate_set) - len(recipe_set))
     # Reverse: kitchen item tokens fully contained in recipe tokens
     if candidate_set.issubset(recipe_set):
         recipe_extra = recipe_set - candidate_set
-        conflict_in_extra = strip_redundant_category_conflicts(
-            {t for t in recipe_extra if t in INGREDIENT_CONFLICT_TOKENS}, context_tokens)
-        if not conflict_in_extra:
+        if not any(token in INGREDIENT_CONFLICT_TOKENS for token in recipe_extra):
             return 150 + (len(candidate_set) * 10) - max(0, len(recipe_set) - len(candidate_set))
     return -1
 
@@ -941,10 +912,8 @@ def search_recipes(qs):
             _persist_overlay_rows(conn, [overlay_row for _, overlay_row in serialized_rows])
             rows = [recipe for recipe, _ in serialized_rows]
         else:
-            # No owner (the iOS client sends only q+limit): still serialize so
-            # ingredients/instructions/notes/image_urls come back as JSON arrays,
-            # not raw DB strings. Without this, ExploreRecipeDTO.ingredients ([String]?)
-            # fails to decode a string → "data isn't in the correct format".
+            # No-owner path (iOS sends only q+limit): serialize so ingredients/etc
+            # come back as JSON arrays, not raw DB strings (ExploreRecipeDTO decode fix).
             rows = [_serialize_row(row) for row in rows]
         return _ok({"query": q, "results": rows})
     finally:
