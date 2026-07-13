@@ -19,14 +19,15 @@ DEST="arn:aws:lambda:us-east-1:566667681926:function:trepo-obs-error-forwarder"
 FILTERNAME="trepo-obs-forwarder"
 # Match JSON error markers (evt=analysis_failed / evt=backend_error) OR the
 # legacy free-text "Background processing error" marker. '?' prefix = OR.
-PATTERN='?analysis_failed ?backend_error ?"Background processing error"'
+PATTERN='?analysis_failed ?backend_error ?ai_op ?"Background processing error"'
 
-GROUPS=(
+LOG_GROUPS=(
   "/aws/lambda/trepo-grocery-backend-dev-AnalyzeOnUpload-bpWcKEif3Gq7"
   "/aws/lambda/trepo-grocery-backend-dev-AnalyzeDishOnUpload-1wGSk6GmnxLv"
   "/aws/lambda/trepo-grocery-backend-dev-AnalyzeDiscardOnUpload-BnUyRpHHwaOx"
   "/aws/lambda/grocery-identifier-dev-identify-async"
   "/aws/lambda/grocery-identifier-dev-bulk-commit"
+  "/aws/lambda/grocery-identifier-dev-enrich-kitchen-item"
   "/aws/lambda/trepo-list-handler"
   "/aws/lambda/twilioAuth"
   "/aws/lambda/trepo-quick-ack-async-worker-dev"
@@ -44,7 +45,7 @@ GROUPS=(
   "/aws/lambda/trepo-grocery-backend-dev-DiscardsApiFunction-ySas82v8qBkQ"
 )
 
-for g in "${GROUPS[@]}"; do
+for g in "${LOG_GROUPS[@]}"; do
   # Safety: abort if the group already has 2 filters and none is ours.
   existing=$(aws logs describe-subscription-filters --log-group-name "$g" \
     --query 'subscriptionFilters[].filterName' --output text 2>/dev/null || true)

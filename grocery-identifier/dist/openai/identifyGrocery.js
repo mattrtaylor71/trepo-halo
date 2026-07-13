@@ -660,6 +660,7 @@ async function identifyGroceryItem(input, options = {}) {
         let result;
         let _identifyLastErr = null;
         for (let _identifyAttempt = 0; _identifyAttempt < 2; _identifyAttempt += 1) {
+            const _aiStart = Date.now();
             try {
                 const response = await openai.responses.create({
                     model,
@@ -697,6 +698,16 @@ async function identifyGroceryItem(input, options = {}) {
                 });
                 const parsed = (0, client_1.parseJsonResponse)(response);
                 result = mergeLabelEvidenceIntoItem(exports.GroceryItemSchema.parse(parsed), labelEvidence);
+                try {
+                    const _u = response?.usage || {};
+                    console.log(JSON.stringify({
+                        evt: "ai_op", service: "grocery_identify", op: "identify_deep", model,
+                        status: "success", latency_ms: Date.now() - _aiStart,
+                        tokens_in: _u.input_tokens ?? _u.prompt_tokens ?? null,
+                        tokens_out: _u.output_tokens ?? _u.completion_tokens ?? null,
+                    }));
+                }
+                catch (_) { /* telemetry must never throw */ }
                 if (_identifyAttempt > 0) {
                     console.log(JSON.stringify({ evt: "openai_fast_retry_saved", service: "grocery_identify", op: "identify_deep" }));
                 }
@@ -708,6 +719,14 @@ async function identifyGroceryItem(input, options = {}) {
                     await new Promise((r) => setTimeout(r, 2500));
                     continue;
                 }
+                try {
+                    console.log(JSON.stringify({
+                        evt: "ai_op", service: "grocery_identify", op: "identify_deep", model,
+                        status: "error", latency_ms: Date.now() - _aiStart,
+                        error: String(_identifyErr?.message || _identifyErr).slice(0, 500),
+                    }));
+                }
+                catch (_) { /* telemetry must never throw */ }
                 throw _identifyLastErr;
             }
         }

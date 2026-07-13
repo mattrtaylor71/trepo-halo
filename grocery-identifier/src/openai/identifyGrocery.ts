@@ -744,6 +744,7 @@ export async function identifyGroceryItem(input: IdentifyImageInput, options: { 
     let result!: GroceryItem;
     let _identifyLastErr: unknown = null;
     for (let _identifyAttempt = 0; _identifyAttempt < 2; _identifyAttempt += 1) {
+      const _aiStart = Date.now();
       try {
     const response = await openai.responses.create({
       model,
@@ -785,6 +786,15 @@ export async function identifyGroceryItem(input: IdentifyImageInput, options: { 
 
     const parsed = parseJsonResponse<GroceryItem>(response);
     result = mergeLabelEvidenceIntoItem(GroceryItemSchema.parse(parsed), labelEvidence);
+    try {
+      const _u: any = (response as any)?.usage || {};
+      console.log(JSON.stringify({
+        evt: "ai_op", service: "grocery_identify", op: "identify_deep", model,
+        status: "success", latency_ms: Date.now() - _aiStart,
+        tokens_in: _u.input_tokens ?? _u.prompt_tokens ?? null,
+        tokens_out: _u.output_tokens ?? _u.completion_tokens ?? null,
+      }));
+    } catch (_) { /* telemetry must never throw */ }
     if (_identifyAttempt > 0) {
       console.log(JSON.stringify({ evt: "openai_fast_retry_saved", service: "grocery_identify", op: "identify_deep" }));
     }
@@ -792,6 +802,13 @@ export async function identifyGroceryItem(input: IdentifyImageInput, options: { 
       } catch (_identifyErr) {
         _identifyLastErr = _identifyErr;
         if (_identifyAttempt === 0) { await new Promise((r) => setTimeout(r, 2500)); continue; }
+        try {
+          console.log(JSON.stringify({
+            evt: "ai_op", service: "grocery_identify", op: "identify_deep", model,
+            status: "error", latency_ms: Date.now() - _aiStart,
+            error: String((_identifyErr as any)?.message || _identifyErr).slice(0, 500),
+          }));
+        } catch (_) { /* telemetry must never throw */ }
         throw _identifyLastErr;
       }
     }

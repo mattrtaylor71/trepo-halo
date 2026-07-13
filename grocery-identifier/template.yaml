@@ -1,0 +1,408 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Grocery Identifier - Identify grocery items with brand, price, ingredients, and alternatives
+
+Parameters:
+  Env:
+    Type: String
+    Default: dev
+  OpenAIApiKey:
+    Type: String
+    NoEcho: true
+    Description: "OpenAI API key for vision recognition"
+  SerpApiKey:
+    Type: String
+    Default: ""
+    NoEcho: true
+    Description: "Optional SerpAPI key for retailer product-page discovery"
+  GoogleVisionApiKey:
+    Type: String
+    Default: ""
+    NoEcho: true
+    Description: "Optional Google Vision API key for OCR-assisted bulk inventory"
+  GeminiApiKey:
+    Type: String
+    Default: ""
+    NoEcho: true
+    Description: "Optional Gemini API key for Gemini Pro bulk inventory"
+  KitchenApiBaseUrl:
+    Type: String
+    Default: "https://7tn3gvwvh7.execute-api.us-east-1.amazonaws.com"
+    Description: "Kitchen API base URL for persisting bulk check-in results"
+  BulkEnrichOnPersist:
+    Type: String
+    Default: "false"
+    Description: "Whether bulk preliminary rows should immediately trigger enrichment"
+  UploadsBucketName:
+    Type: String
+    Default: ""
+    Description: "Optional S3 bucket for oversized bulk-upload fallback storage"
+  NotificationsApiBaseUrl:
+    Type: String
+    Default: "https://nua4yt5q26.execute-api.us-east-1.amazonaws.com/v1"
+    Description: "Notifications API base URL for push notification delivery"
+
+Conditions:
+  HasUploadsBucketName: !Not [!Equals [!Ref UploadsBucketName, ""]]
+
+Globals:
+  Function:
+    Runtime: nodejs20.x
+    Timeout: 300
+    MemorySize: 2048
+    Environment:
+      Variables:
+        OPENAI_API_KEY: !Ref OpenAIApiKey
+        SERPAPI_API_KEY: !Ref SerpApiKey
+        GOOGLE_VISION_API_KEY: !Ref GoogleVisionApiKey
+        GEMINI_API_KEY: !Ref GeminiApiKey
+        KITCHEN_API_BASE_URL: !Ref KitchenApiBaseUrl
+        BULK_ENRICH_ON_PERSIST: !Ref BulkEnrichOnPersist
+        UPLOADS_BUCKET_NAME: !Ref UploadsBucketName
+        ENRICH_KITCHEN_ITEM_FUNCTION_NAME: !Sub "${AWS::StackName}-enrich-kitchen-item"
+        NODE_ENV: production
+        DUAL_WRITE_ENABLED: 'true'
+        OPENAI_MODEL: "gpt-5.4-2026-03-05"
+        OPENAI_DEEP_MODEL: "gpt-5.4-2026-03-05"
+        GEMINI_MODEL: "gemini-3.1-pro-preview"
+        GEMINI_RECEIPT_MODEL: "gemini-3.1-pro-preview"
+        GEMINI_RECEIPT_FALLBACK_MODEL: "gemini-2.5-flash"
+        CATEGORY_ENUM_PROMPT_VERSION: "v1"
+        AI_FALLBACK_ENABLED: "true"
+        GEMINI_RECEIPT_TIMEOUT_MS: "180000"
+        GEMINI_RECEIPT_ATTEMPTS: "2"
+        GEMINI_RECEIPT_MAX_DIMENSION: "1600"
+        OPENAI_IMAGE_VERIFY_MODEL: "gpt-5.4-2026-03-05"
+        OPENAI_IMAGE_VERIFY_ATTEMPTS: "5"
+        OPENAI_IMAGE_VERIFY_MIN_MATCHES: "3"
+        OPENAI_IMAGE_VERIFY_MIN_CONFIDENCE: "0.7"
+        OPENAI_IMAGE_VERIFY_PARALLELISM: "3"
+        STOCK_IMAGE_REQUIRE_TARGET_MATCH: "true"
+        STOCK_IMAGE_TIMEOUT_MS: "10000"
+        STOCK_IMAGE_DEEP_TIMEOUT_MS: "45000"
+        STOCK_IMAGE_MAX_CANDIDATES: "8"
+        STOCK_IMAGE_SERPAPI_NUM: "40"
+
+Resources:
+  Api:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      CorsConfiguration:
+        AllowOrigins: ['*']
+        AllowMethods: ['*']
+        AllowHeaders: ['content-type', 'authorization']
+
+  IdentifyFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: .
+      Handler: identify/app.handler
+      Runtime: nodejs20.x
+      Timeout: 300
+      MemorySize: 2048
+      Events:
+        IdentifyRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /identify
+            Method: POST
+
+  IdentifyFastFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: .
+      Handler: identifyFast/app.handler
+      Runtime: nodejs20.x
+      Timeout: 60
+      MemorySize: 1024
+      Environment:
+        Variables:
+          OPENAI_FAST_MODEL: "gpt-4.1-mini"
+      Events:
+        IdentifyFastRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /identify-fast
+            Method: POST
+
+  IdentifyFromUrlFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: .
+      Handler: identifyFromUrl/app.handler
+      Runtime: nodejs20.x
+      Timeout: 300
+      MemorySize: 2048
+      Events:
+        IdentifyFromUrlRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /identify-from-url
+            Method: POST
+
+  IdentifyFastFromUrlFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: .
+      Handler: identifyFastFromUrl/app.handler
+      Runtime: nodejs20.x
+      Timeout: 60
+      MemorySize: 1024
+      Environment:
+        Variables:
+          OPENAI_FAST_MODEL: "gpt-4.1-mini"
+      Events:
+        IdentifyFastFromUrlRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /identify-fast-from-url
+            Method: POST
+
+  GetStoresFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: .
+      Handler: getStores/app.handler
+      Runtime: nodejs20.x
+      Timeout: 60
+      MemorySize: 1024
+      Events:
+        GetStoresRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /get-stores
+            Method: POST
+
+  JobsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "${AWS::StackName}-jobs"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: job_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: job_id
+          KeyType: HASH
+      TimeToLiveSpecification:
+        Enabled: true
+        AttributeName: ttl
+      Tags:
+        - Key: Environment
+          Value: !Ref Env
+
+  BulkSessionsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "${AWS::StackName}-bulk-sessions"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: session_id
+          AttributeType: S
+        - AttributeName: owner_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: session_id
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: owner-index
+          KeySchema:
+            - AttributeName: owner_id
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+      TimeToLiveSpecification:
+        Enabled: true
+        AttributeName: ttl
+
+  IdentifyAsyncFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${AWS::StackName}-identify-async"
+      CodeUri: .
+      Handler: identifyAsync/app.handler
+      Runtime: nodejs20.x
+      Timeout: 900
+      MemorySize: 2048
+      Environment:
+        Variables:
+          JOB_TABLE_NAME: !Ref JobsTable
+          SESSION_TABLE_NAME: !Ref BulkSessionsTable
+          NOTIFICATIONS_API_BASE_URL: !Ref NotificationsApiBaseUrl
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref JobsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref BulkSessionsTable
+        - LambdaInvokePolicy:
+            FunctionName: !Sub "${AWS::StackName}-identify-async"
+        - LambdaInvokePolicy:
+            FunctionName: !Sub "${AWS::StackName}-enrich-kitchen-item"
+        - Statement:
+            Effect: Allow
+            Action:
+              - s3:PutObject
+              - s3:GetObject
+            Resource: !If
+              - HasUploadsBucketName
+              - !Sub "arn:aws:s3:::${UploadsBucketName}/*"
+              - !Ref AWS::NoValue
+      Events:
+        IdentifyAsyncRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /identify-async
+            Method: POST
+
+  BulkCommitFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${AWS::StackName}-bulk-commit"
+      CodeUri: .
+      Handler: bulkCommit/app.handler
+      Runtime: nodejs20.x
+      Timeout: 900
+      MemorySize: 2048
+      Environment:
+        Variables:
+          JOB_TABLE_NAME: !Ref JobsTable
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref JobsTable
+        - LambdaInvokePolicy:
+            FunctionName: !Sub "${AWS::StackName}-bulk-commit"
+        - LambdaInvokePolicy:
+            FunctionName: !Sub "${AWS::StackName}-enrich-kitchen-item"
+      Events:
+        BulkCommitRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /bulk-commit
+            Method: POST
+
+  EnrichKitchenItemFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${AWS::StackName}-enrich-kitchen-item"
+      CodeUri: .
+      Handler: enrichKitchenItem/app.handler
+      Runtime: nodejs20.x
+      Timeout: 900
+      MemorySize: 2048
+      Policies:
+        - LambdaInvokePolicy:
+            FunctionName: !Sub "${AWS::StackName}-enrich-kitchen-item"
+      Events:
+        EnrichKitchenItemRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /enrich-kitchen-item
+            Method: POST
+
+  GetJobFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: .
+      Handler: getJob/app.handler
+      Runtime: nodejs20.x
+      Timeout: 10
+      MemorySize: 256
+      Environment:
+        Variables:
+          JOB_TABLE_NAME: !Ref JobsTable
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref JobsTable
+      Events:
+        GetJobRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /job/{job_id}
+            Method: GET
+
+  HealthFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: .
+      Handler: health/app.handler
+      Runtime: nodejs20.x
+      Events:
+        HealthRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /health
+            Method: GET
+
+  WebFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: .
+      Handler: web/app.handler
+      Runtime: nodejs20.x
+      Events:
+        WebRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /
+            Method: GET
+
+  GetSessionFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: .
+      Handler: getSession/app.handler
+      Runtime: nodejs20.x
+      Timeout: 10
+      MemorySize: 256
+      Environment:
+        Variables:
+          SESSION_TABLE_NAME: !Ref BulkSessionsTable
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref BulkSessionsTable
+      Events:
+        GetSession:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /session/{session_id}
+            Method: GET
+
+  GetSessionsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: .
+      Handler: getSessions/app.handler
+      Runtime: nodejs20.x
+      Timeout: 10
+      MemorySize: 256
+      Environment:
+        Variables:
+          SESSION_TABLE_NAME: !Ref BulkSessionsTable
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref BulkSessionsTable
+      Events:
+        GetSessions:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /sessions/{owner_id}
+            Method: GET
+
+Outputs:
+  ApiUrl:
+    Value: !Sub "https://${Api}.execute-api.${AWS::Region}.amazonaws.com"
+    Description: "API Gateway endpoint URL"
+
