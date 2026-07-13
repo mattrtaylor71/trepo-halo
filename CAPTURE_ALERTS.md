@@ -50,3 +50,16 @@ Verified live: triggered the dish owner_missing path → marker logged → `Dish
 ## Action required
 Confirm the SNS email subscription — AWS emailed a link to matt@trepo.ai (status
 PendingConfirmation until clicked).
+
+## Coverage expansion (2026-07-13) — closed audit gaps
+New metric filters + alarms → SNS trepo-capture-alerts (artifact 72b40b1e). All threshold-1 unless noted:
+- `VoiceShoppingListWriteMiss` / `VoiceDiscardWriteMiss` ← `{$.evt="shopping_/discard_peruser_write_miss"}` on
+  trepo-quick-ack{,-stream-dev,-async-worker-dev}. Voice item invisible to user (per-user table miss).
+- `BulkGeminiFailover` ← `{$.evt="bulk_gemini_failover"}` on identify-async. **thr=5/5min** (degradation, recovers via OpenAI).
+- `IdentifyJobRedrive` ← `"Re-drove job"` on identify-async. **thr=3/5min** (provider struggling early-warning).
+- `RecipeBatchPartialFailure` ← `{$.evt="recipe_batch_partial_failure"}` on SavedRecipesApi. **thr=3/5min** (some photos in a batch failed).
+- Instrumented (roll into existing KitchenBackendError / RecipesBackendError): shared_kitchen insert/update/delete
+  exceptions; recipe-link refine-unreadable (save_recipe_refine); saved-recipes unhandled-500.
+NOTE: bulk-identify-failed metric filter greps literal `"failed:"` — do NOT change that log substring without
+updating the filter (it silently broke 2026-07-13 when the re-drive edit changed it). Prefer structured `{$.evt=…}`.
+Removed: push-notification-failed alarm (dead-token 404s = benign baseline noise; real notify outage → 5xx-notifications).
