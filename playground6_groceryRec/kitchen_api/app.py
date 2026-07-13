@@ -150,25 +150,32 @@ def _refresh_shelf_life_cache(owner):
 
 
 def _shared_kitchen_insert(conn, owner, payload):
-    """Insert a row into shared_kitchen."""
-    with conn.cursor() as cur:
-        # Add owner_id to payload
-        row = dict(payload)
-        row['owner_id'] = owner
+    """Insert a row into shared_kitchen. On failure emit a backend_error marker so a
+    silently-lost kitchen write pages instead of vanishing (KitchenBackendError alarm)."""
+    try:
+        with conn.cursor() as cur:
+            # Add owner_id to payload
+            row = dict(payload)
+            row['owner_id'] = owner
 
-        # Filter to columns that exist in shared_kitchen
-        # Use a broad set — extra columns are harmlessly ignored
-        cols = [k for k in row.keys() if k not in ('__table',)]
-        placeholders = ', '.join(['%s'] * len(cols))
-        columns_sql = ', '.join(f'`{c}`' for c in cols)
-        values = [row[c] for c in cols]
+            # Filter to columns that exist in shared_kitchen
+            # Use a broad set — extra columns are harmlessly ignored
+            cols = [k for k in row.keys() if k not in ('__table',)]
+            placeholders = ', '.join(['%s'] * len(cols))
+            columns_sql = ', '.join(f'`{c}`' for c in cols)
+            values = [row[c] for c in cols]
 
-        cur.execute(
-            f"INSERT INTO `shared_kitchen` ({columns_sql}) VALUES ({placeholders}) "
-            f"ON DUPLICATE KEY UPDATE `_updatedDate` = NOW()",
-            values
-        )
-        conn.commit()
+            cur.execute(
+                f"INSERT INTO `shared_kitchen` ({columns_sql}) VALUES ({placeholders}) "
+                f"ON DUPLICATE KEY UPDATE `_updatedDate` = NOW()",
+                values
+            )
+            conn.commit()
+    except Exception as exc:
+        _report_backend_error('shared_kitchen_insert', owner_id=owner,
+                              code='write_failed', error=exc,
+                              job_id=(payload or {}).get('_id'))
+        raise
 
 
 class _CoalesceExisting:
@@ -183,47 +190,57 @@ class _CoalesceExisting:
 
 
 def _shared_kitchen_update(conn, item_id, updates_dict):
-    """Update a row in shared_kitchen."""
-    with conn.cursor() as cur:
-        if not updates_dict:
-            return
-        # Single UPDATE choke point → clamp any category write (PATCH/correction/
-        # enrichment) onto the app enum, same map as the INSERT path.
-        if 'category' in updates_dict:
-            updates_dict = dict(updates_dict)
-            updates_dict['category'] = normalize_kitchen_category(
-                updates_dict.get('category'), updates_dict.get('storage_location'), updates_dict.get('product_name'))
-        set_parts = []
-        values = []
-        for k, v in updates_dict.items():
-            if isinstance(v, _CoalesceExisting):
-                set_parts.append(f'`{k}` = COALESCE(`{k}`, %s)')
-                values.append(v.value)
-            else:
-                set_parts.append(f'`{k}` = %s')
-                values.append(v)
-        set_clauses = ', '.join(set_parts)
-        values.append(item_id)
-        cur.execute(
-            f"UPDATE `shared_kitchen` SET {set_clauses}, `_updatedDate` = NOW() WHERE `_id` = %s",
-            values
-        )
-        conn.commit()
+    """Update a row in shared_kitchen. Emits backend_error on failure, and a soft
+    marker if the update matched 0 rows (item not found = a silently-lost edit)."""
+    if not updates_dict:
+        return
+    try:
+        with conn.cursor() as cur:
+            # Single UPDATE choke point → clamp any category write (PATCH/correction/
+            # enrichment) onto the app enum, same map as the INSERT path.
+            if 'category' in updates_dict:
+                updates_dict = dict(updates_dict)
+                updates_dict['category'] = normalize_kitchen_category(
+                    updates_dict.get('category'), updates_dict.get('storage_location'), updates_dict.get('product_name'))
+            set_parts = []
+            values = []
+            for k, v in updates_dict.items():
+                if isinstance(v, _CoalesceExisting):
+                    set_parts.append(f'`{k}` = COALESCE(`{k}`, %s)')
+                    values.append(v.value)
+                else:
+                    set_parts.append(f'`{k}` = %s')
+                    values.append(v)
+            set_clauses = ', '.join(set_parts)
+            values.append(item_id)
+            cur.execute(
+                f"UPDATE `shared_kitchen` SET {set_clauses}, `_updatedDate` = NOW() WHERE `_id` = %s",
+                values
+            )
+            conn.commit()
+    except Exception as exc:
+        _report_backend_error('shared_kitchen_update', code='write_failed', error=exc, job_id=item_id)
+        raise
 
 
 def _shared_kitchen_delete(conn, owner, item_id):
-    """Archive and delete from shared tables."""
-    with conn.cursor() as cur:
-        # Copy to shared_archive_kitchen
-        cur.execute(
-            "INSERT IGNORE INTO `shared_archive_kitchen` "
-            "SELECT *, NOW() as archived_at, 'deleted' as archived_reason, 'shared_kitchen' as archived_from_table "
-            "FROM `shared_kitchen` WHERE `_id` = %s",
-            [item_id]
-        )
-        # Delete from shared_kitchen
-        cur.execute("DELETE FROM `shared_kitchen` WHERE `_id` = %s", [item_id])
-        conn.commit()
+    """Archive and delete from shared tables. Emits backend_error on failure so a
+    delete that silently doesn't land pages (KitchenBackendError alarm)."""
+    try:
+        with conn.cursor() as cur:
+            # Copy to shared_archive_kitchen
+            cur.execute(
+                "INSERT IGNORE INTO `shared_archive_kitchen` "
+                "SELECT *, NOW() as archived_at, 'deleted' as archived_reason, 'shared_kitchen' as archived_from_table "
+                "FROM `shared_kitchen` WHERE `_id` = %s",
+                [item_id]
+            )
+            # Delete from shared_kitchen
+            cur.execute("DELETE FROM `shared_kitchen` WHERE `_id` = %s", [item_id])
+            conn.commit()
+    except Exception as exc:
+        _report_backend_error('shared_kitchen_delete', owner_id=owner, code='write_failed', error=exc, job_id=item_id)
+        raise
 
 
 def _shared_dishes_insert(conn, owner, payload):

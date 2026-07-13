@@ -3468,6 +3468,11 @@ def _refine_recipe_structured(content, request_id=None, source_context=None):
         )
 
     if payload is None:
+        # A user's recipe save that the LLM couldn't parse — surface it so it pages
+        # (RecipesBackendError) instead of being invisible behind a generic 422.
+        _report_backend_error('save_recipe_refine', code='unreadable',
+                              error=last_error or 'LLM returned unparseable recipe',
+                              job_id=(source_context or {}).get('resolved_url'))
         raise ServiceError(
             'Could not read this recipe right now — please try again.',
             status_code=422,
@@ -4912,6 +4917,16 @@ def _handle_async_saved_recipe_batch_task(event, request_id):
             completed_at=_utc_now_iso(),
             error=None,
         )
+        if partial_errors:
+            # Some photos in a multi-image recipe save failed while others succeeded — the
+            # user silently gets fewer recipes than they added. Distinct marker (pattern alarm),
+            # so a spike surfaces without paging on every mixed batch.
+            try:
+                print(json.dumps({'evt': 'recipe_batch_partial_failure', 'service': 'recipes',
+                                  'owner_id': owner, 'job_id': job_id,
+                                  'failed': len(partial_errors), 'saved': len(results)}))
+            except Exception:
+                pass
         _log_event(
             request_id,
             'saved_recipe_batch_job_complete',
@@ -5059,6 +5074,10 @@ def handler(event, context):
         return _error(exc.status_code, str(exc), exc.extra)
     except Exception as exc:
         _log_event(request_id, 'request_failed', path=raw_path, status_code=500, failure_reason=str(exc))
+        # Any unhandled 500 in saved-recipes (DB insert failure, availability crash, etc.)
+        # → surface it so it pages (RecipesBackendError) rather than being a silent 5xx.
+        _report_backend_error('saved_recipes_request', owner_id=owner, code='unhandled_500',
+                              error=exc, job_id=raw_path)
         import traceback
         traceback.print_exc()
         return _error(500, str(exc))
