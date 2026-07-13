@@ -708,6 +708,11 @@ async function processJob(jobId, imageUrl, imageBase64, analysisMode, owner, use
       }
     }
 
+    // TERMINAL failure (re-drives exhausted). Emit a marker containing "failed:" that the
+    // CloudWatch metric filter (bulk-identify-failed alarm) keys on. The per-attempt logs
+    // above deliberately say "failed (attempt N):" so recoverable re-drives never alarm —
+    // only a genuine give-up reaches here and pages.
+    console.error(`[IdentifyAsync] Job ${jobId} identify failed: gave up after ${retryCount + 1} attempt(s) (mode=${analysisMode}): ${(error && error.message) || String(error)}`);
     await jobQueue.updateJobStatus(jobId, 'failed', null, error.message);
 
     // Session failure tracking
