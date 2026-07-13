@@ -2526,7 +2526,7 @@ function estimateHeuristicStorageGuidance(payload) {
 // location, and default to prepared_other — NEVER write a null/free-text value.
 const KITCHEN_CATEGORY_ENUM = new Set([
   "leftovers", "produce", "dairy_eggs", "meat_seafood",
-  "pantry", "snacks_sweets", "beverages", "prepared_other",
+  "pantry", "spices", "snacks_sweets", "beverages", "prepared_other",
 ]);
 // Keyword -> enum. Order matters: PANTRY + SNACKS_SWEETS are scanned before
 // produce/meat/dairy so shelf-stable bakery + baked sweets win over incidental
@@ -2537,7 +2537,12 @@ const KITCHEN_CATEGORY_ENUM = new Set([
 // byte-equivalent with the Python map in kitchen_api/category_normalizer.py.
 const KITCHEN_CATEGORY_KEYWORDS = [
   [["leftover"], "leftovers"],
-  [["pantry", "condiment", "seasoning", "spice", "blend", "rub", "broth", "stock", "bouillon",
+  // Spices/seasonings scanned before pantry so "Steak Blend Seasoning" -> spices and
+  // "Ground Cinnamon" -> spices (were previously folded into pantry).
+  [["spice", "spices", "seasoning", "seasonings", "spice blend", "seasoning blend", "spice rub",
+    "rub", "cinnamon", "cumin", "paprika", "oregano", "turmeric", "nutmeg", "cardamom", "cayenne",
+    "peppercorn", "chili powder", "garlic powder", "onion powder", "curry powder", "bay leaf"], "spices"],
+  [["pantry", "condiment", "broth", "stock", "bouillon",
     "sauce", "marinara", "salsa", "ketchup", "mustard", "mayo", "dressing", "oil", "vinegar",
     "syrup", "honey", "jam", "jelly", "peanut butter", "baking", "flour", "sugar", "rice",
     "pasta", "noodle", "grain", "oat", "cereal", "bean", "lentil", "canned",

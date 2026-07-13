@@ -16,7 +16,7 @@ import re
 
 KITCHEN_CATEGORY_ENUM = {
     "leftovers", "produce", "dairy_eggs", "meat_seafood",
-    "pantry", "snacks_sweets", "beverages", "prepared_other",
+    "pantry", "spices", "snacks_sweets", "beverages", "prepared_other",
 }
 
 # Order matters: PANTRY + SNACKS_SWEETS are scanned before produce/meat/dairy so
@@ -28,7 +28,12 @@ KITCHEN_CATEGORY_ENUM = {
 # "pie" (avoids "pieces"). Keep byte-equivalent with the JS map.
 KITCHEN_CATEGORY_KEYWORDS = [
     (["leftover"], "leftovers"),
-    (["pantry", "condiment", "seasoning", "spice", "blend", "rub", "broth", "stock", "bouillon",
+    # Spices/seasonings scanned before pantry so "Steak Blend Seasoning" -> spices and
+    # "Ground Cinnamon" -> spices (were previously folded into pantry).
+    (["spice", "spices", "seasoning", "seasonings", "spice blend", "seasoning blend", "spice rub",
+      "rub", "cinnamon", "cumin", "paprika", "oregano", "turmeric", "nutmeg", "cardamom", "cayenne",
+      "peppercorn", "chili powder", "garlic powder", "onion powder", "curry powder", "bay leaf"], "spices"),
+    (["pantry", "condiment", "broth", "stock", "bouillon",
       "sauce", "marinara", "salsa", "ketchup", "mustard", "mayo", "dressing", "oil", "vinegar",
       "syrup", "honey", "jam", "jelly", "peanut butter", "baking", "flour", "sugar", "rice",
       "pasta", "noodle", "grain", "oat", "cereal", "bean", "lentil", "canned",

@@ -16,14 +16,14 @@ import { withGeminiFallback } from "./geminiFallback";
 // schema-escape can never crash identify — the normalizer clamps it.
 export const CATEGORY_ENUM = [
   "leftovers", "produce", "dairy_eggs", "meat_seafood",
-  "pantry", "snacks_sweets", "beverages", "prepared_other",
+  "pantry", "spices", "snacks_sweets", "beverages", "prepared_other",
 ] as const;
 export const CATEGORY_ENUM_ENABLED = ["v1", "enum", "true", "on"].includes(
   String(process.env.CATEGORY_ENUM_PROMPT_VERSION || "").toLowerCase()
 );
 const CATEGORY_ENUM_GUIDANCE =
-  "\n\nCATEGORY — choose EXACTLY ONE of these 8 values, by what the product fundamentally IS, NOT by incidental words in its name: leftovers, produce, dairy_eggs, meat_seafood, pantry, snacks_sweets, beverages, prepared_other." +
-  "\nRules + hard examples: Potato Bread / Blueberry Bread = pantry (it IS bread, shelf-stable). Blueberry Muffins / cakes / cookies / pastries = snacks_sweets. Green Onion Pancakes and other frozen/prepared foods = prepared_other. A bag of potatoes / loose bananas / a bunch of celery or herbs = produce. Strawberry yogurt = dairy_eggs. Chicken broth = pantry. Fresh raw meat/poultry/fish = meat_seafood. Any drink = beverages. Home leftover food = leftovers. When a produce word appears in a processed product's name (potato bread, blueberry muffin, green onion pancake), pick the PROCESSED category, not produce.";
+  "\n\nCATEGORY — choose EXACTLY ONE of these 9 values, by what the product fundamentally IS, NOT by incidental words in its name: leftovers, produce, dairy_eggs, meat_seafood, pantry, spices, snacks_sweets, beverages, prepared_other." +
+  "\nRules + hard examples: Potato Bread / Blueberry Bread = pantry (it IS bread, shelf-stable). Blueberry Muffins / cakes / cookies / pastries = snacks_sweets. Green Onion Pancakes and other frozen/prepared foods = prepared_other. A bag of potatoes / loose bananas / a bunch of celery or herbs = produce. Strawberry yogurt = dairy_eggs. Chicken broth = pantry. Fresh raw meat/poultry/fish = meat_seafood. Any drink = beverages. Home leftover food = leftovers. Spices, seasonings, spice blends, spice rubs, and dried/ground herbs (cinnamon, cumin, paprika, oregano, chili powder, garlic powder, dried basil, etc.) = spices, NOT pantry. When a produce word appears in a processed product's name (potato bread, blueberry muffin, green onion pancake), pick the PROCESSED category, not produce.";
 
 export const GroceryItemSchema = z.object({
   brand: z.string().nullable().optional(),
