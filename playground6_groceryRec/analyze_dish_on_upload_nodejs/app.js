@@ -467,6 +467,41 @@ async function calculateMetrics(conn, owner) {
   };
 }
 
+// Shared-table migration: mirror each per-owner metrics snapshot into shared_metrics
+// (keyed by (owner_id,_id) after the 2026-07-13 PK change). Best-effort, gated by
+// DUAL_WRITE_METRICS; never blocks the capture write. Mirrors the Python
+// _dual_write_metrics_to_shared in redemptions_api/app.py.
+const DUAL_WRITE_METRICS = String(process.env.DUAL_WRITE_METRICS || 'false').toLowerCase() === 'true';
+const SHARED_METRICS_COLS = [
+  '_id', '_owner', '_createdDate', 'IQ', 'Points', 'UPF', 'harmful_ingredients',
+  'IQ_what', 'IQ_suggestions', 'UPF_what', 'UPF_suggestions',
+  'harmful_ingredients_what', 'harmful_ingredients_suggestions',
+  'kitchen_analysis_status', 'kitchen_analysis_content', 'kitchen_analysis_generated_at',
+  'kitchen_analysis_error',
+];
+async function dualWriteMetricsToShared(conn, ownerId, memberTable, entryId) {
+  if (!DUAL_WRITE_METRICS) return;
+  try {
+    const cols = SHARED_METRICS_COLS.map((c) => `\`${c}\``).join(', ');
+    const src = SHARED_METRICS_COLS.map((c) => `s.\`${c}\``).join(', ');
+    const upd = SHARED_METRICS_COLS.filter((c) => c !== '_id').map((c) => `\`${c}\`=VALUES(\`${c}\`)`).join(', ');
+    await conn.execute(
+      `INSERT INTO \`shared_metrics\` (\`owner_id\`, ${cols}) `
+      + `SELECT ?, ${src} FROM \`${memberTable}\` s WHERE s.\`_id\` = ? `
+      + `ON DUPLICATE KEY UPDATE \`owner_id\`=VALUES(\`owner_id\`), ${upd}`,
+      [ownerId, entryId],
+    );
+  } catch (err) {
+    try {
+      console.error(JSON.stringify({
+        evt: 'dual_write_miss', family: 'metrics',
+        owner_id: String(ownerId || ''), metrics_id: String(entryId || ''),
+        error: String(err && err.message ? err.message : err).slice(0, 500),
+      }));
+    } catch (_) { /* marker best-effort */ }
+  }
+}
+
 async function appendMetricsSnapshot(owner, pointsDelta = getScanPointsDelta()) {
   const conn = await getDbConnection();
   try {
@@ -508,6 +543,7 @@ async function appendMetricsSnapshot(owner, pointsDelta = getScanPointsDelta()) 
           latest.kitchen_analysis_error || null,
         ],
       );
+      await dualWriteMetricsToShared(conn, memberId, tableName, entryId);
     }
   } finally {
     await conn.end();

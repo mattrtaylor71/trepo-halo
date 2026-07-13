@@ -502,6 +502,20 @@ def _get_latest_metrics(conn, table_name):
         return cur.fetchone()
 
 
+def _get_latest_metrics_shared(conn, owner):
+    """Latest metrics snapshot for one owner from the shared table (personal scope).
+    MANDATORY owner_id filter — shared_metrics holds every owner's rows."""
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT * FROM `shared_metrics` WHERE `owner_id` = %s ORDER BY `_createdDate` DESC LIMIT 1",
+            [owner],
+        )
+        row = cur.fetchone()
+    if row:
+        row.pop('owner_id', None)  # keep response shape identical to per-owner read
+    return row
+
+
 def _pick_body_value(body, keys):
     for key in keys:
         if key in body and body[key] is not None:
@@ -556,8 +570,26 @@ def _normalize_metrics_response(metrics):
 
 def _get_metrics(owner):
     try:
-        table_name = _metrics_table_name(owner)
         conn = _mysql_conn()
+        # Shared-table read cutover (reversible via env flag, default off = per-owner).
+        # Metrics = latest snapshot per owner; MANDATORY owner_id filter.
+        if os.getenv('READ_SHARED_METRICS', '').strip().lower() == 'true':
+            latest = _get_latest_metrics_shared(conn, owner)
+            if not latest:
+                computed = _calculate_metrics(conn, owner)
+                metrics = {
+                    '_id': None, '_owner': owner, 'IQ': _DEFAULT_IQ, 'Points': 0,
+                    'UPF': computed['UPF'], 'harmful_ingredients': computed['harmful_ingredients'],
+                    'IQ_what': None, 'IQ_suggestions': [], 'UPF_what': None, 'UPF_suggestions': [],
+                    'harmful_ingredients_what': None, 'harmful_ingredients_suggestions': [],
+                    'kitchen_analysis_status': None, 'kitchen_analysis_content': None,
+                    'kitchen_analysis_generated_at': None, 'kitchen_analysis_error': None,
+                }
+                return _success_response({'owner': owner, 'metrics': metrics, 'count': 0})
+            metrics = _normalize_metrics_response({k: json_serial(v) for k, v in latest.items()})
+            return _success_response({'owner': owner, 'metrics': metrics, 'count': 1})
+
+        table_name = _metrics_table_name(owner)
         with conn.cursor() as cur:
             if not _table_exists(cur, table_name):
                 _ensure_metrics_table(conn, table_name)
