@@ -1110,22 +1110,27 @@ def _backfill_storage_guidance(owner):
     """Re-estimate storage_guidance for all items using LLM."""
     try:
         conn = _mysql_conn()
-        table = _kitchen_table(owner)
+        # Kitchen is shared-primary: read/write shared_kitchen (household-scoped),
+        # not the frozen per-owner {owner}_prod_kitchen (which is empty — this
+        # endpoint was otherwise burning LLM spend re-estimating invisible rows).
+        table_name, owner_where, owner_params = _resolve_table(owner, '_prod_kitchen', conn)
 
         with conn.cursor() as cur:
-            raw_name = table.strip('`')
-            if not _table_exists(cur, raw_name):
+            if not owner_where and not _table_exists(cur, table_name):
                 return _error(404, 'Kitchen table not found')
 
+            where = "action = 'IN'"
+            if owner_where:
+                where = f"{owner_where} AND {where}"
             # Fetch all IN items with their descriptions
             cur.execute(f"""
                 SELECT _id, product_name, brand, variant, category,
                        product_description, explanation, storage_guidance
-                FROM {table}
-                WHERE action = 'IN'
+                FROM `{table_name}`
+                WHERE {where}
                 ORDER BY _createdDate DESC
                 LIMIT 300
-            """)
+            """, owner_params)
             items = cur.fetchall()
 
         if not items:
@@ -1150,13 +1155,16 @@ def _backfill_storage_guidance(owner):
             old_summary = (old_sg or {}).get('summary', 'none')
 
             guidance_json = json.dumps(new_guidance)
+            upd_where = "`_id` = %s"
+            if owner_where:
+                upd_where = f"{owner_where} AND {upd_where}"
             with conn.cursor() as cur:
                 cur.execute(f"""
-                    UPDATE {table}
+                    UPDATE `{table_name}`
                     SET storage_guidance = %s
-                    WHERE _id = %s
+                    WHERE {upd_where}
                     LIMIT 1
-                """, (guidance_json, item['_id']))
+                """, [guidance_json] + owner_params + [item['_id']])
             conn.commit()
             updated += 1
 

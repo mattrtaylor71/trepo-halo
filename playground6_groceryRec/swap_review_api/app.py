@@ -287,19 +287,48 @@ def _candidate_ids_from_snapshot(snapshot):
     return result
 
 
+def _household_member_ids(cur, owner):
+    """Resolve the owner's household members from new_users (for shared_kitchen scoping)."""
+    safe = _sanitize_owner(owner)
+    if not safe:
+        return []
+    cur.execute("SELECT owner_id FROM new_users WHERE user_id = %s LIMIT 1", [safe])
+    row = cur.fetchone() or {}
+    household_id = row.get('owner_id')
+    if not household_id:
+        return [safe]
+    cur.execute("SELECT user_id FROM new_users WHERE owner_id = %s", [household_id])
+    members = [_sanitize_owner(r.get('user_id')) for r in (cur.fetchall() or [])]
+    members = [m for m in members if m]
+    return list(dict.fromkeys(members)) or [safe]
+
+
 def _load_kitchen_items_by_ids(cur, owner, item_ids):
     use_shared = os.getenv('USE_SHARED_TABLES', 'false').lower() == 'true'
     table_name = 'shared_kitchen' if use_shared else _kitchen_table_name(owner)
     if not item_ids or (not use_shared and not _table_exists(cur, table_name)):
         return {}
     placeholders = ', '.join(['%s'] * len(item_ids))
-    cur.execute(
-        f"""
-        SELECT * FROM `{table_name}`
-        WHERE `_id` IN ({placeholders}) AND `action` = 'IN'
-        """,
-        item_ids,
-    )
+    if use_shared:
+        # MANDATORY owner scoping on the shared read — without it any _id resolves
+        # to another household's kitchen row. Scope to this owner's household.
+        members = _household_member_ids(cur, owner)
+        member_ph = ', '.join(['%s'] * len(members))
+        cur.execute(
+            f"""
+            SELECT * FROM `{table_name}`
+            WHERE `_id` IN ({placeholders}) AND `owner_id` IN ({member_ph}) AND `action` = 'IN'
+            """,
+            list(item_ids) + members,
+        )
+    else:
+        cur.execute(
+            f"""
+            SELECT * FROM `{table_name}`
+            WHERE `_id` IN ({placeholders}) AND `action` = 'IN'
+            """,
+            item_ids,
+        )
     items = {}
     for row in (cur.fetchall() or []):
         item = {}

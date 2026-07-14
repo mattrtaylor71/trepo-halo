@@ -2212,9 +2212,13 @@ async function findKitchenRowsByName(connection, ownerId, itemName, limit = 5) {
 
 async function findKitchenRowById(connection, ownerId, rowId) {
   if (WRITE_SHARED_ONLY) {
+    // Scope to the owner: shared_kitchen holds every owner's rows, so a bare
+    // _id lookup could read/mutate another household's item (item ids reach
+    // this via LLM tool-call args). Matches the owner_id filter on every other
+    // shared_kitchen read (e.g. getKitchenRows).
     const [rows] = await connection.execute(
-      `SELECT * FROM \`${SHARED_KITCHEN_TABLE}\` WHERE \`_id\` = ? LIMIT 1`,
-      [rowId]
+      `SELECT * FROM \`${SHARED_KITCHEN_TABLE}\` WHERE \`_id\` = ? AND \`owner_id\` = ? LIMIT 1`,
+      [rowId, ownerId]
     );
     return rows?.[0] || null;
   }
@@ -2396,8 +2400,16 @@ async function updateKitchenRowAcrossHousehold(connection, context, rowId, field
     }
     assignments.push("`_updatedDate` = NOW()");
     values.push(rowId);
+    // Scope the write to this household's owners so a bare _id can't mutate
+    // another household's shared_kitchen row (defensive; matches the read scoping).
+    const memberIds = getTableHouseholdMemberIds(context);
+    let ownerClause = "";
+    if (memberIds.length) {
+      ownerClause = ` AND \`owner_id\` IN (${memberIds.map(() => "?").join(",")})`;
+      values.push(...memberIds);
+    }
     const [updateResult] = await connection.execute(
-      `UPDATE \`${SHARED_KITCHEN_TABLE}\` SET ${assignments.join(", ")} WHERE _id = ?`,
+      `UPDATE \`${SHARED_KITCHEN_TABLE}\` SET ${assignments.join(", ")} WHERE _id = ?${ownerClause}`,
       values
     );
     // Phantom-write guard: `_updatedDate = NOW()` is always in the SET, so a
