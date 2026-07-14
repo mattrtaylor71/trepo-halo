@@ -4388,38 +4388,57 @@ def _save_saved_recipe_record(conn, owner, extraction, request_id=None, prepared
         )
 
     table = _saved_recipes_table(owner)
-    with conn.cursor() as cur:
-        cur.execute(
-            f"""INSERT INTO `{table}` (
-                    _id, _owner, source_type, source_url, resolved_url, resolved_url_hash,
-                    title, image_url, image_urls, source_image_url, source_image_urls, image_storage_key,
-                    ingredients, instructions, notes, raw_caption, raw_content,
-                    extraction_source, author_name, caption_field, status
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'ready')""",
-            (
-                recipe_id,
-                owner,
-                extraction['platform'],
-                extraction['url'],
-                extraction['resolved_url'],
-                resolved_url_hash,
-                structured_recipe['title'] or extraction['title'] or 'Recipe',
-                image_fields.get('image_url') or None,
-                json.dumps(image_fields.get('image_urls') or []),
-                image_fields.get('source_image_url') or None,
-                json.dumps(image_fields.get('source_image_urls') or []),
-                image_fields.get('image_storage_key') or None,
-                json.dumps(structured_recipe['ingredients']),
-                json.dumps(structured_recipe['instructions']),
-                json.dumps(structured_recipe['notes']),
-                extraction['caption'],
-                extraction['content'],
-                extraction['source'],
-                extraction.get('author_name'),
-                extraction.get('caption_field') or None,
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"""INSERT INTO `{table}` (
+                        _id, _owner, source_type, source_url, resolved_url, resolved_url_hash,
+                        title, image_url, image_urls, source_image_url, source_image_urls, image_storage_key,
+                        ingredients, instructions, notes, raw_caption, raw_content,
+                        extraction_source, author_name, caption_field, status
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'ready')""",
+                (
+                    recipe_id,
+                    owner,
+                    extraction['platform'],
+                    extraction['url'],
+                    extraction['resolved_url'],
+                    resolved_url_hash,
+                    structured_recipe['title'] or extraction['title'] or 'Recipe',
+                    image_fields.get('image_url') or None,
+                    json.dumps(image_fields.get('image_urls') or []),
+                    image_fields.get('source_image_url') or None,
+                    json.dumps(image_fields.get('source_image_urls') or []),
+                    image_fields.get('image_storage_key') or None,
+                    json.dumps(structured_recipe['ingredients']),
+                    json.dumps(structured_recipe['instructions']),
+                    json.dumps(structured_recipe['notes']),
+                    extraction['caption'],
+                    extraction['content'],
+                    extraction['source'],
+                    extraction.get('author_name'),
+                    extraction.get('caption_field') or None,
+                )
             )
-        )
-    conn.commit()
+        conn.commit()
+    except pymysql.err.IntegrityError as exc:
+        # 1062 = another save of the same URL committed between our hash pre-check
+        # and this INSERT (double-tap / client retry — the pre-check-to-insert gap
+        # spans seconds of LLM + image work). The recipe exists, so this save
+        # SUCCEEDED from the user's perspective: re-enter to take the dedupe path.
+        if exc.args and exc.args[0] == 1062:
+            conn.rollback()
+            _log_event(
+                request_id,
+                'saved_recipe_insert_race_deduped',
+                owner=owner,
+                resolved_url=extraction['resolved_url'],
+            )
+            return _save_saved_recipe_record(
+                conn, owner, extraction,
+                request_id=request_id, prepared_images=prepared_images,
+            )
+        raise
     if manual_platform and extraction['platform'] != 'image':
         _invoke_saved_recipe_image_generation_async(owner, recipe_id, request_id=request_id)
     row = _fetch_saved_recipe_by_id(conn, owner, recipe_id)
@@ -4709,30 +4728,46 @@ def _post_saved_recipe(owner, body, request_id=None):
                     if in_ingredients and stripped.startswith('- '):
                         raw_ingredients.append(stripped[2:])
                 table = _saved_recipes_table(owner)
-                with conn.cursor() as cur:
-                    cur.execute(
-                        f"""INSERT INTO `{table}` (
-                                _id, _owner, source_type, source_url, resolved_url, resolved_url_hash,
-                                title, ingredients, instructions, notes, raw_caption, raw_content,
-                                extraction_source, status
-                            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'processing')""",
-                        (
-                            recipe_id, owner, extraction['platform'],
-                            extraction['url'], extraction['resolved_url'], resolved_url_hash,
-                            placeholder_title,
-                            json.dumps(raw_ingredients), json.dumps([]), json.dumps([]),
-                            extraction['caption'], extraction['content'], extraction['source'],
-                        ),
-                    )
-                conn.commit()
-                _invoke_saved_recipe_text_refinement_async(owner, recipe_id, content_text, request_id=request_id)
-                placeholder_row = _fetch_saved_recipe_by_id(conn, owner, recipe_id)
-                serialized = _serialize_row(placeholder_row) if placeholder_row else {
-                    'id': recipe_id, 'title': placeholder_title, 'status': 'processing',
-                    'ingredients': raw_ingredients, 'instructions': [], 'notes': [],
-                }
-                response = _success({'owner': owner, 'recipe': serialized, 'deduped': False, 'async': True}, status=202)
-                response_result_count = 1
+                dup_row = None
+                try:
+                    with conn.cursor() as cur:
+                        cur.execute(
+                            f"""INSERT INTO `{table}` (
+                                    _id, _owner, source_type, source_url, resolved_url, resolved_url_hash,
+                                    title, ingredients, instructions, notes, raw_caption, raw_content,
+                                    extraction_source, status
+                                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'processing')""",
+                            (
+                                recipe_id, owner, extraction['platform'],
+                                extraction['url'], extraction['resolved_url'], resolved_url_hash,
+                                placeholder_title,
+                                json.dumps(raw_ingredients), json.dumps([]), json.dumps([]),
+                                extraction['caption'], extraction['content'], extraction['source'],
+                            ),
+                        )
+                    conn.commit()
+                except pymysql.err.IntegrityError as exc:
+                    # 1062 = concurrent save of identical text won the race — the
+                    # recipe exists, so return it as a dedupe instead of a 500.
+                    if not (exc.args and exc.args[0] == 1062):
+                        raise
+                    conn.rollback()
+                    dup_row = _fetch_saved_recipe_by_hash(conn, owner, resolved_url_hash)
+                    if not dup_row:
+                        raise
+                if dup_row:
+                    dup_row = _ensure_owned_saved_recipe_image(conn, owner, dup_row, request_id=request_id)
+                    response = _success({'owner': owner, 'recipe': _serialize_row(dup_row), 'deduped': True}, status=200)
+                    response_result_count = 1
+                else:
+                    _invoke_saved_recipe_text_refinement_async(owner, recipe_id, content_text, request_id=request_id)
+                    placeholder_row = _fetch_saved_recipe_by_id(conn, owner, recipe_id)
+                    serialized = _serialize_row(placeholder_row) if placeholder_row else {
+                        'id': recipe_id, 'title': placeholder_title, 'status': 'processing',
+                        'ingredients': raw_ingredients, 'instructions': [], 'notes': [],
+                    }
+                    response = _success({'owner': owner, 'recipe': serialized, 'deduped': False, 'async': True}, status=202)
+                    response_result_count = 1
         elif submission['kind'] == 'image':
             extraction, prepared_image = _extract_recipe_from_image(submission, request_id=request_id)
             result, _ = _save_saved_recipe_record(conn, owner, extraction, request_id=request_id, prepared_images=[prepared_image])
