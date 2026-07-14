@@ -25,6 +25,33 @@ const dynamodb = new AWS.DynamoDB.DocumentClient();
 const iot = new AWS.IotData({ endpoint: process.env.IOT_ENDPOINT });
 const lambda = new AWS.Lambda();
 
+// Per-LLM-call telemetry marker (evt=ai_op). One line of JSON per LLM HTTP call,
+// success and error. Best-effort: a logging failure must never break the op.
+function logAiOp(rec) {
+  try {
+    const out = {
+      evt: 'ai_op',
+      service: rec.service,
+      op: rec.op,
+      owner_id: rec.owner_id != null ? String(rec.owner_id) : null,
+      model: rec.model != null ? String(rec.model) : null,
+      latency_ms: Number.isFinite(rec.latency_ms) ? Math.trunc(rec.latency_ms) : null,
+      status: rec.status,
+      input: String(rec.input == null ? '' : rec.input).slice(0, 400),
+      output: String(rec.output == null ? '' : rec.output).slice(0, 1200),
+    };
+    if (rec.error != null) out.error = String(rec.error).slice(0, 500);
+    if (rec.job_id != null) out.job_id = String(rec.job_id);
+    console.log(JSON.stringify(out));
+  } catch (_) { /* never let telemetry throw */ }
+}
+
+// Model resolvers mirror the dist/openai/* + vendor wrappers so the marker records
+// the model actually used (env-overridable, same defaults as the wrappers).
+const OPENAI_MODEL_DEFAULT = 'gpt-5.4-2026-03-05';
+function discardTextModel() { return process.env.OPENAI_MODEL || OPENAI_MODEL_DEFAULT; }
+function discardFastModel() { return process.env.OPENAI_FAST_MODEL || 'gpt-4.1-mini'; }
+
 const BUCKET_NAME = process.env.BUCKET_NAME;
 const PRODUCT_IMAGES_BUCKET = process.env.PRODUCT_IMAGES_BUCKET || BUCKET_NAME;
 const JOBS_TABLE = process.env.JOBS_TABLE;
@@ -1037,7 +1064,27 @@ exports.handler = async (event) => {
 
     try {
       console.log('[fast-identify] Starting provisional discard legacy fast scan...');
-      const { fastScan, fastMode, fallbackUsed } = await runDiscardFastScan(imageBuffer);
+      const fastStart = Date.now();
+      let fastScan;
+      let fastMode;
+      let fallbackUsed;
+      try {
+        ({ fastScan, fastMode, fallbackUsed } = await runDiscardFastScan(imageBuffer));
+        logAiOp({
+          service: 'discard', op: 'identify_fast', owner_id: owner, model: discardFastModel(),
+          latency_ms: Date.now() - fastStart, status: 'success', job_id: jobId,
+          input: `job_id=${jobId} image_bytes=${imageBuffer.length}`,
+          output: `fast_mode=${fastMode} fallback_used=${fallbackUsed} items=${Array.isArray(fastScan && fastScan.items) ? fastScan.items.length : 0}`,
+        });
+      } catch (fastLlmError) {
+        logAiOp({
+          service: 'discard', op: 'identify_fast', owner_id: owner, model: discardFastModel(),
+          latency_ms: Date.now() - fastStart, status: 'error', job_id: jobId,
+          input: `job_id=${jobId} image_bytes=${imageBuffer.length}`,
+          error: fastLlmError && fastLlmError.message ? fastLlmError.message : String(fastLlmError),
+        });
+        throw fastLlmError;
+      }
       const fastCandidate = selectBestFastItem(fastScan);
       if (fastCandidate) {
         await insertProvisionalDiscardRow({
@@ -1102,30 +1149,75 @@ exports.handler = async (event) => {
       console.error('[resized-image] Error uploading resized original image (non-fatal):', resizeUploadError);
     }
 
-    let groceryItem = await identifyGroceryItem(imageBuffer);
+    const analyzeStart = Date.now();
+    let groceryItem;
+    try {
+      groceryItem = await identifyGroceryItem(imageBuffer);
+      logAiOp({
+        service: 'discard', op: 'analyze_discard', owner_id: owner, model: discardTextModel(),
+        latency_ms: Date.now() - analyzeStart, status: 'success', job_id: jobId,
+        input: `job_id=${jobId} image_bytes=${imageBuffer.length}`,
+        output: `product_name=${groceryItem && groceryItem.product_name} brand=${groceryItem && groceryItem.brand} category=${groceryItem && groceryItem.category} confidence=${groceryItem && groceryItem.confidence}`,
+      });
+    } catch (analyzeLlmError) {
+      logAiOp({
+        service: 'discard', op: 'analyze_discard', owner_id: owner, model: discardTextModel(),
+        latency_ms: Date.now() - analyzeStart, status: 'error', job_id: jobId,
+        input: `job_id=${jobId} image_bytes=${imageBuffer.length}`,
+        error: analyzeLlmError && analyzeLlmError.message ? analyzeLlmError.message : String(analyzeLlmError),
+      });
+      throw analyzeLlmError;
+    }
     let storeAvailability = null;
     if (shouldStandardizeUnknownItem(groceryItem)) {
       groceryItem = applyUnknownItemPlaceholder(groceryItem);
       console.log('[discard] Standardized unresolved discard item to unknown placeholder.');
     } else {
+      const refineStart = Date.now();
+      const refineBeforeName = groceryItem.product_name || '';
       try {
         const refinedItem = await refineProductTitle(groceryItem);
         groceryItem.product_name = refinedItem.product_name;
+        logAiOp({
+          service: 'discard', op: 'refine_title', owner_id: owner, model: discardTextModel(),
+          latency_ms: Date.now() - refineStart, status: 'success', job_id: jobId,
+          input: `job_id=${jobId} before=${refineBeforeName} brand=${groceryItem.brand || ''}`,
+          output: `after=${groceryItem.product_name || ''}`,
+        });
         console.log('[title-refine] Final discard title:', {
           product_name: groceryItem.product_name || null,
           brand: groceryItem.brand || null,
           variant: groceryItem.variant || null,
         });
       } catch (titleError) {
+        logAiOp({
+          service: 'discard', op: 'refine_title', owner_id: owner, model: discardTextModel(),
+          latency_ms: Date.now() - refineStart, status: 'error', job_id: jobId,
+          input: `job_id=${jobId} before=${refineBeforeName} brand=${groceryItem.brand || ''}`,
+          error: titleError && titleError.message ? titleError.message : String(titleError),
+        });
         console.warn('[title-refine] Failed (non-fatal):', titleError);
       }
+      const storeStart = Date.now();
       try {
         storeAvailability = await getStoreAvailability(
           groceryItem.product_name || '',
           groceryItem.brand || null,
           groceryItem.category || null
         );
+        logAiOp({
+          service: 'discard', op: 'store_availability', owner_id: owner, model: discardTextModel(),
+          latency_ms: Date.now() - storeStart, status: 'success', job_id: jobId,
+          input: `job_id=${jobId} product_name=${groceryItem.product_name || ''} brand=${groceryItem.brand || ''}`,
+          output: `stores=${Array.isArray(storeAvailability) ? storeAvailability.length : (storeAvailability ? 'present' : 'none')}`,
+        });
       } catch (storeError) {
+        logAiOp({
+          service: 'discard', op: 'store_availability', owner_id: owner, model: discardTextModel(),
+          latency_ms: Date.now() - storeStart, status: 'error', job_id: jobId,
+          input: `job_id=${jobId} product_name=${groceryItem.product_name || ''} brand=${groceryItem.brand || ''}`,
+          error: storeError && storeError.message ? storeError.message : String(storeError),
+        });
         console.error('[stores] Error (non-fatal):', storeError);
       }
     }
@@ -1190,8 +1282,15 @@ exports.handler = async (event) => {
     }
 
     if (!productImageUrl && !isUnknownItem) {
+      const iconStart = Date.now();
       try {
         const iconBuffer = await generateProductIcon(groceryItem);
+        logAiOp({
+          service: 'discard', op: 'generate_icon', owner_id: owner, model: 'gpt-image-1',
+          latency_ms: Date.now() - iconStart, status: 'success', job_id: jobId,
+          input: `job_id=${jobId} product_name=${groceryItem.product_name || ''} category=${groceryItem.category || ''}`,
+          output: `icon_generated=${iconBuffer ? 'yes' : 'no'} bytes=${iconBuffer ? iconBuffer.length : 0}`,
+        });
         if (iconBuffer) {
           const uploaded = await uploadGeneratedImageToS3(iconBuffer, user_id, device_id, jobId);
           productImageUrl = uploaded.url;
@@ -1202,6 +1301,12 @@ exports.handler = async (event) => {
           });
         }
       } catch (iconError) {
+        logAiOp({
+          service: 'discard', op: 'generate_icon', owner_id: owner, model: 'gpt-image-1',
+          latency_ms: Date.now() - iconStart, status: 'error', job_id: jobId,
+          input: `job_id=${jobId} product_name=${groceryItem.product_name || ''} category=${groceryItem.category || ''}`,
+          error: iconError && iconError.message ? iconError.message : String(iconError),
+        });
         console.error('[discard-image] Icon fallback failed (non-fatal):', iconError);
       }
     }

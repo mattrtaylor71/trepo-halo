@@ -21,6 +21,33 @@ const s3 = new AWS.S3();
 const THUMBNAIL_MAX_SIZE = 256;
 const NOTIFICATIONS_API_URL = 'https://nua4yt5q26.execute-api.us-east-1.amazonaws.com/v1/notifications/send';
 
+// Per-LLM-call telemetry marker (evt=ai_op). One line of JSON per LLM HTTP call,
+// success and error. Best-effort: a logging failure must never break the op.
+function logAiOp(rec) {
+  try {
+    const out = {
+      evt: 'ai_op',
+      service: rec.service,
+      op: rec.op,
+      owner_id: rec.owner_id != null ? String(rec.owner_id) : null,
+      model: rec.model != null ? String(rec.model) : null,
+      latency_ms: Number.isFinite(rec.latency_ms) ? Math.trunc(rec.latency_ms) : null,
+      status: rec.status,
+      input: String(rec.input == null ? '' : rec.input).slice(0, 400),
+      output: String(rec.output == null ? '' : rec.output).slice(0, 1200),
+    };
+    if (rec.error != null) out.error = String(rec.error).slice(0, 500);
+    if (rec.job_id != null) out.job_id = String(rec.job_id);
+    console.log(JSON.stringify(out));
+  } catch (_) { /* never let telemetry throw */ }
+}
+
+// Model resolvers mirror the dist/openai/* wrappers so the marker records the
+// model actually used (env-overridable, same defaults as the wrappers).
+const OPENAI_MODEL_DEFAULT = 'gpt-5.4-2026-03-05';
+function fullDishModel() { return process.env.FULL_DISH_MODEL || process.env.OPENAI_MODEL || OPENAI_MODEL_DEFAULT; }
+function fastDishModel() { return process.env.FAST_DISH_MODEL || process.env.OPENAI_MODEL || OPENAI_MODEL_DEFAULT; }
+
 async function sendJobCompletePush(ownerId, productName) {
   if (!ownerId) return;
   try {
@@ -1035,7 +1062,24 @@ exports.handler = async (event) => {
     try {
       console.log('[fast] Starting fast dish nutrition estimate...');
       const fastStart = Date.now();
-      const fastData = await extractNutritionFast(imageBuffer);
+      let fastData;
+      try {
+        fastData = await extractNutritionFast(imageBuffer);
+        logAiOp({
+          service: 'dish', op: 'extract_nutrition_fast', owner_id: owner, model: fastDishModel(),
+          latency_ms: Date.now() - fastStart, status: 'success', job_id: jobId,
+          input: `job_id=${jobId} image_bytes=${imageBuffer.length}`,
+          output: `dish_name=${fastData && fastData.dish_name} confidence=${fastData && fastData.confidence} calories=${fastData && fastData.calories}`,
+        });
+      } catch (fastLlmError) {
+        logAiOp({
+          service: 'dish', op: 'extract_nutrition_fast', owner_id: owner, model: fastDishModel(),
+          latency_ms: Date.now() - fastStart, status: 'error', job_id: jobId,
+          input: `job_id=${jobId} image_bytes=${imageBuffer.length}`,
+          error: fastLlmError && fastLlmError.message ? fastLlmError.message : String(fastLlmError),
+        });
+        throw fastLlmError;
+      }
       const normalizedFastData = normalizeFastPayload(fastData);
       const fastCreatedAt = isoNow();
       const fastResultPayload = buildFastResultPayload(jobMeta, normalizedFastData, fastCreatedAt);
@@ -1075,7 +1119,24 @@ exports.handler = async (event) => {
     // Identify dish
     console.log('[identify] Starting dish identification...');
     const identifyStart = Date.now();
-    const dish = await identifyDish(imageBuffer);
+    let dish;
+    try {
+      dish = await identifyDish(imageBuffer);
+      logAiOp({
+        service: 'dish', op: 'identify_dish', owner_id: owner, model: fullDishModel(),
+        latency_ms: Date.now() - identifyStart, status: 'success', job_id: jobId,
+        input: `job_id=${jobId} image_bytes=${imageBuffer.length}`,
+        output: `dish_name=${dish && dish.dish_name} confidence=${dish && dish.confidence} category=${dish && dish.category}`,
+      });
+    } catch (identifyLlmError) {
+      logAiOp({
+        service: 'dish', op: 'identify_dish', owner_id: owner, model: fullDishModel(),
+        latency_ms: Date.now() - identifyStart, status: 'error', job_id: jobId,
+        input: `job_id=${jobId} image_bytes=${imageBuffer.length}`,
+        error: identifyLlmError && identifyLlmError.message ? identifyLlmError.message : String(identifyLlmError),
+      });
+      throw identifyLlmError;
+    }
     const identifyTime = Date.now() - identifyStart;
     console.log('[identify] Dish identification complete in', identifyTime, 'ms');
     console.log('[identify] Dish:', dish.dish_name, 'Confidence:', dish.confidence);
@@ -1083,7 +1144,24 @@ exports.handler = async (event) => {
     // Extract nutrition data
     console.log('[nutrition] Starting nutrition extraction...');
     const nutritionStart = Date.now();
-    const nutritionData = await extractNutrition(imageBuffer);
+    let nutritionData;
+    try {
+      nutritionData = await extractNutrition(imageBuffer);
+      logAiOp({
+        service: 'dish', op: 'extract_nutrition', owner_id: owner, model: fullDishModel(),
+        latency_ms: Date.now() - nutritionStart, status: 'success', job_id: jobId,
+        input: `job_id=${jobId} image_bytes=${imageBuffer.length}`,
+        output: `calories=${nutritionData && nutritionData.calories} protein=${nutritionData && nutritionData.protein} serving_size=${nutritionData && nutritionData.serving_size}`,
+      });
+    } catch (nutritionLlmError) {
+      logAiOp({
+        service: 'dish', op: 'extract_nutrition', owner_id: owner, model: fullDishModel(),
+        latency_ms: Date.now() - nutritionStart, status: 'error', job_id: jobId,
+        input: `job_id=${jobId} image_bytes=${imageBuffer.length}`,
+        error: nutritionLlmError && nutritionLlmError.message ? nutritionLlmError.message : String(nutritionLlmError),
+      });
+      throw nutritionLlmError;
+    }
     const nutritionTime = Date.now() - nutritionStart;
     console.log('[nutrition] Nutrition extraction complete in', nutritionTime, 'ms');
     console.log('[nutrition] Calories:', nutritionData.calories, 'Protein:', nutritionData.protein);
@@ -1095,7 +1173,24 @@ exports.handler = async (event) => {
     if (shouldAttemptPackagedLookup(dish, nutritionData)) {
       try {
         console.log('[packaged] Attempting packaged item identification...');
-        packagedItem = await identifyPackagedItem(imageBuffer);
+        const packagedStart = Date.now();
+        try {
+          packagedItem = await identifyPackagedItem(imageBuffer);
+          logAiOp({
+            service: 'dish', op: 'identify_packaged', owner_id: owner, model: fullDishModel(),
+            latency_ms: Date.now() - packagedStart, status: 'success', job_id: jobId,
+            input: `job_id=${jobId} image_bytes=${imageBuffer.length}`,
+            output: `is_packaged=${packagedItem && packagedItem.is_packaged_item} product_name=${packagedItem && packagedItem.product_name} confidence=${packagedItem && packagedItem.confidence}`,
+          });
+        } catch (packagedLlmError) {
+          logAiOp({
+            service: 'dish', op: 'identify_packaged', owner_id: owner, model: fullDishModel(),
+            latency_ms: Date.now() - packagedStart, status: 'error', job_id: jobId,
+            input: `job_id=${jobId} image_bytes=${imageBuffer.length}`,
+            error: packagedLlmError && packagedLlmError.message ? packagedLlmError.message : String(packagedLlmError),
+          });
+          throw packagedLlmError;
+        }
         console.log('[packaged] Result:', {
           is_packaged_item: packagedItem.is_packaged_item,
           brand: packagedItem.brand,

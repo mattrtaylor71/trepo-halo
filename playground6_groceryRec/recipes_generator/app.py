@@ -91,6 +91,31 @@ def _report_backend_error(op, owner_id=None, code=None, error=None, job_id=None,
         }), file=sys.stderr)
     except Exception:
         pass
+def _ai_op(op, model, latency_ms, status, input_summary='', output_summary='',
+           error=None, owner_id=None, job_id=None, service='recipes'):
+    """Emit one per-LLM-call telemetry marker (evt=ai_op) to stdout. Best-effort:
+    a logging failure must never break the op."""
+    try:
+        rec = {
+            'evt': 'ai_op',
+            'service': service,
+            'op': op,
+            'owner_id': str(owner_id) if owner_id is not None else None,
+            'model': str(model) if model is not None else None,
+            'latency_ms': int(latency_ms) if latency_ms is not None else None,
+            'status': status,
+            'input': (str(input_summary) if input_summary is not None else '')[:400],
+            'output': (str(output_summary) if output_summary is not None else '')[:1200],
+        }
+        if error is not None:
+            rec['error'] = (error if isinstance(error, str) else str(error))[:500]
+        if job_id is not None:
+            rec['job_id'] = str(job_id)
+        print(json.dumps(rec))
+    except Exception:
+        pass
+
+
 _INGREDIENT_NOISE_TOKENS = {
     'a', 'an', 'and', 'fresh', 'organic', 'large', 'small', 'medium', 'lean', 'extra', 'virgin',
     'boneless', 'skinless', 'shredded', 'chopped', 'diced', 'minced', 'sliced', 'ground',
@@ -688,6 +713,8 @@ Only include substitutions that are genuinely plausible in a home kitchen. If no
         'missing_ingredients': missing_ingredients,
         'kitchen_items': kitchen_items,
     })
+    _sub_t0 = time.time()
+    _sub_input = f"recipe={recipe.get('title')} missing={missing_ingredients}"
     try:
         response = _create_chat(
             client,
@@ -699,7 +726,12 @@ Only include substitutions that are genuinely plausible in a home kitchen. If no
             ],
         )
         payload = _best_effort_json_parse((response.choices[0].message.content or '').strip(), {'substitutions': [], 'summary': None})
+        _ai_op('suggest_substitutions', SUBSTITUTION_MODEL, int((time.time() - _sub_t0) * 1000), 'success',
+               input_summary=_sub_input,
+               output_summary=f"substitutions={len(payload.get('substitutions') or [])}")
     except Exception as exc:
+        _ai_op('suggest_substitutions', SUBSTITUTION_MODEL, int((time.time() - _sub_t0) * 1000), 'error',
+               input_summary=_sub_input, error=exc)
         print(f"[recipes_generator] Substitution suggestion failed for '{recipe.get('title')}': {exc}")
         return {
             'substitution_candidates': [],
@@ -885,7 +917,7 @@ def _recipe_meal_category(recipe, fallback_index=0):
     )
 
 
-def _generate_recipes_with_gpt(ingredients_list, kitchen_only_count=10, need_grocery_count=10, excluded_titles=None):
+def _generate_recipes_with_gpt(ingredients_list, kitchen_only_count=10, need_grocery_count=10, excluded_titles=None, owner=None):
     from openai import OpenAI
     client = OpenAI(
         api_key=os.getenv('OPENAI_API_KEY'),
@@ -937,27 +969,47 @@ Return the JSON object only."""
     # Fast in-handler retry: a single malformed/blank generation (JSONDecodeError)
     # otherwise fails the invocation and detours through the 4-min refresh-flag class.
     # Retry the generate+parse 1x immediately before giving up.
+    _gen_model = os.getenv('OPENAI_MODEL', 'gpt-4o')
+    _gen_t0 = time.time()
+    _gen_input = f"kitchen_items={full_ingredient_count} kitchen_only={kitchen_only_count} need_grocery={need_grocery_count}"
     last_err = None
-    for _attempt in range(2):
-        resp = _create_chat(
-            client,
-            model=os.getenv('OPENAI_MODEL', 'gpt-4o'),
-            messages=[{'role': 'system', 'content': system}, {'role': 'user', 'content': user}],
-            temperature=0.4,
-        )
-        text = (resp.choices[0].message.content or '').strip()
-        if text.startswith('```'):
-            text = text.split('\n', 1)[-1].rsplit('```', 1)[0].strip()
-        try:
-            parsed = json.loads(text)
-            if _attempt > 0:
-                print(json.dumps({'evt': 'openai_fast_retry_saved', 'service': 'recipes_generator', 'op': 'generate'}))
-            return parsed
-        except json.JSONDecodeError as e:
-            last_err = e
-            if _attempt == 0:
-                time.sleep(2)
-    raise last_err
+    try:
+        for _attempt in range(2):
+            resp = _create_chat(
+                client,
+                model=_gen_model,
+                messages=[{'role': 'system', 'content': system}, {'role': 'user', 'content': user}],
+                temperature=0.4,
+            )
+            text = (resp.choices[0].message.content or '').strip()
+            if text.startswith('```'):
+                text = text.split('\n', 1)[-1].rsplit('```', 1)[0].strip()
+            try:
+                parsed = json.loads(text)
+                if _attempt > 0:
+                    print(json.dumps({'evt': 'openai_fast_retry_saved', 'service': 'recipes_generator', 'op': 'generate'}))
+                _titles = []
+                for _section in ('kitchen_only', 'need_grocery'):
+                    for _r in (parsed.get(_section) or []):
+                        _title = (_r or {}).get('title')
+                        if _title:
+                            _titles.append(_title)
+                _ai_op('generate_recipes', _gen_model, int((time.time() - _gen_t0) * 1000), 'success',
+                       input_summary=_gen_input,
+                       output_summary=(f"kitchen_only={len(parsed.get('kitchen_only') or [])} "
+                                       f"need_grocery={len(parsed.get('need_grocery') or [])} "
+                                       f"titles={_titles[:20]}"),
+                       owner_id=owner)
+                return parsed
+            except json.JSONDecodeError as e:
+                last_err = e
+                if _attempt == 0:
+                    time.sleep(2)
+        raise last_err
+    except Exception as _gen_err:
+        _ai_op('generate_recipes', _gen_model, int((time.time() - _gen_t0) * 1000), 'error',
+               input_summary=_gen_input, error=_gen_err, owner_id=owner)
+        raise
 
 
 def _build_recipe_record(recipe, fallback_index=0):
@@ -1097,6 +1149,7 @@ def handler(event, context):
             kitchen_only_count=10,
             need_grocery_count=10,
             excluded_titles=[],
+            owner=owner,
         )
         print(
             f"[recipes_generator] GPT recipe generation owner={owner} "

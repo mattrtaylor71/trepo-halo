@@ -81,6 +81,31 @@ def _report_backend_error(op, owner_id=None, code=None, error=None, job_id=None,
         pass
 
 
+def _ai_op(op, model, latency_ms, status, input_summary='', output_summary='',
+           error=None, owner_id=None, job_id=None, service='kitchen'):
+    """Emit one per-LLM-call telemetry marker (evt=ai_op) to stdout. Best-effort:
+    a logging failure must never break the op."""
+    try:
+        rec = {
+            'evt': 'ai_op',
+            'service': service,
+            'op': op,
+            'owner_id': str(owner_id) if owner_id is not None else None,
+            'model': str(model) if model is not None else None,
+            'latency_ms': int(latency_ms) if latency_ms is not None else None,
+            'status': status,
+            'input': (str(input_summary) if input_summary is not None else '')[:400],
+            'output': (str(output_summary) if output_summary is not None else '')[:1200],
+        }
+        if error is not None:
+            rec['error'] = (error if isinstance(error, str) else str(error))[:500]
+        if job_id is not None:
+            rec['job_id'] = str(job_id)
+        print(json.dumps(rec))
+    except Exception:
+        pass
+
+
 def _invoke_meal_plan_generator(owner):
     """Fire-and-forget invoke of meal plan generator (e.g. after kitchen change)."""
     arn = os.getenv('MEAL_PLAN_GENERATOR_ARN')
@@ -1286,22 +1311,31 @@ _TEXT_ADD_SCHEMA = {
 }
 
 
-def _parse_text_items_with_llm(text):
+def _parse_text_items_with_llm(text, owner=None):
     """Parse free text into (items, skipped) via OpenAI structured outputs. Raises on failure."""
     client = _openai_client()
-    response = client.chat.completions.create(
-        model=TEXT_ADD_PARSE_MODEL,
-        temperature=0,
-        messages=[
-            {"role": "system", "content": _TEXT_ADD_SYSTEM_PROMPT},
-            {"role": "user", "content": text},
-        ],
-        response_format={"type": "json_schema", "json_schema": _TEXT_ADD_SCHEMA},
-    )
-    data = json.loads(response.choices[0].message.content)
-    items = data.get('items') or []
-    skipped = data.get('skipped') or []
-    return items, skipped
+    _t0 = time.time()
+    try:
+        response = client.chat.completions.create(
+            model=TEXT_ADD_PARSE_MODEL,
+            temperature=0,
+            messages=[
+                {"role": "system", "content": _TEXT_ADD_SYSTEM_PROMPT},
+                {"role": "user", "content": text},
+            ],
+            response_format={"type": "json_schema", "json_schema": _TEXT_ADD_SCHEMA},
+        )
+        data = json.loads(response.choices[0].message.content)
+        items = data.get('items') or []
+        skipped = data.get('skipped') or []
+        _ai_op('parse_text_add', TEXT_ADD_PARSE_MODEL, int((time.time() - _t0) * 1000), 'success',
+               input_summary=text, output_summary=f'items={len(items)} skipped={len(skipped)}',
+               owner_id=owner)
+        return items, skipped
+    except Exception as _e:
+        _ai_op('parse_text_add', TEXT_ADD_PARSE_MODEL, int((time.time() - _t0) * 1000), 'error',
+               input_summary=text, error=_e, owner_id=owner)
+        raise
 
 
 def _fire_kitchen_enrichment(owner, item_id, product_name, brand, variant):
@@ -1341,7 +1375,7 @@ def _handle_text_add(owner, body):
 
     # 1) LLM parse
     try:
-        items, skipped = _parse_text_items_with_llm(text)
+        items, skipped = _parse_text_items_with_llm(text, owner=owner)
     except Exception as e:
         latency_ms = int((time.time() - t0) * 1000)
         print(json.dumps({
@@ -1420,7 +1454,7 @@ def _handle_text_add(owner, body):
                               'parse': parse_out, 'skipped': skipped}, status_code=201)
 
 
-def _correct_kitchen_item_with_llm(item_dict, correction_text):
+def _correct_kitchen_item_with_llm(item_dict, correction_text, owner=None):
     """Call OpenAI to re-derive item fields based on a user correction."""
     system_prompt = (
         "You are a kitchen inventory AI. A user has corrected a misidentified kitchen item. "
@@ -1442,18 +1476,30 @@ Return JSON with these fields updated to match the corrected item:
 product_name, brand, category (EXACTLY one of: leftovers/produce/dairy_eggs/meat_seafood/pantry/snacks_sweets/beverages/prepared_other — no other values; seasonings/sauces are pantry), description, ingredients (array), nutrition_summary, upf ("yes"/"no"), harmful_ingredients (array), healthier_alternatives (array of objects with name/brand/why_healthier). IMPORTANT: If the current category is 'leftovers', keep it as 'leftovers' unless the user's correction clearly indicates otherwise."""
 
     client = _openai_client()
-    response = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt}
-        ],
-        response_format={"type": "json_object"},
-        temperature=0.2,
-        max_tokens=1000,
-        timeout=30
-    )
-    return json.loads(response.choices[0].message.content)
+    _t0 = time.time()
+    _input_summary = f"product_name={item_dict.get('product_name', '')} :: correction={correction_text}"
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt}
+            ],
+            response_format={"type": "json_object"},
+            temperature=0.2,
+            max_tokens=1000,
+            timeout=30
+        )
+        result = json.loads(response.choices[0].message.content)
+        _ai_op('correct_item', 'gpt-4o-mini', int((time.time() - _t0) * 1000), 'success',
+               input_summary=_input_summary,
+               output_summary=f"product_name={result.get('product_name', '')} category={result.get('category', '')}",
+               owner_id=owner)
+        return result
+    except Exception as _e:
+        _ai_op('correct_item', 'gpt-4o-mini', int((time.time() - _t0) * 1000), 'error',
+               input_summary=_input_summary, error=_e, owner_id=owner)
+        raise
 
 
 def _handle_correct_kitchen_item(owner, item_id, body, conn):
@@ -1483,7 +1529,7 @@ def _handle_correct_kitchen_item(owner, item_id, body, conn):
         current_dict = _serialize_rows([current_row])[0]
 
         try:
-            corrected = _correct_kitchen_item_with_llm(current_dict, correction)
+            corrected = _correct_kitchen_item_with_llm(current_dict, correction, owner=owner)
         except Exception as e:
             print(f"[ERROR] LLM correction failed: {e}")
             return _error_response(500, f'AI correction failed: {str(e)}')

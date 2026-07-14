@@ -30,6 +30,39 @@ function getOpenAiHeaders(env) {
   };
 }
 
+// ── Per-LLM-call telemetry (ai_op markers) ─────────────────────────────────
+// Additive observability: emit one single-line JSON record per LLM call so we
+// can track op/model/latency/status across chat, transcription, and the Gemini
+// fallbacks. Emission is fully wrapped so telemetry can NEVER break a request,
+// and we never log raw audio bytes/base64 — only counts and transcript text.
+function emitAiOp(rec) {
+  try {
+    console.log(JSON.stringify({ evt: "ai_op", service: "thyme", ...rec }));
+  } catch {
+    // Telemetry is best-effort; swallow any serialization/logging error.
+  }
+}
+
+// owner_id resolution order per marker spec: userContext.userId || ownerId || tableOwnerId.
+function ownerIdForMarker(userContext) {
+  return userContext?.userId || userContext?.ownerId || userContext?.tableOwnerId || null;
+}
+
+function truncateForMarker(value, max) {
+  const text = typeof value === "string" ? value : value == null ? "" : String(value);
+  return text.length > max ? text.slice(0, max) : text;
+}
+
+// output = final assistant text + the tool names invoked this turn (from the
+// toolTrace/toolEvents), capped to the marker's 1200-char budget.
+function summarizeAiOutput(finalText, toolTrace) {
+  const tools = Array.isArray(toolTrace)
+    ? toolTrace.map((entry) => entry?.toolName).filter(Boolean)
+    : [];
+  const toolPart = tools.length ? ` [tools: ${tools.join(", ")}]` : "";
+  return truncateForMarker(`${finalText || ""}${toolPart}`, 1200);
+}
+
 export function pcmToWavBuffer(audioBuffer, options = {}) {
   if (audioBuffer?.subarray?.(0, 4)?.toString("ascii") === "RIFF") {
     return audioBuffer;
@@ -207,10 +240,24 @@ async function openAiRequest(path, opts) {
     const { env, body, expectJson = true } = opts || {};
     if (path === "/chat/completions" && geminiFallbackEnabled(env) && isOpenAiOutageError(error)) {
       console.warn("[WARN] OpenAI chat failed — falling back to Gemini:", JSON.stringify({ reason: String(error?.message || "").slice(0, 140) }));
+      const fbStart = Date.now();
+      const fbModel = env.GEMINI_FALLBACK_MODEL || "gemini-2.5-flash-lite";
+      let fbInput = "";
+      try {
+        const parsed = JSON.parse(body);
+        const lastUser = Array.isArray(parsed?.messages)
+          ? [...parsed.messages].reverse().find((m) => m?.role === "user")
+          : null;
+        fbInput = truncateForMarker(typeof lastUser?.content === "string" ? lastUser.content : "", 400);
+      } catch {
+        // body may not be JSON-parseable; leave input empty (never log audio).
+      }
       try {
         const res = await geminiChatFallbackResponse(body, env);
+        emitAiOp({ op: "chat_fallback_gemini", owner_id: null, model: fbModel, latency_ms: Date.now() - fbStart, status: "success", input: fbInput, output: "gemini chat fallback response", error: "" });
         return expectJson ? res.json() : res;
       } catch (gemErr) {
+        emitAiOp({ op: "chat_fallback_gemini", owner_id: null, model: fbModel, latency_ms: Date.now() - fbStart, status: "error", input: fbInput, output: "", error: truncateForMarker(gemErr?.message || String(gemErr), 500) });
         console.error("[ERROR] Gemini chat fallback also failed:", String(gemErr?.message || gemErr).slice(0, 200));
         throw error;
       }
@@ -938,6 +985,12 @@ export async function* runDeviceAssistantStreaming({ transcript, userContext, en
   const toolEvents = [];
   const quickItems = [];
   let fullText = "";
+  // ai_op telemetry: streaming path serves the app surface → op "chat_app";
+  // HALO responses through this path fall back to "chat_halo". Latency spans the
+  // whole completion loop. Model is the OpenAI chat model actually requested.
+  const aiOpStart = Date.now();
+  const aiOp = normalizedResponseSurface === "app" ? "chat_app" : "chat_halo";
+  const aiModel = env.OPENAI_MODEL || "gpt-5.4-2026-03-05";
   let falseConfirmCorrections = 0;
   let falseConfirmRecovered = false;
   // When the false-confirmation guard fires, the corrective retry FORCES a tool
@@ -945,6 +998,7 @@ export async function* runDeviceAssistantStreaming({ transcript, userContext, en
   // the tool (kitchen_add on 07-09: retry produced text again in ~1s, recovered:false).
   let forceToolChoiceNext = null;
 
+  try {
   for (let turn = 0; turn < 6; turn += 1) {
     const turnToolChoice = forceToolChoiceNext || "auto";
     forceToolChoiceNext = null;
@@ -1026,6 +1080,7 @@ export async function* runDeviceAssistantStreaming({ transcript, userContext, en
         toolEvents,
         responseSurface: normalizedResponseSurface
       });
+      emitAiOp({ op: aiOp, owner_id: ownerIdForMarker(userContext), model: aiModel, latency_ms: Date.now() - aiOpStart, status: "success", input: truncateForMarker(transcript, 400), output: summarizeAiOutput(fullText || "Okay.", toolTrace), error: "" });
       return {
         text: fullText || "Okay.",
         quickItems,
@@ -1102,6 +1157,7 @@ export async function* runDeviceAssistantStreaming({ transcript, userContext, en
     quickItems,
     toolEvents
   });
+  emitAiOp({ op: aiOp, owner_id: ownerIdForMarker(userContext), model: aiModel, latency_ms: Date.now() - aiOpStart, status: "success", input: truncateForMarker(transcript, 400), output: summarizeAiOutput(fullText || "I heard you, but I couldn't finish that request.", toolTrace), error: "" });
   return {
     text: fullText || "I heard you, but I couldn't finish that request.",
     quickItems,
@@ -1111,6 +1167,10 @@ export async function* runDeviceAssistantStreaming({ transcript, userContext, en
     type: uiResponse.type,
     ui: uiResponse.ui
   };
+  } catch (aiOpErr) {
+    emitAiOp({ op: aiOp, owner_id: ownerIdForMarker(userContext), model: aiModel, latency_ms: Date.now() - aiOpStart, status: "error", input: truncateForMarker(transcript, 400), output: summarizeAiOutput(fullText, toolTrace), error: truncateForMarker(aiOpErr?.message || String(aiOpErr), 500) });
+    throw aiOpErr;
+  }
 }
 
 function validateAudioQuality(audioBuffer) {
@@ -1168,6 +1228,11 @@ export async function transcribeAudio(audioBuffer, env, options = {}) {
   form.append("response_format", "json");
   form.append("file", new Blob([wavBuffer], { type: "audio/wav" }), "audio.wav");
 
+  // ai_op telemetry: input is byte/duration counts only — never the audio itself.
+  const transcribeStart = Date.now();
+  const transcribeModel = env.TRANSCRIPTION_MODEL || "gpt-4o-mini-transcribe";
+  const transcribeInput = `pcm_bytes=${audioBuffer?.length || 0} wav_bytes=${wavBuffer?.length || 0} sample_rate=${Number(options.sampleRate || env.AUDIO_SAMPLE_RATE || 24000)}`;
+
   let json;
   try {
     json = await openAiRequest("/audio/transcriptions", {
@@ -1178,15 +1243,27 @@ export async function transcribeAudio(audioBuffer, env, options = {}) {
       body: form
     });
   } catch (error) {
+    emitAiOp({ op: "transcribe", owner_id: null, model: transcribeModel, latency_ms: Date.now() - transcribeStart, status: "error", input: transcribeInput, output: "", error: truncateForMarker(error?.message || String(error), 500) });
     // OpenAI transcription down (429/5xx/abort) → fall back to native Gemini so HALO/app voice
     // still gets transcribed. Needs a durable AIza GEMINI_API_KEY (native rejects AQ. tokens).
     if (geminiFallbackEnabled(env) && isOpenAiOutageError(error)) {
       console.warn("[WARN] OpenAI transcription failed — falling back to Gemini:", String(error?.message || "").slice(0, 140));
-      return await geminiTranscribe(wavBuffer, env);
+      const fbStart = Date.now();
+      const fbModel = env.GEMINI_TRANSCRIBE_MODEL || "gemini-2.5-flash";
+      try {
+        const fbText = await geminiTranscribe(wavBuffer, env);
+        emitAiOp({ op: "transcribe_fallback", owner_id: null, model: fbModel, latency_ms: Date.now() - fbStart, status: "success", input: transcribeInput, output: truncateForMarker(fbText, 1200), error: "" });
+        return fbText;
+      } catch (fbErr) {
+        emitAiOp({ op: "transcribe_fallback", owner_id: null, model: fbModel, latency_ms: Date.now() - fbStart, status: "error", input: transcribeInput, output: "", error: truncateForMarker(fbErr?.message || String(fbErr), 500) });
+        throw fbErr;
+      }
     }
     throw error;
   }
-  return String(json?.text || "").trim();
+  const transcript = String(json?.text || "").trim();
+  emitAiOp({ op: "transcribe", owner_id: null, model: transcribeModel, latency_ms: Date.now() - transcribeStart, status: "success", input: transcribeInput, output: truncateForMarker(transcript, 1200), error: "" });
+  return transcript;
 }
 
 export async function runDeviceAssistant({ transcript, userContext, env, sessionMessages = [], responseSurface = "halo", lambdaDeadline = null }) {
@@ -1239,6 +1316,12 @@ export async function runDeviceAssistant({ transcript, userContext, env, session
   const toolEvents = [];
   const quickItems = [];
   let lastAssistantText = "";
+  // ai_op telemetry: op derived from responseSurface (HALO path → "chat_halo",
+  // app → "chat_app"). Latency spans the whole completion loop; model is the
+  // OpenAI chat model actually requested.
+  const aiOpStart = Date.now();
+  const aiOp = normalizedResponseSurface === "app" ? "chat_app" : "chat_halo";
+  const aiModel = env.OPENAI_MODEL || "gpt-5.4-2026-03-05";
   let falseConfirmCorrections = 0;
   let falseConfirmRecovered = false;
   // The false-confirmation corrective retry FORCES a tool call (see streaming path).
@@ -1250,6 +1333,7 @@ export async function runDeviceAssistant({ transcript, userContext, env, session
     console.log("[DEBUG] forcing tool_choice on first turn:", JSON.stringify(initialToolChoice));
   }
 
+  try {
   for (let turn = 0; turn < 6; turn += 1) {
     // Force a tool on a corrective retry; else force on the first turn if write-intent; else auto.
     const turnToolChoice = forceToolChoiceNext || (turn === 0 ? initialToolChoice : "auto");
@@ -1301,6 +1385,7 @@ export async function runDeviceAssistant({ transcript, userContext, env, session
         toolCount: toolTrace.length
       }));
 
+      emitAiOp({ op: aiOp, owner_id: ownerIdForMarker(userContext), model: aiModel, latency_ms: Date.now() - aiOpStart, status: "success", input: truncateForMarker(transcript, 400), output: summarizeAiOutput(lastAssistantText || "Okay.", toolTrace), error: "" });
       return {
         text: lastAssistantText || "Okay.",
         quickItems,
@@ -1385,6 +1470,7 @@ export async function runDeviceAssistant({ transcript, userContext, env, session
     toolCount: toolTrace.length
   }));
 
+  emitAiOp({ op: aiOp, owner_id: ownerIdForMarker(userContext), model: aiModel, latency_ms: Date.now() - aiOpStart, status: "success", input: truncateForMarker(transcript, 400), output: summarizeAiOutput(lastAssistantText || "I heard you, but I couldn't finish that request.", toolTrace), error: "" });
   return {
     text: lastAssistantText || "I heard you, but I couldn't finish that request.",
     quickItems,
@@ -1394,4 +1480,8 @@ export async function runDeviceAssistant({ transcript, userContext, env, session
     type: uiResponse.type,
     ui: uiResponse.ui
   };
+  } catch (aiOpErr) {
+    emitAiOp({ op: aiOp, owner_id: ownerIdForMarker(userContext), model: aiModel, latency_ms: Date.now() - aiOpStart, status: "error", input: truncateForMarker(transcript, 400), output: summarizeAiOutput(lastAssistantText, toolTrace), error: truncateForMarker(aiOpErr?.message || String(aiOpErr), 500) });
+    throw aiOpErr;
+  }
 }
