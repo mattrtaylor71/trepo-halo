@@ -2201,13 +2201,18 @@ def _delete_archived_kitchen_item(owner, item_id):
     """Delete an already-archived kitchen item from archive history/feed."""
     try:
         conn = _mysql_conn()
-        member_ids = _get_household_member_ids(conn, owner)
         with conn.cursor() as cur:
-            # Delete from shared archive table
-            cur.execute("SELECT `_id` FROM `shared_archive_kitchen` WHERE `_id` = %s", [item_id])
+            # Household-scope the archive delete: without an owner_id filter this is a
+            # cross-tenant IDOR (any item_id would delete another household's archived
+            # row). Route through the resolver so the WHERE matches every sibling path.
+            arch_table, arch_where, arch_params = _resolve_kitchen_table(owner, '_archive_kitchen', conn)
+            verify_where = "`_id` = %s"
+            if arch_where:
+                verify_where = f"{arch_where} AND {verify_where}"
+            cur.execute(f"SELECT `_id` FROM `{arch_table}` WHERE {verify_where}", arch_params + [item_id])
             if not cur.fetchone():
                 return _error_response(404, f'Archived item with id {item_id} not found')
-            cur.execute("DELETE FROM `shared_archive_kitchen` WHERE `_id` = %s", [item_id])
+            cur.execute(f"DELETE FROM `{arch_table}` WHERE {verify_where}", arch_params + [item_id])
             deleted_count = int(cur.rowcount or 0)
             conn.commit()
 

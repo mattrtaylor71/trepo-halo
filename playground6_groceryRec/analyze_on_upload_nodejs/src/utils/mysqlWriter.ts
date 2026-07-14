@@ -521,7 +521,7 @@ export async function writeToArchiveKitchenTable(record: ArchiveKitchenRecord): 
     const sqlForTable = (tableName: string) => `
       INSERT INTO \`${tableName}\`
       (
-        _id, _owner, _device, _createdDate,
+        _id, _owner, owner_id, _device, _createdDate,
         product_name, brand, variant, category, confidence, explanation, product_description, barcode, country_guess,
         estimated_price,
         ingredients, nutrition_summary, upf, harmful_ingredients,
@@ -532,7 +532,7 @@ export async function writeToArchiveKitchenTable(record: ArchiveKitchenRecord): 
         job_id, user_id,
         archived_at, archived_reason, archived_from_table
       )
-      VALUES (?, ?, ?, NOW(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)
+      VALUES (?, ?, ?, ?, NOW(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)
       ON DUPLICATE KEY UPDATE
         archived_at = VALUES(archived_at),
         archived_reason = VALUES(archived_reason),
@@ -541,6 +541,7 @@ export async function writeToArchiveKitchenTable(record: ArchiveKitchenRecord): 
 
     const buildValues = (entryId: string, targetOwnerId: string) => ([
       entryId,
+      targetOwnerId,
       targetOwnerId,
       device_id,
       groceryItem.product_name || null,
