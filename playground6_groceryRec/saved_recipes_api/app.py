@@ -3714,6 +3714,9 @@ def _update_saved_recipe_image_fields(conn, owner, recipe_id, image_fields):
             ],
         )
     conn.commit()
+    # Migration dual-write: mirror the enriched image fields into shared_saved_recipes
+    # (re-upsert the row) so generated images survive the read cutover. Non-blocking.
+    _dual_write_saved_recipe_to_shared(conn, owner, recipe_id)
 
 
 def _invoke_saved_recipe_image_generation_async(owner, recipe_id, request_id=None):
@@ -3986,23 +3989,35 @@ def _get_saved_recipes(owner, query=None, request_id=None):
         table = _saved_recipes_table(owner)
         limit = _parse_limit(query)
         before = _parse_before(query)
-        with conn.cursor() as cur:
-            cur.execute("""
-                SELECT COUNT(*) AS n FROM information_schema.tables
-                WHERE table_schema = DATABASE() AND table_name = %s
-            """, [table])
-            if cur.fetchone()['n'] == 0:
-                return _success({'owner': owner, 'recipes': [], 'count': 0})
-        _ensure_saved_recipes_table(conn, owner)
+        # Shared-table read cutover (reversible via env flag, default off = per-owner).
+        # MANDATORY owner_id filter. Internal fetch-by-id/hash + mutations stay per-owner
+        # (source of truth); only this user-facing list read flips.
+        use_shared = os.getenv('READ_SHARED_SAVED_RECIPES', '').strip().lower() == 'true'
+        if not use_shared:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT COUNT(*) AS n FROM information_schema.tables
+                    WHERE table_schema = DATABASE() AND table_name = %s
+                """, [table])
+                if cur.fetchone()['n'] == 0:
+                    return _success({'owner': owner, 'recipes': [], 'count': 0})
+            _ensure_saved_recipes_table(conn, owner)
         with conn.cursor() as cur:
             params = []
-            where_clause = ""
+            where_parts = []
+            if use_shared:
+                from_ref = '`shared_saved_recipes`'
+                where_parts.append("owner_id = %s")
+                params.append(owner)
+            else:
+                from_ref = f'`{table}`'
             if before:
-                where_clause = "WHERE COALESCE(_updatedDate, _createdDate) < %s"
+                where_parts.append("COALESCE(_updatedDate, _createdDate) < %s")
                 params.append(before)
+            where_clause = ("WHERE " + " AND ".join(where_parts)) if where_parts else ""
             cur.execute(
                 f"""SELECT {_SAVED_RECIPE_SELECT_FIELDS}
-                    FROM `{table}`
+                    FROM {from_ref}
                     {where_clause}
                     ORDER BY COALESCE(_updatedDate, _createdDate) DESC
                     LIMIT {limit + 1}""",
@@ -4056,20 +4071,32 @@ def _personalize_saved_recipes(owner, request_id=None, recipe_ids=None):
     conn = _mysql_conn()
     try:
         table = _saved_recipes_table(owner)
+        # Shared-table read cutover (reversible via env flag, default off = per-owner).
+        use_shared = os.getenv('READ_SHARED_SAVED_RECIPES', '').strip().lower() == 'true'
+        if not use_shared:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT COUNT(*) AS n FROM information_schema.tables
+                    WHERE table_schema = DATABASE() AND table_name = %s
+                """, [table])
+                if cur.fetchone()['n'] == 0:
+                    return _success({'owner': owner, 'recipes': []})
+            _ensure_saved_recipes_table(conn, owner)
         with conn.cursor() as cur:
-            cur.execute("""
-                SELECT COUNT(*) AS n FROM information_schema.tables
-                WHERE table_schema = DATABASE() AND table_name = %s
-            """, [table])
-            if cur.fetchone()['n'] == 0:
-                return _success({'owner': owner, 'recipes': []})
-        _ensure_saved_recipes_table(conn, owner)
-        with conn.cursor() as cur:
-            cur.execute(
-                f"""SELECT {_SAVED_RECIPE_SELECT_FIELDS}
-                    FROM `{table}`
-                    ORDER BY COALESCE(_updatedDate, _createdDate) DESC""",
-            )
+            if use_shared:
+                cur.execute(
+                    f"""SELECT {_SAVED_RECIPE_SELECT_FIELDS}
+                        FROM `shared_saved_recipes`
+                        WHERE owner_id = %s
+                        ORDER BY COALESCE(_updatedDate, _createdDate) DESC""",
+                    [owner],
+                )
+            else:
+                cur.execute(
+                    f"""SELECT {_SAVED_RECIPE_SELECT_FIELDS}
+                        FROM `{table}`
+                        ORDER BY COALESCE(_updatedDate, _createdDate) DESC""",
+                )
             rows = cur.fetchall() or []
         _ensure_recipe_personalization_tables(conn)
         kitchen_context = _build_kitchen_match_context(conn, owner)
@@ -4772,6 +4799,20 @@ def _delete_saved_recipe(owner, item_id):
             cur.execute(f"DELETE FROM `{table}` WHERE _id = %s LIMIT 1", [item_id])
         conn.commit()
         _delete_owner_recipe_availability(conn, owner, 'saved', item_id)
+        # Migration dual-write: mirror the delete into shared_saved_recipes so a deleted
+        # recipe can't reappear once reads flip to shared (per-owner stays source of truth).
+        # Non-blocking — a missed shared delete is caught by the reconcile/parity sweep.
+        if DUAL_WRITE_SAVED_RECIPES:
+            try:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        f"DELETE FROM `{_SHARED_SAVED_RECIPES_TABLE}` WHERE owner_id = %s AND _id = %s LIMIT 1",
+                        [owner, item_id],
+                    )
+                conn.commit()
+            except Exception as exc:
+                print(json.dumps({'evt': 'dual_write_miss', 'family': 'saved_recipes_delete',
+                    'owner_id': str(owner), 'recipe_id': str(item_id), 'error': str(exc)[:500]}), file=sys.stderr)
         # Fan out delete to household members
         try:
             _fan_out_delete_to_household(conn, owner, item_id)
@@ -4836,6 +4877,9 @@ def _update_saved_recipe(owner, item_id, body, request_id=None):
         except Exception as exc:
             _log_event(request_id, 'saved_recipe_update_member_error', member=tid, error=str(exc))
     conn.commit()
+    # Migration dual-write: mirror the edited row into shared_saved_recipes (re-upsert)
+    # so title/ingredient/step edits survive the read cutover. Non-blocking.
+    _dual_write_saved_recipe_to_shared(conn, owner, item_id, request_id=request_id)
 
     # Ingredients may have changed → recompute availability against the owner's kitchen.
     _ensure_recipe_personalization_tables(conn)
