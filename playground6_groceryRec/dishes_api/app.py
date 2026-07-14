@@ -25,6 +25,68 @@ _DB_READ_TIMEOUT = int(os.getenv('DB_READ_TIMEOUT_SECONDS', '10'))
 _DB_WRITE_TIMEOUT = int(os.getenv('DB_WRITE_TIMEOUT_SECONDS', '10'))
 USE_SHARED_TABLES = os.getenv('USE_SHARED_TABLES', 'false').lower() == 'true'
 
+# Shared-table migration: mirror dish writes into shared_dishes (owner_id-keyed).
+# Dishes are per-user (no household fan-out) so owner_id = acting owner. Off by default;
+# non-blocking (a missed mirror is redundant, never a failed user write). Column set is
+# the per-owner∩shared intersection — the Node capture path populates the enrichment-only
+# shared columns (components/resized_image_*/analysis_*).
+DUAL_WRITE_DISHES = os.getenv('DUAL_WRITE_DISHES', 'false').lower() == 'true'
+_SHARED_DISHES_TABLE = 'shared_dishes'
+_SHARED_DISHES_COLS = (
+    '_id', '_owner', '_device', '_createdDate', 'dish_name', 'confidence', 'explanation',
+    'serving_size', 'calories', 'total_fat', 'saturated_fat', 'trans_fat', 'cholesterol',
+    'sodium', 'total_carbohydrates', 'dietary_fiber', 'sugars', 'protein', 'vitamin_a',
+    'vitamin_c', 'calcium', 'iron', 'ingredients', 'allergens', 'images', 's3_key',
+    'dish_image_url', 'dish_image_key', 'action', 'job_id', 'user_id',
+)
+
+
+def _dual_write_dish_to_shared(conn, owner, dish_table, dish_id):
+    """Mirror one dish row (by _id) from the per-owner table into shared_dishes."""
+    if not DUAL_WRITE_DISHES:
+        return
+    try:
+        cols = ', '.join(f'`{c}`' for c in _SHARED_DISHES_COLS)
+        src = ', '.join(f's.`{c}`' for c in _SHARED_DISHES_COLS)
+        upd = ', '.join(f'`{c}`=VALUES(`{c}`)' for c in _SHARED_DISHES_COLS if c != '_id')
+        sql = (
+            f"INSERT INTO `{_SHARED_DISHES_TABLE}` (`owner_id`, {cols}) "
+            f"SELECT %s, {src} FROM `{dish_table}` s WHERE s.`_id` = %s "
+            f"ON DUPLICATE KEY UPDATE `owner_id`=VALUES(`owner_id`), {upd}"
+        )
+        with conn.cursor() as cur:
+            cur.execute(sql, (owner, dish_id))
+        conn.commit()
+    except Exception as exc:
+        try:
+            import sys
+            print(json.dumps({'evt': 'dual_write_miss', 'family': 'dishes',
+                'owner_id': str(owner), 'dish_id': str(dish_id), 'error': str(exc)[:500]}),
+                file=sys.stderr)
+        except Exception:
+            pass
+
+
+def _dual_delete_dish_from_shared(conn, owner, dish_id):
+    """Mirror a dish delete into shared_dishes so a deleted dish can't reappear post-flip."""
+    if not DUAL_WRITE_DISHES:
+        return
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"DELETE FROM `{_SHARED_DISHES_TABLE}` WHERE `owner_id` = %s AND `_id` = %s LIMIT 1",
+                (owner, dish_id),
+            )
+        conn.commit()
+    except Exception as exc:
+        try:
+            import sys
+            print(json.dumps({'evt': 'dual_write_miss', 'family': 'dishes_delete',
+                'owner_id': str(owner), 'dish_id': str(dish_id), 'error': str(exc)[:500]}),
+                file=sys.stderr)
+        except Exception:
+            pass
+
 
 def _get_db_config():
     missing = [name for name in _DB_ENV_VARS if not os.getenv(name)]
@@ -205,8 +267,11 @@ def _resolve_table(owner, suffix, conn=None):
     shared_name = shared_map.get(suffix)
     if not shared_name:
         return f"{safe}{suffix}", "", []
-    # Dishes are user-specific — read from per-user table, not shared
+    # Dishes are user-specific (no household fan-out). Read from shared_dishes when the
+    # per-type read flag is on (reversible; owner_id = self); else the per-user table.
     if suffix == '_dishes':
+        if os.getenv('READ_SHARED_DISHES', '').strip().lower() == 'true':
+            return shared_name, "owner_id = %s", [safe]
         return f"{safe}{suffix}", "", []
     member_ids = _get_household_member_ids(conn, owner) if conn else [safe]
     placeholders = ','.join(['%s'] * len(member_ids))
@@ -371,14 +436,11 @@ def _create_dish(owner, body):
                   serving_size, explanation, ingredients_json,
                   user_id, analysis_status))
             conn.commit()
+            _dual_write_dish_to_shared(conn, owner, table_name, dish_id)
 
-            read_tbl, read_where, read_params = _resolve_table(owner, '_dishes', conn)
-            read_q = f"SELECT * FROM `{read_tbl}` WHERE `_id` = %s"
-            read_p = [dish_id]
-            if read_where:
-                read_q = f"SELECT * FROM `{read_tbl}` WHERE {read_where} AND `_id` = %s"
-                read_p = list(read_params) + [dish_id]
-            cur.execute(read_q, read_p)
+            # Read the just-written row from the per-owner table (source of truth,
+            # guaranteed present regardless of the READ_SHARED_DISHES flag).
+            cur.execute(f"SELECT * FROM `{table_name}` WHERE `_id` = %s", [dish_id])
             row = cur.fetchone()
 
         dish_dict = {k: json_serial(v) for k, v in (row or {}).items()}
@@ -545,6 +607,7 @@ def _update_dish(owner, item_id, body):
             query = f"UPDATE `{table_name}` SET {', '.join(updates)} WHERE `_id` = %s"
             cur.execute(query, values)
             conn.commit()
+            _dual_write_dish_to_shared(conn, owner, table_name, item_id)
 
             cur.execute(f"SELECT * FROM `{table_name}` WHERE `_id` = %s", [item_id])
             row = cur.fetchone()
@@ -609,6 +672,7 @@ def _delete_dish(owner, item_id):
 
             cur.execute(f"DELETE FROM `{table_name}` WHERE `_id` = %s", [item_id])
             conn.commit()
+            _dual_delete_dish_from_shared(conn, owner, item_id)
             _record_master_feed_event(
                 conn,
                 owner,
