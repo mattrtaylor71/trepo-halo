@@ -20,11 +20,11 @@ const geminiFallback_1 = require("./geminiFallback");
 // schema-escape can never crash identify — the normalizer clamps it.
 exports.CATEGORY_ENUM = [
     "leftovers", "produce", "dairy_eggs", "meat_seafood",
-    "pantry", "snacks_sweets", "beverages", "prepared_other",
+    "pantry", "spices", "snacks_sweets", "beverages", "prepared_other",
 ];
 exports.CATEGORY_ENUM_ENABLED = ["v1", "enum", "true", "on"].includes(String(process.env.CATEGORY_ENUM_PROMPT_VERSION || "").toLowerCase());
-const CATEGORY_ENUM_GUIDANCE = "\n\nCATEGORY — choose EXACTLY ONE of these 8 values, by what the product fundamentally IS, NOT by incidental words in its name: leftovers, produce, dairy_eggs, meat_seafood, pantry, snacks_sweets, beverages, prepared_other." +
-    "\nRules + hard examples: Potato Bread / Blueberry Bread = pantry (it IS bread, shelf-stable). Blueberry Muffins / cakes / cookies / pastries = snacks_sweets. Green Onion Pancakes and other frozen/prepared foods = prepared_other. A bag of potatoes / loose bananas / a bunch of celery or herbs = produce. Strawberry yogurt = dairy_eggs. Chicken broth = pantry. Fresh raw meat/poultry/fish = meat_seafood. Any drink = beverages. Home leftover food = leftovers. When a produce word appears in a processed product's name (potato bread, blueberry muffin, green onion pancake), pick the PROCESSED category, not produce.";
+const CATEGORY_ENUM_GUIDANCE = "\n\nCATEGORY — choose EXACTLY ONE of these 9 values, by what the product fundamentally IS, NOT by incidental words in its name: leftovers, produce, dairy_eggs, meat_seafood, pantry, spices, snacks_sweets, beverages, prepared_other." +
+    "\nRules + hard examples: Potato Bread / Blueberry Bread = pantry (it IS bread, shelf-stable). Blueberry Muffins / cakes / cookies / pastries = snacks_sweets. Green Onion Pancakes and other frozen/prepared foods = prepared_other. A bag of potatoes / loose bananas / a bunch of celery or herbs = produce. Strawberry yogurt = dairy_eggs. Chicken broth = pantry. Fresh raw meat/poultry/fish = meat_seafood. Any drink = beverages. Home leftover food = leftovers. Spices, seasonings, spice blends, spice rubs, and dried/ground herbs (cinnamon, cumin, paprika, oregano, chili powder, garlic powder, dried basil, etc.) = spices, NOT pantry. When a produce word appears in a processed product's name (potato bread, blueberry muffin, green onion pancake), pick the PROCESSED category, not produce. Tofu (silken/firm/extra-firm), tempeh, seitan, and plant-based meat substitutes = prepared_other — they are a processed soy/plant product, NOT produce/a vegetable and NOT meat_seafood.";
 exports.GroceryItemSchema = zod_1.z.object({
     brand: zod_1.z.string().nullable().optional(),
     product_name: zod_1.z.string().nullable().optional(),
@@ -665,7 +665,9 @@ async function identifyGroceryItem(input, options = {}) {
                 const response = await openai.responses.create({
                     model,
                     ...((/^(o[1-9]|gpt-5)/.test(model)) ? { reasoning: { effort: "medium" } } : {}),
-                    max_output_tokens: 2200,
+                    // Headroom so reasoning tokens (drawn from this budget on gpt-5.x) don't starve the
+                    // structured output → "No structured output". 2200 occasionally ran dry under medium.
+                    max_output_tokens: 4000,
                     text: {
                         format: {
                             type: "json_schema",

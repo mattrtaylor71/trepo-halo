@@ -9,46 +9,30 @@ exports.updateDishRow = updateDishRow;
 const promise_1 = __importDefault(require("mysql2/promise"));
 const householdSync_1 = require("./householdSync");
 const DUAL_WRITE_ENABLED = (process.env.DUAL_WRITE_ENABLED || 'false').toLowerCase() === 'true';
-async function dualWriteSharedDishes(connection, owner, entryId, record, dishName, confidence, ingredientsJson, allergensJson) {
+async function dualWriteSharedDishes(connection, owner, entryId) {
+    // Verbatim INSERT...SELECT copy of the just-written per-owner row so shared is
+    // byte-identical — including _createdDate/_updatedDate (the old payload-based
+    // insert let shared default-stamp its own timestamps, skewing dates by seconds).
     if (!DUAL_WRITE_ENABLED)
         return;
     try {
-        const { dish, nutritionData, device_id, user_id, job_id, action, s3_key, image_url, resized_image_url, resized_image_key, dish_image_url, dish_image_key } = record;
-        await connection.execute(`INSERT INTO \`shared_dishes\` (
-        _id, owner_id, _owner, _device, dish_name, confidence, explanation,
-        serving_size, calories, total_fat, saturated_fat, trans_fat, cholesterol, sodium,
-        total_carbohydrates, dietary_fiber, sugars, protein,
-        vitamin_a, vitamin_c, calcium, iron,
-        ingredients, allergens, images, s3_key, action,
-        resized_image_url, resized_image_key, dish_image_url, dish_image_key,
-        job_id, user_id
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      ON DUPLICATE KEY UPDATE
-        dish_name = COALESCE(VALUES(dish_name), dish_name),
-        confidence = COALESCE(VALUES(confidence), confidence),
-        calories = COALESCE(VALUES(calories), calories),
-        protein = COALESCE(VALUES(protein), protein),
-        _updatedDate = NOW()`, [
-            entryId, owner, owner, device_id,
-            dishName, confidence,
-            dish.explanation || nutritionData.explanation || null,
-            nutritionData.serving_size || null,
-            nutritionData.calories || null, nutritionData.total_fat || null,
-            nutritionData.saturated_fat || null, nutritionData.trans_fat || null,
-            nutritionData.cholesterol || null, nutritionData.sodium || null,
-            nutritionData.total_carbohydrates || null, nutritionData.dietary_fiber || null,
-            nutritionData.sugars || null, nutritionData.protein || null,
-            nutritionData.vitamin_a || null, nutritionData.vitamin_c || null,
-            nutritionData.calcium || null, nutritionData.iron || null,
-            ingredientsJson, allergensJson,
-            image_url, s3_key, action,
-            resized_image_url || null, resized_image_key || null,
-            dish_image_url || null, dish_image_key || null,
-            job_id, user_id,
-        ]);
+        const memberTable = `${String(owner).replace(/[^a-zA-Z0-9_-]/g, '')}_dishes`;
+        const [srcRows] = await connection.execute("SELECT COLUMN_NAME cn FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name=?", [memberTable]);
+        const [shdRows] = await connection.execute("SELECT COLUMN_NAME cn FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='shared_dishes'");
+        const src = new Set(srcRows.map((r) => r.cn || r.COLUMN_NAME));
+        const cols = shdRows.map((r) => r.cn || r.COLUMN_NAME).filter((c) => src.has(c) && c !== 'owner_id');
+        if (!cols.length)
+            return;
+        const collist = cols.map((c) => `\`${c}\``).join(', ');
+        const s = cols.map((c) => `s.\`${c}\``).join(', ');
+        const upd = cols.filter((c) => c !== '_id').map((c) => `\`${c}\`=VALUES(\`${c}\`)`).join(', ');
+        await connection.execute(`INSERT INTO \`shared_dishes\` (\`owner_id\`, ${collist}) SELECT ?, ${s} FROM \`${memberTable}\` s WHERE s.\`_id\` = ? ON DUPLICATE KEY UPDATE \`owner_id\`=VALUES(\`owner_id\`), ${upd}`, [owner, entryId]);
     }
     catch (err) {
-        console.error('[DUAL-WRITE] shared_dishes write failed (non-fatal):', err?.message || err);
+        try {
+            console.error(JSON.stringify({ evt: 'dual_write_miss', family: 'dishes', owner_id: String(owner || ''), item_id: String(entryId || ''), error: String(err && err.message ? err.message : err).slice(0, 500) }));
+        }
+        catch (_) { }
     }
 }
 async function writeToDishesTable(record) {
@@ -193,8 +177,12 @@ async function writeToDishesTable(record) {
             await connection.execute(sqlForTable(tableName), values);
             console.log(`[MySQL] Successfully inserted dish record into ${tableName}, entry_id: ${entryId}`);
         }
-        // Dual-write to shared table
-        await dualWriteSharedDishes(connection, record.owner, entryId, record, dishName, confidence, ingredientsJson, allergensJson);
+        // Dual-write to shared table — per member: dish rows fan out to every
+        // household member's table, so each member's copy must mirror to shared
+        // under their own owner_id (mirroring only record.owner strands the rest).
+        for (const memberId of memberIds) {
+            await dualWriteSharedDishes(connection, memberId, entryId);
+        }
     }
     catch (error) {
         console.error('[MySQL] Error writing household dishes:', error);
@@ -427,5 +415,10 @@ async function updateDishRow(connection, tableName, itemId, fields) {
     const sql = `UPDATE \`${tableName}\` SET ${updates.join(', ')} WHERE _id = ?`;
     await connection.execute(sql, values);
     console.log(`[MySQL] Updated dish ${itemId} in ${tableName}`);
+    // Mirror the updated row to shared_dishes (covers the recharacterize path,
+    // which previously updated per-owner only and let shared drift).
+    if (tableName.endsWith('_dishes')) {
+        await dualWriteSharedDishes(connection, tableName.slice(0, -'_dishes'.length), itemId);
+    }
 }
 //# sourceMappingURL=mysqlDishWriter.js.map
