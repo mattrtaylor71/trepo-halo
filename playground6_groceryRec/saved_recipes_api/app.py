@@ -421,13 +421,21 @@ def _dual_write_saved_recipe_to_shared(conn, owner, recipe_id, request_id=None):
             return v if isinstance(v, str) else json.dumps(v)
 
         with conn.cursor() as cur:
+            # Copy the per-owner timestamps verbatim — shared must show the same
+            # "saved on" time as the source table, never the mirror time.
+            cur.execute(
+                f"SELECT `_createdDate`, `_updatedDate` FROM `{_safe_owner_token(owner)}_saved_recipes` WHERE `_id` = %s",
+                (recipe_id,),
+            )
+            ts = cur.fetchone() or {}
             cur.execute(
                 f"""INSERT INTO `{_SHARED_SAVED_RECIPES_TABLE}` (
                         owner_id, _id, _owner, source_type, source_url, resolved_url, resolved_url_hash,
                         title, image_url, image_urls, source_image_url, source_image_urls, image_storage_key,
                         ingredients, instructions, notes, raw_caption, raw_content,
-                        extraction_source, author_name, caption_field, status, meal_category
-                    ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                        extraction_source, author_name, caption_field, status, meal_category,
+                        _createdDate, _updatedDate
+                    ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,COALESCE(%s,NOW()),%s)
                     ON DUPLICATE KEY UPDATE
                         title=VALUES(title), image_url=VALUES(image_url), image_urls=VALUES(image_urls),
                         source_image_url=VALUES(source_image_url), source_image_urls=VALUES(source_image_urls),
@@ -435,7 +443,8 @@ def _dual_write_saved_recipe_to_shared(conn, owner, recipe_id, request_id=None):
                         instructions=VALUES(instructions), notes=VALUES(notes), raw_caption=VALUES(raw_caption),
                         raw_content=VALUES(raw_content), extraction_source=VALUES(extraction_source),
                         author_name=VALUES(author_name), caption_field=VALUES(caption_field),
-                        status=VALUES(status), meal_category=VALUES(meal_category), _updatedDate=NOW()""",
+                        status=VALUES(status), meal_category=VALUES(meal_category),
+                        _createdDate=VALUES(_createdDate), _updatedDate=VALUES(_updatedDate)""",
                 (
                     owner, row.get('_id'), row.get('_owner'), row.get('source_type'), row.get('source_url'),
                     row.get('resolved_url'), resolved_url_hash, row.get('title'), row.get('image_url'),
@@ -444,6 +453,7 @@ def _dual_write_saved_recipe_to_shared(conn, owner, recipe_id, request_id=None):
                     _j(row.get('notes')), row.get('raw_caption'), row.get('raw_content'),
                     row.get('extraction_source'), row.get('author_name'), row.get('caption_field'),
                     row.get('status') or 'ready', row.get('meal_category'),
+                    ts.get('_createdDate'), ts.get('_updatedDate'),
                 ),
             )
         conn.commit()
