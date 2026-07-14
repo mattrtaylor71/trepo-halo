@@ -345,6 +345,20 @@ exports.handler = async (event) => {
           }));
           if (memberId === ownerId) throw e;
         }
+        // Mirror into the VOICE store (shared_shopping_list) per member so items
+        // added in the app are visible to HALO voice. Voice reads owner-scoped,
+        // and the remove path marks these rows 'REMOVED' — this is the missing add
+        // direction. Ungated + non-fatal, matching the remove-side mark.
+        try {
+          await pool.execute(
+            `INSERT INTO shared_shopping_list
+              (owner_id, _owner, _device, product_name, product_brand, images, product_barcode, action, store, household_item_uuid)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [memberId, memberId, device, product_name, product_brand || null, images || null, product_barcode || null, effectiveAction, store || null, sharedUUID]
+          );
+        } catch (e) {
+          console.error(JSON.stringify({ evt: 'shared_shopping_add_miss', op: 'add', ownerId, memberId, error: e.code || e.message }));
+        }
       }
 
       // Dual-write to shared_list
@@ -434,6 +448,18 @@ exports.handler = async (event) => {
                 product_name: itemName, error: err.code || err.message,
               }));
             }
+          }
+          // Mirror into the VOICE store (shared_shopping_list) per member — the
+          // missing add direction that made app-added items invisible to HALO voice.
+          try {
+            await pool.execute(
+              `INSERT INTO shared_shopping_list
+                (owner_id, _owner, _device, product_name, product_brand, images, product_barcode, action, store, household_item_uuid)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              [memberId, memberId, itemDevice, itemName, itemBrand, itemImages, itemBarcode, itemAction, itemStore, sharedUUID]
+            );
+          } catch (e) {
+            console.error(JSON.stringify({ evt: 'shared_shopping_add_miss', op: 'batch_add', ownerId, memberId, error: e.code || e.message }));
           }
         }
 
