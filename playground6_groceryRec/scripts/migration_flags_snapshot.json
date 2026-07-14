@@ -1,127 +1,130 @@
 {
-  "trepo-grocery-backend-dev-AnalyzeDiscardOnUpload-BnUyRpHHwaOx": {
-    "DUAL_WRITE_DISCARDS": "true",
-    "DUAL_WRITE_METRICS": "true",
-    "USE_SHARED_TABLES": "true",
-    "WRITE_SHARED_ONLY": "true"
-  },
-  "trepo-grocery-backend-dev-AnalyzeDishOnUpload-1wGSk6GmnxLv": {
-    "DUAL_WRITE_ENABLED": "true",
-    "DUAL_WRITE_METRICS": "true",
-    "USE_SHARED_TABLES": "true",
-    "WRITE_SHARED_ONLY": "true"
-  },
-  "trepo-grocery-backend-dev-AnalyzeOnUpload-bpWcKEif3Gq7": {
-    "DUAL_WRITE_METRICS": "true",
-    "USE_SHARED_TABLES": "true",
-    "WRITE_SHARED_ONLY": "true"
-  },
-  "trepo-grocery-backend-dev-ConsentsFunction-N2Nemfmwl588": {
-    "USE_SHARED_TABLES": "true",
-    "WRITE_SHARED_ONLY": "true"
-  },
-  "trepo-grocery-backend-dev-DiscardsApiFunction-ySas82v8qBkQ": {
-    "DUAL_WRITE_DISCARDS": "true",
-    "READ_SHARED_DISCARDS": "true",
-    "USE_SHARED_TABLES": "true",
-    "WRITE_SHARED_ONLY": "true"
-  },
-  "trepo-grocery-backend-dev-DishResultFunction-gVSDdgayllRu": {
-    "USE_SHARED_TABLES": "true",
-    "WRITE_SHARED_ONLY": "true"
-  },
-  "trepo-grocery-backend-dev-DishesApiFunction-nf0KMidcpnmW": {
-    "DUAL_WRITE_DISHES": "true",
-    "READ_SHARED_DISHES": "true",
-    "USE_SHARED_TABLES": "true",
-    "WRITE_SHARED_ONLY": "true"
-  },
-  "trepo-grocery-backend-dev-GetJobFunction-0FnKnmEYg5e2": {
-    "USE_SHARED_TABLES": "true",
-    "WRITE_SHARED_ONLY": "true"
-  },
-  "trepo-grocery-backend-dev-HomeSuggestionsFunction-eq77AzDop23s": {
-    "USE_SHARED_TABLES": "true",
-    "WRITE_SHARED_ONLY": "true"
-  },
-  "trepo-grocery-backend-dev-KitchenAnalysisGenerator-NMPT2noIBOfq": {
-    "DUAL_WRITE_METRICS": "true",
-    "USE_SHARED_TABLES": "true",
-    "WRITE_SHARED_ONLY": "true"
-  },
-  "trepo-grocery-backend-dev-KitchenApiFunction-lC0BHStmZf1k": {
-    "USE_SHARED_TABLES": "true",
-    "WRITE_SHARED_ONLY": "true"
-  },
-  "trepo-grocery-backend-dev-KitchenInsightsFunction-8GzX0dcpmdMg": {
-    "USE_SHARED_TABLES": "true",
-    "WRITE_SHARED_ONLY": "true"
-  },
-  "trepo-grocery-backend-dev-ListTriageFunction-0ao7qSUe5FC7": {
-    "USE_SHARED_TABLES": "true",
-    "WRITE_SHARED_ONLY": "true"
-  },
-  "trepo-grocery-backend-dev-MealPlanApiFunction-BPOVuOSkR8X2": {
-    "DUAL_WRITE_MEAL_PLAN": "true",
-    "READ_SHARED_MEAL_PLAN": "true",
-    "USE_SHARED_TABLES": "true",
-    "WRITE_SHARED_ONLY": "true"
-  },
-  "trepo-grocery-backend-dev-MealPlanGeneratorFunctio-4rNstnlDTS1Z": {
-    "USE_SHARED_TABLES": "true",
-    "WRITE_SHARED_ONLY": "true"
-  },
-  "trepo-grocery-backend-dev-MetricsApiFunction-7RkSUBvvJJtp": {
-    "DUAL_WRITE_METRICS": "true",
-    "READ_SHARED_METRICS": "true",
-    "USE_SHARED_TABLES": "true",
-    "WRITE_SHARED_ONLY": "true"
-  },
-  "trepo-grocery-backend-dev-OtaReportApiFunction-cyUvBswGXwDb": {
-    "USE_SHARED_TABLES": "true",
-    "WRITE_SHARED_ONLY": "true"
-  },
-  "trepo-grocery-backend-dev-OtaScheduleAdminApiFunct-GgjhSRWrgN1P": {
-    "USE_SHARED_TABLES": "true",
-    "WRITE_SHARED_ONLY": "true"
-  },
-  "trepo-grocery-backend-dev-OtaScheduleApiFunction-uTNwBpku0zPC": {
-    "USE_SHARED_TABLES": "true",
-    "WRITE_SHARED_ONLY": "true"
-  },
-  "trepo-grocery-backend-dev-PresignFunction-EOb8DRx0IhAC": {
-    "USE_SHARED_TABLES": "true",
-    "WRITE_SHARED_ONLY": "true"
-  },
-  "trepo-grocery-backend-dev-RecharacterizeDishFuncti-AAhdgWVFQWMK": {
-    "DUAL_WRITE_ENABLED": "true",
-    "USE_SHARED_TABLES": "true",
-    "WRITE_SHARED_ONLY": "true"
-  },
-  "trepo-grocery-backend-dev-RecipesApiFunction-zjwZ1RP9bUAQ": {
-    "READ_SHARED_RECIPES": "true",
-    "USE_SHARED_TABLES": "true",
-    "WRITE_SHARED_ONLY": "true"
-  },
-  "trepo-grocery-backend-dev-RecipesGeneratorFunction-ycoZeX7W0vum": {
-    "DUAL_WRITE_RECIPES": "true",
-    "USE_SHARED_TABLES": "true",
-    "WRITE_SHARED_ONLY": "true"
-  },
-  "trepo-grocery-backend-dev-RedemptionsApiFunction-RYd5YJaXm6PW": {
-    "USE_SHARED_TABLES": "true",
-    "WRITE_SHARED_ONLY": "true"
-  },
-  "trepo-grocery-backend-dev-SavedRecipesApiFunction-a7aWuWlJvEF2": {
-    "USE_SHARED_TABLES": "true",
-    "WRITE_SHARED_ONLY": "true"
-  },
-  "trepo-grocery-backend-dev-SmsInboundFunction-qr1p3NfeMPg7": {
-    "USE_SHARED_TABLES": "true",
-    "WRITE_SHARED_ONLY": "true"
-  },
-  "trepo-grocery-backend-dev-SwapReviewApiFunction-7pJ4euAPp8LJ": {
-    "USE_SHARED_TABLES": "true",
-    "WRITE_SHARED_ONLY": "true"
-  }
+ "trepo-grocery-backend-dev-AnalyzeDiscardOnUpload-BnUyRpHHwaOx": {
+  "DUAL_WRITE_DISCARDS": "true",
+  "DUAL_WRITE_METRICS": "true",
+  "USE_SHARED_TABLES": "true",
+  "WRITE_SHARED_ONLY": "true"
+ },
+ "trepo-grocery-backend-dev-AnalyzeDishOnUpload-1wGSk6GmnxLv": {
+  "DUAL_WRITE_ENABLED": "true",
+  "DUAL_WRITE_METRICS": "true",
+  "USE_SHARED_TABLES": "true",
+  "WRITE_SHARED_ONLY": "true"
+ },
+ "trepo-grocery-backend-dev-AnalyzeOnUpload-bpWcKEif3Gq7": {
+  "DUAL_WRITE_METRICS": "true",
+  "USE_SHARED_TABLES": "true",
+  "WRITE_SHARED_ONLY": "true"
+ },
+ "trepo-grocery-backend-dev-ConsentsFunction-N2Nemfmwl588": {
+  "USE_SHARED_TABLES": "true",
+  "WRITE_SHARED_ONLY": "true"
+ },
+ "trepo-grocery-backend-dev-DiscardsApiFunction-ySas82v8qBkQ": {
+  "DUAL_WRITE_DISCARDS": "true",
+  "READ_SHARED_DISCARDS": "true",
+  "USE_SHARED_TABLES": "true",
+  "WRITE_SHARED_ONLY": "true"
+ },
+ "trepo-grocery-backend-dev-DishResultFunction-gVSDdgayllRu": {
+  "USE_SHARED_TABLES": "true",
+  "WRITE_SHARED_ONLY": "true"
+ },
+ "trepo-grocery-backend-dev-DishesApiFunction-nf0KMidcpnmW": {
+  "DUAL_WRITE_DISHES": "true",
+  "READ_SHARED_DISHES": "true",
+  "USE_SHARED_TABLES": "true",
+  "WRITE_SHARED_ONLY": "true"
+ },
+ "trepo-grocery-backend-dev-GetJobFunction-0FnKnmEYg5e2": {
+  "USE_SHARED_TABLES": "true",
+  "WRITE_SHARED_ONLY": "true"
+ },
+ "trepo-grocery-backend-dev-HomeSuggestionsFunction-eq77AzDop23s": {
+  "USE_SHARED_TABLES": "true",
+  "WRITE_SHARED_ONLY": "true"
+ },
+ "trepo-grocery-backend-dev-KitchenAnalysisGenerator-NMPT2noIBOfq": {
+  "DUAL_WRITE_METRICS": "true",
+  "USE_SHARED_TABLES": "true",
+  "WRITE_SHARED_ONLY": "true"
+ },
+ "trepo-grocery-backend-dev-KitchenApiFunction-lC0BHStmZf1k": {
+  "USE_SHARED_TABLES": "true",
+  "WRITE_SHARED_ONLY": "true"
+ },
+ "trepo-grocery-backend-dev-KitchenInsightsFunction-8GzX0dcpmdMg": {
+  "USE_SHARED_TABLES": "true",
+  "WRITE_SHARED_ONLY": "true"
+ },
+ "trepo-grocery-backend-dev-ListTriageFunction-0ao7qSUe5FC7": {
+  "USE_SHARED_TABLES": "true",
+  "WRITE_SHARED_ONLY": "true"
+ },
+ "trepo-grocery-backend-dev-MealPlanApiFunction-BPOVuOSkR8X2": {
+  "DUAL_WRITE_MEAL_PLAN": "true",
+  "READ_SHARED_MEAL_PLAN": "true",
+  "USE_SHARED_TABLES": "true",
+  "WRITE_SHARED_ONLY": "true"
+ },
+ "trepo-grocery-backend-dev-MealPlanGeneratorFunctio-4rNstnlDTS1Z": {
+  "DUAL_WRITE_MEAL_PLAN": "true",
+  "USE_SHARED_TABLES": "true",
+  "WRITE_SHARED_ONLY": "true"
+ },
+ "trepo-grocery-backend-dev-MetricsApiFunction-7RkSUBvvJJtp": {
+  "DUAL_WRITE_METRICS": "true",
+  "READ_SHARED_METRICS": "true",
+  "USE_SHARED_TABLES": "true",
+  "WRITE_SHARED_ONLY": "true"
+ },
+ "trepo-grocery-backend-dev-OtaReportApiFunction-cyUvBswGXwDb": {
+  "USE_SHARED_TABLES": "true",
+  "WRITE_SHARED_ONLY": "true"
+ },
+ "trepo-grocery-backend-dev-OtaScheduleAdminApiFunct-GgjhSRWrgN1P": {
+  "USE_SHARED_TABLES": "true",
+  "WRITE_SHARED_ONLY": "true"
+ },
+ "trepo-grocery-backend-dev-OtaScheduleApiFunction-uTNwBpku0zPC": {
+  "USE_SHARED_TABLES": "true",
+  "WRITE_SHARED_ONLY": "true"
+ },
+ "trepo-grocery-backend-dev-PresignFunction-EOb8DRx0IhAC": {
+  "USE_SHARED_TABLES": "true",
+  "WRITE_SHARED_ONLY": "true"
+ },
+ "trepo-grocery-backend-dev-RecharacterizeDishFuncti-AAhdgWVFQWMK": {
+  "DUAL_WRITE_ENABLED": "true",
+  "USE_SHARED_TABLES": "true",
+  "WRITE_SHARED_ONLY": "true"
+ },
+ "trepo-grocery-backend-dev-RecipesApiFunction-zjwZ1RP9bUAQ": {
+  "READ_SHARED_RECIPES": "true",
+  "USE_SHARED_TABLES": "true",
+  "WRITE_SHARED_ONLY": "true"
+ },
+ "trepo-grocery-backend-dev-RecipesGeneratorFunction-ycoZeX7W0vum": {
+  "DUAL_WRITE_RECIPES": "true",
+  "USE_SHARED_TABLES": "true",
+  "WRITE_SHARED_ONLY": "true"
+ },
+ "trepo-grocery-backend-dev-RedemptionsApiFunction-RYd5YJaXm6PW": {
+  "USE_SHARED_TABLES": "true",
+  "WRITE_SHARED_ONLY": "true"
+ },
+ "trepo-grocery-backend-dev-SavedRecipesApiFunction-a7aWuWlJvEF2": {
+  "DUAL_WRITE_SAVED_RECIPES": "true",
+  "READ_SHARED_SAVED_RECIPES": "true",
+  "USE_SHARED_TABLES": "true",
+  "WRITE_SHARED_ONLY": "true"
+ },
+ "trepo-grocery-backend-dev-SmsInboundFunction-qr1p3NfeMPg7": {
+  "USE_SHARED_TABLES": "true",
+  "WRITE_SHARED_ONLY": "true"
+ },
+ "trepo-grocery-backend-dev-SwapReviewApiFunction-7pJ4euAPp8LJ": {
+  "USE_SHARED_TABLES": "true",
+  "WRITE_SHARED_ONLY": "true"
+ }
 }
