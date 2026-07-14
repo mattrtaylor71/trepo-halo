@@ -148,6 +148,9 @@ const DEFAULT_PENDING_POLL_AFTER_MS = 1000;
 const DEFAULT_FAST_POLL_AFTER_MS = 1500;
 const DEFAULT_RESULT_RETENTION_SECONDS = 24 * 60 * 60;
 const METRICS_WINDOW_DAYS = 14;
+// Shared-table migration: kitchen went shared-primary, so metrics must read
+// shared_kitchen (household-scoped) not the frozen per-owner {owner}_prod_kitchen.
+const USE_SHARED_TABLES = String(process.env.USE_SHARED_TABLES || 'false').toLowerCase() === 'true';
 const DEFAULT_IQ = 75;
 const DISH_POINTS_MIN = 7;
 const DISH_POINTS_MAX = 10;
@@ -405,16 +408,18 @@ function recentWhereClause(columns) {
   return clauses.join(' AND ');
 }
 
-async function getUpfCounts(conn, tableName) {
+async function getUpfCounts(conn, tableName, extraWhere = '', extraParams = []) {
   if (!(await tableExists(conn, tableName))) return { total: 0, upfCount: 0 };
   const columns = await getTableColumns(conn, tableName);
-  const whereClause = recentWhereClause(columns);
+  let whereClause = recentWhereClause(columns);
+  if (extraWhere) whereClause = `${extraWhere} AND ${whereClause}`;
   if (columns.has('upf')) {
     const [rows] = await conn.query(
       `SELECT COUNT(*) AS total,
               SUM(CASE WHEN LOWER(\`upf\`) = 'yes' THEN 1 ELSE 0 END) AS upf_count
        FROM \`${tableName}\`
        WHERE ${whereClause}`,
+      extraParams,
     );
     return {
       total: Number(rows?.[0]?.total || 0),
@@ -425,19 +430,22 @@ async function getUpfCounts(conn, tableName) {
     `SELECT COUNT(*) AS total
      FROM \`${tableName}\`
      WHERE ${whereClause}`,
+    extraParams,
   );
   return { total: Number(rows?.[0]?.total || 0), upfCount: 0 };
 }
 
-async function getHarmfulCount(conn, tableName) {
+async function getHarmfulCount(conn, tableName, extraWhere = '', extraParams = []) {
   if (!(await tableExists(conn, tableName))) return 0;
   const columns = await getTableColumns(conn, tableName);
   if (!columns.has('harmful_ingredients')) return 0;
-  const whereClause = recentWhereClause(columns);
+  let whereClause = recentWhereClause(columns);
+  if (extraWhere) whereClause = `${extraWhere} AND ${whereClause}`;
   const [rows] = await conn.query(
     `SELECT SUM(COALESCE(JSON_LENGTH(\`harmful_ingredients\`), 0)) AS harmful_count
      FROM \`${tableName}\`
      WHERE ${whereClause}`,
+    extraParams,
   );
   return Number(rows?.[0]?.harmful_count || 0);
 }
@@ -466,19 +474,34 @@ function coerceJsonList(value) {
 }
 
 async function calculateMetrics(conn, owner) {
-  const prodKitchenTable = prodKitchenTableName(owner);
+  // Kitchen is shared-primary: when USE_SHARED_TABLES, the current-kitchen
+  // contribution must come from shared_kitchen filtered to the household, not the
+  // frozen per-owner {owner}_prod_kitchen. new_kitchen + discards stay per-owner
+  // (they were never migrated) — mirrors metrics_api/_calculate_metrics.
+  let prodKitchenTable;
+  let prodWhere = '';
+  let prodParams = [];
+  if (USE_SHARED_TABLES) {
+    prodKitchenTable = 'shared_kitchen';
+    const memberIds = await getHouseholdMemberIds(conn, owner);
+    const members = memberIds && memberIds.length ? memberIds : [owner];
+    prodWhere = `\`owner_id\` IN (${members.map(() => '?').join(',')})`;
+    prodParams = members;
+  } else {
+    prodKitchenTable = prodKitchenTableName(owner);
+    await ensureGroceryColumns(conn, prodKitchenTable);
+  }
   const newKitchenTable = newKitchenTableName(owner);
   const discardsTable = discardsTableName(owner);
-  await ensureGroceryColumns(conn, prodKitchenTable);
   await ensureGroceryColumns(conn, newKitchenTable);
   await ensureGroceryColumns(conn, discardsTable);
 
   const [prodKitchen, newKitchen, discards, harmfulCounts] = await Promise.all([
-    getUpfCounts(conn, prodKitchenTable),
+    getUpfCounts(conn, prodKitchenTable, prodWhere, prodParams),
     getUpfCounts(conn, newKitchenTable),
     getUpfCounts(conn, discardsTable),
     Promise.all([
-      getHarmfulCount(conn, prodKitchenTable),
+      getHarmfulCount(conn, prodKitchenTable, prodWhere, prodParams),
       getHarmfulCount(conn, newKitchenTable),
       getHarmfulCount(conn, discardsTable),
     ]),
