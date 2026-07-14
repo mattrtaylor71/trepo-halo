@@ -308,6 +308,61 @@ def handler(event, context):
         return _error_response(500, f'Internal server error: {str(e)}')
 
 
+# Shared-table migration: mirror discard writes into shared_discards (owner_id-keyed,
+# PK (owner_id,_id)). Discards fan out to household members, each written with owner_id =
+# that member. Off by default; non-blocking. Per-call column intersection handles the
+# per-owner schema drift. Read stays per-owner until READ_SHARED_DISCARDS flips.
+DUAL_WRITE_DISCARDS = os.getenv('DUAL_WRITE_DISCARDS', 'false').lower() == 'true'
+_SHARED_DISCARDS_TABLE = 'shared_discards'
+
+
+def _shared_discards_cols(conn, member_table):
+    with conn.cursor() as cur:
+        cur.execute("SELECT COLUMN_NAME cn FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name=%s", [member_table])
+        src = {r['cn'] for r in cur.fetchall()}
+        cur.execute("SELECT COLUMN_NAME cn FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name=%s", [_SHARED_DISCARDS_TABLE])
+        shd = {r['cn'] for r in cur.fetchall()}
+    return [c for c in shd if c in src and c != 'owner_id']
+
+
+def _dual_write_discard_to_shared(conn, member_id, item_id):
+    """Upsert one discard row (by _id) from a member's table into shared_discards."""
+    if not DUAL_WRITE_DISCARDS:
+        return
+    try:
+        member_table = f"{member_id}_discards"
+        cols = _shared_discards_cols(conn, member_table)
+        if not cols:
+            return
+        collist = ', '.join(f'`{c}`' for c in cols)
+        src = ', '.join(f's.`{c}`' for c in cols)
+        upd = ', '.join(f'`{c}`=VALUES(`{c}`)' for c in cols if c != '_id')
+        sql = (f"INSERT INTO `{_SHARED_DISCARDS_TABLE}` (`owner_id`, {collist}) "
+               f"SELECT %s, {src} FROM `{member_table}` s WHERE s.`_id` = %s "
+               f"ON DUPLICATE KEY UPDATE `owner_id`=VALUES(`owner_id`), {upd}")
+        with conn.cursor() as cur:
+            cur.execute(sql, (member_id, item_id))
+        conn.commit()
+    except Exception as exc:
+        try:
+            import sys
+            print(json.dumps({'evt': 'dual_write_miss', 'family': 'discards',
+                'owner_id': str(member_id), 'item_id': str(item_id), 'error': str(exc)[:500]}), file=sys.stderr)
+        except Exception:
+            pass
+
+
+def _dual_delete_discard_from_shared(conn, member_id, item_id):
+    if not DUAL_WRITE_DISCARDS:
+        return
+    try:
+        with conn.cursor() as cur:
+            cur.execute(f"DELETE FROM `{_SHARED_DISCARDS_TABLE}` WHERE `owner_id`=%s AND `_id`=%s LIMIT 1", (member_id, item_id))
+        conn.commit()
+    except Exception:
+        pass
+
+
 def _get_discards(owner, query=None):
     """Get all items from owner's discards table ({owner}_discards)"""
     try:
@@ -315,29 +370,40 @@ def _get_discards(owner, query=None):
         limit = _parse_limit(query)
         before = _parse_before(query)
         conn = _mysql_conn()
+        # Shared-table read cutover (reversible via env flag, default off = per-owner).
+        # MANDATORY owner_id filter — shared_discards holds every owner's rows.
+        use_shared = os.getenv('READ_SHARED_DISCARDS', '').strip().lower() == 'true'
         with conn.cursor() as cur:
-            cur.execute("""
-                SELECT COUNT(*) as count 
-                FROM information_schema.tables 
-                WHERE table_schema = DATABASE() AND table_name = %s
-            """, [table_name])
-            if cur.fetchone()['count'] == 0:
-                return _success_response({'owner': owner, 'items': [], 'count': 0})
-            cur.execute("""
-                SELECT COUNT(*) as count
-                FROM information_schema.columns
-                WHERE table_schema = DATABASE() AND table_name = %s AND column_name = '_updatedDate'
-            """, [table_name])
-            has_updated_date = cur.fetchone()['count'] > 0
+            if not use_shared:
+                cur.execute("""
+                    SELECT COUNT(*) as count FROM information_schema.tables
+                    WHERE table_schema = DATABASE() AND table_name = %s
+                """, [table_name])
+                if cur.fetchone()['count'] == 0:
+                    return _success_response({'owner': owner, 'items': [], 'count': 0})
+                cur.execute("""
+                    SELECT COUNT(*) as count FROM information_schema.columns
+                    WHERE table_schema = DATABASE() AND table_name = %s AND column_name = '_updatedDate'
+                """, [table_name])
+                has_updated_date = cur.fetchone()['count'] > 0
+            else:
+                has_updated_date = True
             sort_expression = "COALESCE(`_updatedDate`, `_createdDate`)" if has_updated_date else "`_createdDate`"
             params = []
+            if use_shared:
+                from_ref = "`shared_discards`"
+                where_clause = "`owner_id` = %s AND `action` = 'IN'"
+                params.append(_sanitize_user_id(owner))
+            else:
+                from_ref = f"`{table_name}`"
+                where_clause = "`action` = 'IN'"
             before_clause = ""
             if before:
                 before_clause = f"AND {sort_expression} < %s"
                 params.append(before)
             cur.execute(f"""
-                SELECT * FROM `{table_name}` 
-                WHERE `action` = 'IN'
+                SELECT * FROM {from_ref}
+                WHERE {where_clause}
                 {before_clause}
                 ORDER BY {sort_expression} DESC
                 LIMIT {limit + 1}
@@ -372,15 +438,18 @@ def _get_discard_by_id(owner, item_id):
     try:
         table_name = f"{_sanitize_user_id(owner)}_discards"
         conn = _mysql_conn()
+        use_shared = os.getenv('READ_SHARED_DISCARDS', '').strip().lower() == 'true'
         with conn.cursor() as cur:
-            cur.execute("""
-                SELECT COUNT(*) as count
-                FROM information_schema.tables
-                WHERE table_schema = DATABASE() AND table_name = %s
-            """, [table_name])
-            if cur.fetchone()['count'] == 0:
-                return _error_response(404, f'Discards table not found for owner: {owner}')
-            cur.execute(f"SELECT * FROM `{table_name}` WHERE `_id` = %s", [item_id])
+            if use_shared:
+                cur.execute("SELECT * FROM `shared_discards` WHERE `owner_id` = %s AND `_id` = %s", [_sanitize_user_id(owner), item_id])
+            else:
+                cur.execute("""
+                    SELECT COUNT(*) as count FROM information_schema.tables
+                    WHERE table_schema = DATABASE() AND table_name = %s
+                """, [table_name])
+                if cur.fetchone()['count'] == 0:
+                    return _error_response(404, f'Discards table not found for owner: {owner}')
+                cur.execute(f"SELECT * FROM `{table_name}` WHERE `_id` = %s", [item_id])
             row = cur.fetchone()
             if not row:
                 return _error_response(404, f'Discard with id {item_id} not found')
@@ -447,6 +516,8 @@ def _update_discard(owner, item_id, body):
                 member_table_name = f"{member_id}_discards"
                 cur.execute(query.format(table_name=member_table_name), values)
             conn.commit()
+            for member_id in member_ids:
+                _dual_write_discard_to_shared(conn, member_id, item_id)
             cur.execute(f"SELECT * FROM `{table_name}` WHERE `_id` = %s", [item_id])
             updated_item = cur.fetchone()
             if not updated_item:
@@ -509,6 +580,8 @@ def _delete_discard(owner, item_id):
                 member_table_name = f"{member_id}_discards"
                 cur.execute(f"DELETE FROM `{member_table_name}` WHERE `_id` = %s", [item_id])
             conn.commit()
+            for member_id in member_ids:
+                _dual_delete_discard_from_shared(conn, member_id, item_id)
             _record_master_feed_event(
                 conn,
                 owner,
