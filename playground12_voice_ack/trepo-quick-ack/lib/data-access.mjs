@@ -2568,7 +2568,11 @@ const KITCHEN_CATEGORY_KEYWORDS = [
   [["produce", "fruit", "vegetable", "veggie", "lettuce", "spinach", "tomato", "onion",
     "potato", "apple", "banana", "berry", "berries", "corn", "herb", "cilantro"], "produce"],
   [["meat", "seafood", "fish", "poultry", "beef", "pork", "bacon", "sausage", "chicken",
-    "turkey", "ham", "salmon", "shrimp", "tuna", "deli"], "meat_seafood"],
+    "turkey", "ham", "salmon", "shrimp", "tuna", "deli",
+    // Cuts of raw meat. Scanned AFTER spices+pantry so "Steak Seasoning"->spices and
+    // "Steak Sauce"->pantry still win (order matters). "steak" also catches "steaks".
+    "steak", "sirloin", "ribeye", "tbone", "t bone", "porterhouse", "flank", "brisket",
+    "filet", "fillet", "veal", "lamb"], "meat_seafood"],
   [["prepared", "meal", "entree", "other", "misc"], "prepared_other"],
 ];
 const KITCHEN_STORAGE_CATEGORY_FALLBACK = {
@@ -2595,6 +2599,19 @@ export function normalizeKitchenCategory(rawCategory, storageLocation, productNa
   // confident 'produce' guess (user feedback: "this is not a vegetable"). Leftovers win.
   const pname = (productName == null ? "" : String(productName)).toLowerCase();
   if (raw !== "leftovers" && /\b(tofu|tempeh|seitan)\b/.test(pname)) return "prepared_other";
+  // Hard override: an unambiguous raw-meat CUT in the product name is meat_seafood,
+  // even when the AI category guess is confidently wrong (the Gemini bulk path
+  // mislabeled raw steaks as 'beverages'; that exact-enum value would otherwise pass
+  // straight through below). Only fires on unmistakable cut words (never generic
+  // "beef"/"chicken" — that would wrongly pull beef/chicken broth out of pantry), and
+  // is suppressed when the name is really a sauce/seasoning/marinade/rub/broth/jerky
+  // (those stay pantry/spices/snacks). Leftovers still win. Keep byte-equivalent with
+  // the Python map in kitchen_api/category_normalizer.py.
+  if (raw !== "leftovers"
+      && /\b(steaks?|ribeye|rib eye|sirloin|porterhouse|t-?bone|brisket|filet mignon|veal|lamb chop)\b/.test(pname)
+      && !/\b(sauce|seasoning|marinade|rub|broth|stock|bouillon|jerky|flavor|flavored|chips?|crisps?)\b/.test(pname)) {
+    return "meat_seafood";
+  }
   if (KITCHEN_CATEGORY_ENUM.has(raw)) return raw;
   return (
     scanKitchenCategoryKeywords(raw) ||
