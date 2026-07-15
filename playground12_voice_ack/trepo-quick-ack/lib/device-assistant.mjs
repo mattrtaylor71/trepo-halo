@@ -890,6 +890,54 @@ const ACTION_CLAIM_RULES = [
 // succeeded this turn (recovery signal).
 const WRITE_TOOL_NAMES = new Set(ACTION_CLAIM_RULES.flatMap((r) => [...r.okTools]));
 
+// ── Recipe-save vs dish-log mutual-exclusion guard ─────────────────────
+// "Save a recipe (to cook later)" and "log a dish (that I ate)" are DIFFERENT
+// actions. The model sometimes treats "save <food>" as BOTH — emitting
+// save_generated_recipe (correct) AND a dish-log write (log_dish_ingredients)
+// in the same turn, fabricating a phantom "you ate this" record with invented
+// nutrition, then narrating only the dish log. (07-14: "Save turkey fried rice"
+// → recipe saved ✅ + phantom Turkey Fried Rice dish ❌.) Recipe-save intent
+// WINS: whenever a recipe-save tool is present in the request, suppress every
+// dish-log write. A legitimate "I ate X" turn does NOT call a save tool, so it
+// is untouched (see the control test). delete_dish_log is intentionally NOT in
+// this set — suppressing a delete could strand a bad row.
+const RECIPE_SAVE_TOOLS = new Set(["save_generated_recipe", "save_recipe_from_tiktok"]);
+const DISH_LOG_WRITE_TOOLS = new Set([
+  "log_dish_ingredients",
+  "log_dish_from_voice",
+  "update_recent_dish",
+  "append_to_recent_dish",
+  "mark_dish_consumed",
+]);
+
+// True when a batch of tool calls contains a recipe-save (which then wins over
+// any dish-log write in the same request).
+export function batchHasRecipeSaveTool(toolNames) {
+  return (Array.isArray(toolNames) ? toolNames : []).some((n) => RECIPE_SAVE_TOOLS.has(n));
+}
+
+// Decide whether a single dish-log write must be suppressed. Suppress a dish-log
+// write iff a recipe-save is present in this same turn (batchHasRecipeSave) or
+// already happened earlier in the request (recipeSaveIssued). Non-dish-log tools
+// (including the recipe save itself) are never suppressed.
+export function shouldSuppressDishLog(toolName, { batchHasRecipeSave = false, recipeSaveIssued = false } = {}) {
+  return DISH_LOG_WRITE_TOOLS.has(toolName) && (batchHasRecipeSave || recipeSaveIssued);
+}
+
+// Synthetic tool result handed back to the model in place of the suppressed
+// dish-log write. Tells it the write was intentionally skipped and to confirm
+// the recipe save instead of claiming a dish was logged.
+function suppressedDishLogResult() {
+  return {
+    ok: false,
+    suppressed: true,
+    statusCode: 409,
+    actionSummary: null,
+    error: "dish_log_suppressed_recipe_save",
+    note: "Dish log intentionally skipped: this turn saved a recipe (to cook later), not a dish the user ate. Confirm the recipe was saved — do NOT tell the user a dish was logged.",
+  };
+}
+
 // Returns the matching claim rule (domain + expected tool) or null.
 export function detectActionClaim(text) {
   const value = String(text || "");
@@ -993,6 +1041,9 @@ export async function* runDeviceAssistantStreaming({ transcript, userContext, en
   const aiModel = env.OPENAI_MODEL || "gpt-5.4-2026-03-05";
   let falseConfirmCorrections = 0;
   let falseConfirmRecovered = false;
+  // Set once a recipe-save tool is seen in the request; suppresses dish-log
+  // writes for the rest of the request (mutual-exclusion guard).
+  let recipeSaveIssued = false;
   // When the false-confirmation guard fires, the corrective retry FORCES a tool
   // call (tool_choice: "required") — "auto" let the model re-claim without calling
   // the tool (kitchen_add on 07-09: retry produced text again in ~1s, recovered:false).
@@ -1099,10 +1150,24 @@ export async function* runDeviceAssistantStreaming({ transcript, userContext, en
       tool_calls: assembledToolCalls
     });
 
+    // Recipe-save vs dish-log mutual exclusion: if this turn (or an earlier one
+    // in this request) issues a recipe-save, dish-log writes below are suppressed.
+    const batchHasRecipeSave = batchHasRecipeSaveTool(assembledToolCalls.map((tc) => tc.function.name));
+
     for (const toolCall of assembledToolCalls) {
       const toolName = toolCall.function.name;
       const args = parseToolArgs(toolCall.function.arguments);
       yield { type: "tool_start", tool_name: toolName, args };
+
+      // Suppress a phantom dish-log write when the same request saves a recipe.
+      if (shouldSuppressDishLog(toolName, { batchHasRecipeSave, recipeSaveIssued })) {
+        console.log(JSON.stringify({ evt: "assistant_dishlog_suppressed_on_save", tool: toolName, userId: userContext?.userId || null, reason: batchHasRecipeSave ? "same_turn_save" : "prior_turn_save" }));
+        const suppressed = suppressedDishLogResult();
+        toolTrace.push({ toolName, args, ok: false, statusCode: suppressed.statusCode, actionSummary: null, error: suppressed.error, suppressed: true });
+        yield { type: "tool_end", tool_name: toolName, ok: false, summary: null };
+        messages.push({ role: "tool", tool_call_id: toolCall.id, content: JSON.stringify(suppressed) });
+        continue;
+      }
 
       const result = await executeToolAction({ toolName, args, env, userContext, responseSurface: normalizedResponseSurface });
 
@@ -1136,6 +1201,10 @@ export async function* runDeviceAssistantStreaming({ transcript, userContext, en
         content: JSON.stringify(result)
       });
     }
+
+    // Once a recipe-save is issued, keep suppressing dish-log writes for any
+    // later turn in this request too.
+    if (batchHasRecipeSave) recipeSaveIssued = true;
 
     // If a corrective retry (false-confirmation guard) produced a successful
     // write, record the recovery for the corpus/metric.
@@ -1324,6 +1393,9 @@ export async function runDeviceAssistant({ transcript, userContext, env, session
   const aiModel = env.OPENAI_MODEL || "gpt-5.4-2026-03-05";
   let falseConfirmCorrections = 0;
   let falseConfirmRecovered = false;
+  // Set once a recipe-save tool is seen in the request; suppresses dish-log
+  // writes for the rest of the request (mutual-exclusion guard).
+  let recipeSaveIssued = false;
   // The false-confirmation corrective retry FORCES a tool call (see streaming path).
   let forceToolChoiceNext = null;
 
@@ -1403,11 +1475,20 @@ export async function runDeviceAssistant({ transcript, userContext, env, session
       tool_calls: message.tool_calls
     });
 
+    // Recipe-save vs dish-log mutual exclusion: if this turn (or an earlier one
+    // in this request) issues a recipe-save, dish-log writes are suppressed.
+    const batchHasRecipeSave = batchHasRecipeSaveTool(message.tool_calls.map((tc) => tc?.function?.name));
+
     const toolResults = await Promise.all(
       message.tool_calls.map(async (toolCall) => {
         const toolName = toolCall?.function?.name;
         const args = parseToolArgs(toolCall?.function?.arguments);
         console.log("[DEBUG] assistant requested tool:", JSON.stringify({ toolName, args }));
+        // Suppress a phantom dish-log write when the same request saves a recipe.
+        if (shouldSuppressDishLog(toolName, { batchHasRecipeSave, recipeSaveIssued })) {
+          console.log(JSON.stringify({ evt: "assistant_dishlog_suppressed_on_save", tool: toolName, userId: userContext?.userId || null, reason: batchHasRecipeSave ? "same_turn_save" : "prior_turn_save" }));
+          return { toolCall, toolName, args, result: suppressedDishLogResult() };
+        }
         const result = await executeToolAction({
           toolName,
           args,
@@ -1418,6 +1499,7 @@ export async function runDeviceAssistant({ transcript, userContext, env, session
         return { toolCall, toolName, args, result };
       })
     );
+    if (batchHasRecipeSave) recipeSaveIssued = true;
 
     for (const { toolCall, toolName, args, result } of toolResults) {
       if (toolName === "add_to_shopping_list" && result?.ok && result?.args?.item_name) {
