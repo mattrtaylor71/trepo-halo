@@ -1647,6 +1647,55 @@ Resources:
             ApiId: !Ref Api
             Path: /saved-recipes/{owner}/{item_id}
             Method: PUT
+        # --- Custom recipe categories (user-defined tags for saved recipes) ---
+        ListRecipeCategoriesRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /recipe-categories/{owner}
+            Method: GET
+        CreateRecipeCategoryRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /recipe-categories/{owner}
+            Method: POST
+        UpdateRecipeCategoryRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /recipe-categories/{owner}/{category_id}
+            Method: PUT
+        DeleteRecipeCategoryRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /recipe-categories/{owner}/{category_id}
+            Method: DELETE
+        SetRecipeCategoriesRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /saved-recipes/{owner}/{item_id}/categories
+            Method: PUT
+        OptionsRecipeCategoriesRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /recipe-categories/{owner}
+            Method: OPTIONS
+        OptionsRecipeCategoryItemRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /recipe-categories/{owner}/{category_id}
+            Method: OPTIONS
+        OptionsSetRecipeCategoriesRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /saved-recipes/{owner}/{item_id}/categories
+            Method: OPTIONS
         OptionsSavedRecipesRoute:
           Type: HttpApi
           Properties:

@@ -360,7 +360,7 @@ def _cors_headers():
         'Content-Type': 'application/json',
         'Access-Control-Allow-Origin': '*',
         'Access-Control-Allow-Headers': 'Content-Type',
-        'Access-Control-Allow-Methods': 'GET,POST,DELETE,OPTIONS'
+        'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS'
     }
 
 
@@ -5102,6 +5102,230 @@ def _handle_async_saved_recipe_batch_task(event, request_id):
         pass
 
 
+# =====================================================================
+# Custom recipe categories — user-defined tags for saved recipes.
+# Shared-first: two owner_id-keyed shared tables, no per-owner sprawl.
+# A saved recipe's _id is identical in the per-owner and shared tables,
+# so these mappings work regardless of READ_SHARED_SAVED_RECIPES. The
+# owner_id here matches shared_saved_recipes.owner_id (the acting user).
+# Many-to-many + orthogonal to meal_category: a recipe can carry any
+# number of custom tags on top of its single breakfast/lunch/... slot.
+# =====================================================================
+_SHARED_RECIPE_CATEGORIES_TABLE = 'shared_recipe_categories'
+_SHARED_RECIPE_CATEGORY_MAP_TABLE = 'shared_recipe_category_map'
+_MAX_CATEGORIES_PER_OWNER = 100
+_MAX_CATEGORY_NAME_LEN = 64
+
+
+def _ensure_recipe_category_tables(conn):
+    with conn.cursor() as cur:
+        cur.execute(f"""
+            CREATE TABLE IF NOT EXISTS `{_SHARED_RECIPE_CATEGORIES_TABLE}` (
+                owner_id VARCHAR(36) NOT NULL,
+                category_id VARCHAR(36) NOT NULL,
+                name VARCHAR(64) NOT NULL,
+                color VARCHAR(16) NULL,
+                sort_order INT NOT NULL DEFAULT 0,
+                _createdDate DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                _updatedDate DATETIME DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
+                PRIMARY KEY (owner_id, category_id),
+                UNIQUE KEY uniq_owner_name (owner_id, name),
+                KEY idx_owner_sort (owner_id, sort_order)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        """)
+        cur.execute(f"""
+            CREATE TABLE IF NOT EXISTS `{_SHARED_RECIPE_CATEGORY_MAP_TABLE}` (
+                owner_id VARCHAR(36) NOT NULL,
+                recipe_id VARCHAR(36) NOT NULL,
+                category_id VARCHAR(36) NOT NULL,
+                _createdDate DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (owner_id, recipe_id, category_id),
+                KEY idx_owner_category (owner_id, category_id),
+                KEY idx_owner_recipe (owner_id, recipe_id)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        """)
+    conn.commit()
+
+
+def _category_row(r):
+    return {
+        'id': r.get('category_id'),
+        'name': r.get('name'),
+        'color': r.get('color'),
+        'sort_order': int(r.get('sort_order') or 0),
+    }
+
+
+def _list_recipe_categories(owner, request_id=None):
+    """Return the owner's custom categories + a recipe_id -> [category_id] map."""
+    safe = _safe_owner_token(owner)
+    conn = _mysql_conn()
+    _ensure_recipe_category_tables(conn)
+    with conn.cursor() as cur:
+        cur.execute(
+            f"SELECT category_id, name, color, sort_order FROM `{_SHARED_RECIPE_CATEGORIES_TABLE}` "
+            f"WHERE owner_id = %s ORDER BY sort_order ASC, name ASC",
+            [safe],
+        )
+        categories = [_category_row(r) for r in (cur.fetchall() or [])]
+        cur.execute(
+            f"SELECT recipe_id, category_id FROM `{_SHARED_RECIPE_CATEGORY_MAP_TABLE}` WHERE owner_id = %s",
+            [safe],
+        )
+        assignments = {}
+        for r in (cur.fetchall() or []):
+            assignments.setdefault(r.get('recipe_id'), []).append(r.get('category_id'))
+    return _success({'categories': categories, 'assignments': assignments})
+
+
+def _create_recipe_category(owner, body, request_id=None):
+    name = _safe_text((body or {}).get('name'))
+    if not name:
+        return _error(400, 'Category name is required')
+    name = name[:_MAX_CATEGORY_NAME_LEN]
+    color = _safe_text((body or {}).get('color')) or None
+    safe = _safe_owner_token(owner)
+    conn = _mysql_conn()
+    _ensure_recipe_category_tables(conn)
+    with conn.cursor() as cur:
+        # Dedupe by case-insensitive name — return the existing one instead of erroring,
+        # so the client's "create" is idempotent.
+        cur.execute(
+            f"SELECT category_id, name, color, sort_order FROM `{_SHARED_RECIPE_CATEGORIES_TABLE}` "
+            f"WHERE owner_id = %s AND LOWER(name) = LOWER(%s) LIMIT 1",
+            [safe, name],
+        )
+        existing = cur.fetchone()
+        if existing:
+            return _success({'category': _category_row(existing)}, status=200)
+        cur.execute(
+            f"SELECT COUNT(*) AS n FROM `{_SHARED_RECIPE_CATEGORIES_TABLE}` WHERE owner_id = %s",
+            [safe],
+        )
+        if int((cur.fetchone() or {}).get('n', 0)) >= _MAX_CATEGORIES_PER_OWNER:
+            return _error(400, 'Category limit reached')
+        cur.execute(
+            f"SELECT COALESCE(MAX(sort_order), -1) AS m FROM `{_SHARED_RECIPE_CATEGORIES_TABLE}` WHERE owner_id = %s",
+            [safe],
+        )
+        next_sort = int((cur.fetchone() or {}).get('m', -1)) + 1
+        category_id = str(uuid.uuid4())
+        cur.execute(
+            f"INSERT INTO `{_SHARED_RECIPE_CATEGORIES_TABLE}` (owner_id, category_id, name, color, sort_order) "
+            f"VALUES (%s,%s,%s,%s,%s)",
+            [safe, category_id, name, color, next_sort],
+        )
+    conn.commit()
+    return _success({'category': {'id': category_id, 'name': name, 'color': color, 'sort_order': next_sort}}, status=201)
+
+
+def _update_recipe_category(owner, category_id, body, request_id=None):
+    safe = _safe_owner_token(owner)
+    cid = _safe_text(category_id)
+    if not cid:
+        return _error(400, 'Missing category_id')
+    body = body or {}
+    sets, params = [], []
+    if 'name' in body:
+        name = _safe_text(body.get('name'))
+        if not name:
+            return _error(400, 'Category name cannot be empty')
+        sets.append('name = %s')
+        params.append(name[:_MAX_CATEGORY_NAME_LEN])
+    if 'color' in body:
+        sets.append('color = %s')
+        params.append(_safe_text(body.get('color')) or None)
+    if 'sort_order' in body:
+        try:
+            so = int(body.get('sort_order'))
+        except (TypeError, ValueError):
+            so = 0
+        sets.append('sort_order = %s')
+        params.append(so)
+    if not sets:
+        return _error(400, 'Nothing to update')
+    conn = _mysql_conn()
+    _ensure_recipe_category_tables(conn)
+    with conn.cursor() as cur:
+        try:
+            cur.execute(
+                f"UPDATE `{_SHARED_RECIPE_CATEGORIES_TABLE}` SET {', '.join(sets)} "
+                f"WHERE owner_id = %s AND category_id = %s",
+                params + [safe, cid],
+            )
+        except pymysql.err.IntegrityError:
+            return _error(409, 'A category with that name already exists')
+        if cur.rowcount == 0:
+            cur.execute(
+                f"SELECT 1 FROM `{_SHARED_RECIPE_CATEGORIES_TABLE}` WHERE owner_id = %s AND category_id = %s",
+                [safe, cid],
+            )
+            if not cur.fetchone():
+                return _error(404, 'Category not found')
+    conn.commit()
+    return _success({'ok': True, 'id': cid})
+
+
+def _delete_recipe_category(owner, category_id, request_id=None):
+    safe = _safe_owner_token(owner)
+    cid = _safe_text(category_id)
+    if not cid:
+        return _error(400, 'Missing category_id')
+    conn = _mysql_conn()
+    _ensure_recipe_category_tables(conn)
+    with conn.cursor() as cur:
+        cur.execute(
+            f"DELETE FROM `{_SHARED_RECIPE_CATEGORY_MAP_TABLE}` WHERE owner_id = %s AND category_id = %s",
+            [safe, cid],
+        )
+        cur.execute(
+            f"DELETE FROM `{_SHARED_RECIPE_CATEGORIES_TABLE}` WHERE owner_id = %s AND category_id = %s",
+            [safe, cid],
+        )
+    conn.commit()
+    return _success({'ok': True, 'id': cid})
+
+
+def _set_recipe_categories(owner, recipe_id, body, request_id=None):
+    """Replace the full set of custom categories on a saved recipe (multi-select)."""
+    safe = _safe_owner_token(owner)
+    rid = _safe_text(recipe_id)
+    if not rid:
+        return _error(400, 'Missing item_id')
+    raw_ids = (body or {}).get('category_ids')
+    if raw_ids is None:
+        raw_ids = (body or {}).get('categories')
+    if not isinstance(raw_ids, list):
+        return _error(400, 'category_ids must be an array')
+    desired = [c for c in (_safe_text(c) for c in raw_ids) if c]
+    conn = _mysql_conn()
+    _ensure_recipe_category_tables(conn)
+    with conn.cursor() as cur:
+        valid = set()
+        if desired:
+            placeholders = ','.join(['%s'] * len(desired))
+            cur.execute(
+                f"SELECT category_id FROM `{_SHARED_RECIPE_CATEGORIES_TABLE}` "
+                f"WHERE owner_id = %s AND category_id IN ({placeholders})",
+                [safe] + desired,
+            )
+            valid = {r.get('category_id') for r in (cur.fetchall() or [])}
+        # Preserve request order, drop dupes + ids that aren't this owner's categories.
+        final_ids = [c for c in dict.fromkeys(desired) if c in valid]
+        cur.execute(
+            f"DELETE FROM `{_SHARED_RECIPE_CATEGORY_MAP_TABLE}` WHERE owner_id = %s AND recipe_id = %s",
+            [safe, rid],
+        )
+        for cid in final_ids:
+            cur.execute(
+                f"INSERT INTO `{_SHARED_RECIPE_CATEGORY_MAP_TABLE}` (owner_id, recipe_id, category_id) "
+                f"VALUES (%s,%s,%s)",
+                [safe, rid, cid],
+            )
+    conn.commit()
+    return _success({'ok': True, 'recipe_id': rid, 'category_ids': final_ids})
+
+
 def handler(event, context):
     from trepo_auth import require_owner
     _denied = require_owner(event)
@@ -5147,6 +5371,30 @@ def handler(event, context):
 
         if not owner:
             return _error(400, 'Missing owner parameter')
+
+        # --- Custom recipe categories (self-contained; owner-scoped tags) ---
+        if raw_path.endswith('/categories') and '/saved-recipes/' in raw_path:
+            if http_method != 'PUT':
+                return _error(405, f'Method {http_method} not allowed')
+            if not item_id:
+                return _error(400, 'Missing item_id parameter')
+            return _set_recipe_categories(owner, item_id, _parse_json_body(event), request_id=request_id)
+        if '/recipe-categories' in raw_path:
+            category_id = _safe_text(path_params.get('category_id'))
+            if http_method == 'GET':
+                return _list_recipe_categories(owner, request_id=request_id)
+            if http_method == 'POST':
+                return _create_recipe_category(owner, _parse_json_body(event), request_id=request_id)
+            if http_method == 'PUT':
+                if not category_id:
+                    return _error(400, 'Missing category_id parameter')
+                return _update_recipe_category(owner, category_id, _parse_json_body(event), request_id=request_id)
+            if http_method == 'DELETE':
+                if not category_id:
+                    return _error(400, 'Missing category_id parameter')
+                return _delete_recipe_category(owner, category_id, request_id=request_id)
+            return _error(405, f'Method {http_method} not allowed')
+
         if http_method == 'GET' and raw_path.endswith('/personalize'):
             qsp = event.get('queryStringParameters') or {}
             ids_param = qsp.get('ids', '')
