@@ -33,6 +33,14 @@ OPENAI_MAX_RETRIES = int(os.getenv('OPENAI_MAX_RETRIES', '2'))
 # the generation call more timeout headroom (Lambda timeout is 420s).
 RECIPE_GEN_MAX_INGREDIENTS = int(os.getenv('RECIPE_GEN_MAX_INGREDIENTS', '80'))
 RECIPE_GEN_TIMEOUT_SECONDS = int(os.getenv('RECIPE_GEN_TIMEOUT_SECONDS', '90'))
+# gpt-5.5's long-generation tail intermittently exceeds the 90s per-attempt client
+# timeout on EVERY retry (~3% of runs -> APITimeoutError at timeout*(retries+1)).
+# Cap the primary model at 2 attempts, then regenerate once on the fast fallback
+# model instead of failing the refresh. Rollback = env flip (empty fallback model
+# disables failover; bump RECIPE_GEN_MAX_RETRIES to restore the old 3-attempt budget).
+RECIPE_GEN_MAX_RETRIES = int(os.getenv('RECIPE_GEN_MAX_RETRIES', '1'))
+RECIPE_GEN_FALLBACK_MODEL = (os.getenv('RECIPE_GEN_FALLBACK_MODEL', 'gpt-5.4') or '').strip()
+RECIPE_GEN_FALLBACK_TIMEOUT_SECONDS = int(os.getenv('RECIPE_GEN_FALLBACK_TIMEOUT_SECONDS', '75'))
 SUBSTITUTION_MODEL = os.getenv('OPENAI_SUBSTITUTION_MODEL', os.getenv('OPENAI_MODEL', 'gpt-4o'))
 
 
@@ -922,7 +930,7 @@ def _generate_recipes_with_gpt(ingredients_list, kitchen_only_count=10, need_gro
     client = OpenAI(
         api_key=os.getenv('OPENAI_API_KEY'),
         timeout=RECIPE_GEN_TIMEOUT_SECONDS,
-        max_retries=OPENAI_MAX_RETRIES,
+        max_retries=RECIPE_GEN_MAX_RETRIES,
     )
     kitchen_only_count = max(0, int(kitchen_only_count or 0))
     need_grocery_count = max(0, int(need_grocery_count or 0))
@@ -966,50 +974,67 @@ Return the JSON object only."""
         f"Generate exactly {kitchen_only_count} kitchen_only recipes using ONLY these items (plus pantry), and exactly {need_grocery_count} need_grocery recipes that use some of these items but need extra ingredients to buy (include missing_ingredients for each)."
         f"{exclusion_text}\nReturn the JSON object only."
     )
-    # Fast in-handler retry: a single malformed/blank generation (JSONDecodeError)
-    # otherwise fails the invocation and detours through the 4-min refresh-flag class.
-    # Retry the generate+parse 1x immediately before giving up.
-    _gen_model = os.getenv('OPENAI_MODEL', 'gpt-4o')
-    _gen_t0 = time.time()
     _gen_input = f"kitchen_items={full_ingredient_count} kitchen_only={kitchen_only_count} need_grocery={need_grocery_count}"
-    last_err = None
+
+    def _generate_once(gen_client, gen_model):
+        # Fast in-handler retry: a single malformed/blank generation (JSONDecodeError)
+        # otherwise fails the invocation and detours through the 4-min refresh-flag class.
+        # Retry the generate+parse 1x immediately before giving up.
+        t0 = time.time()
+        last_err = None
+        try:
+            for _attempt in range(2):
+                resp = _create_chat(
+                    gen_client,
+                    model=gen_model,
+                    messages=[{'role': 'system', 'content': system}, {'role': 'user', 'content': user}],
+                    temperature=0.4,
+                )
+                text = (resp.choices[0].message.content or '').strip()
+                if text.startswith('```'):
+                    text = text.split('\n', 1)[-1].rsplit('```', 1)[0].strip()
+                try:
+                    parsed = json.loads(text)
+                    if _attempt > 0:
+                        print(json.dumps({'evt': 'openai_fast_retry_saved', 'service': 'recipes_generator', 'op': 'generate'}))
+                    _titles = []
+                    for _section in ('kitchen_only', 'need_grocery'):
+                        for _r in (parsed.get(_section) or []):
+                            _title = (_r or {}).get('title')
+                            if _title:
+                                _titles.append(_title)
+                    _ai_op('generate_recipes', gen_model, int((time.time() - t0) * 1000), 'success',
+                           input_summary=_gen_input,
+                           output_summary=(f"kitchen_only={len(parsed.get('kitchen_only') or [])} "
+                                           f"need_grocery={len(parsed.get('need_grocery') or [])} "
+                                           f"titles={_titles[:20]}"),
+                           owner_id=owner)
+                    return parsed
+                except json.JSONDecodeError as e:
+                    last_err = e
+                    if _attempt == 0:
+                        time.sleep(2)
+            raise last_err
+        except Exception as gen_err:
+            _ai_op('generate_recipes', gen_model, int((time.time() - t0) * 1000), 'error',
+                   input_summary=_gen_input, error=gen_err, owner_id=owner)
+            raise
+
+    _gen_model = os.getenv('OPENAI_MODEL', 'gpt-4o')
     try:
-        for _attempt in range(2):
-            resp = _create_chat(
-                client,
-                model=_gen_model,
-                messages=[{'role': 'system', 'content': system}, {'role': 'user', 'content': user}],
-                temperature=0.4,
-            )
-            text = (resp.choices[0].message.content or '').strip()
-            if text.startswith('```'):
-                text = text.split('\n', 1)[-1].rsplit('```', 1)[0].strip()
-            try:
-                parsed = json.loads(text)
-                if _attempt > 0:
-                    print(json.dumps({'evt': 'openai_fast_retry_saved', 'service': 'recipes_generator', 'op': 'generate'}))
-                _titles = []
-                for _section in ('kitchen_only', 'need_grocery'):
-                    for _r in (parsed.get(_section) or []):
-                        _title = (_r or {}).get('title')
-                        if _title:
-                            _titles.append(_title)
-                _ai_op('generate_recipes', _gen_model, int((time.time() - _gen_t0) * 1000), 'success',
-                       input_summary=_gen_input,
-                       output_summary=(f"kitchen_only={len(parsed.get('kitchen_only') or [])} "
-                                       f"need_grocery={len(parsed.get('need_grocery') or [])} "
-                                       f"titles={_titles[:20]}"),
-                       owner_id=owner)
-                return parsed
-            except json.JSONDecodeError as e:
-                last_err = e
-                if _attempt == 0:
-                    time.sleep(2)
-        raise last_err
-    except Exception as _gen_err:
-        _ai_op('generate_recipes', _gen_model, int((time.time() - _gen_t0) * 1000), 'error',
-               input_summary=_gen_input, error=_gen_err, owner_id=owner)
-        raise
+        return _generate_once(client, _gen_model)
+    except Exception as _primary_err:
+        if not RECIPE_GEN_FALLBACK_MODEL or RECIPE_GEN_FALLBACK_MODEL == _gen_model:
+            raise
+        print(json.dumps({'evt': 'recipes_model_failover', 'service': 'recipes_generator',
+                          'from_model': _gen_model, 'to_model': RECIPE_GEN_FALLBACK_MODEL,
+                          'primary_error': str(_primary_err)[:200], 'owner_id': owner}))
+        fallback_client = OpenAI(
+            api_key=os.getenv('OPENAI_API_KEY'),
+            timeout=RECIPE_GEN_FALLBACK_TIMEOUT_SECONDS,
+            max_retries=1,
+        )
+        return _generate_once(fallback_client, RECIPE_GEN_FALLBACK_MODEL)
 
 
 def _build_recipe_record(recipe, fallback_index=0):
