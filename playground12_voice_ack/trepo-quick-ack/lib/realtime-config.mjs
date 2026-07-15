@@ -31,6 +31,11 @@ CRITICAL — saving a recipe and logging a dish are DIFFERENT actions; never do 
 
 Kitchen categories are a FIXED set — when checking in or recategorizing an item, only ever use one of these exact values: leftovers, produce, dairy_eggs, meat_seafood, pantry, snacks_sweets, beverages, prepared_other. Never invent or promise a category outside this list (e.g. there is no "seasoning" category — spices and seasonings are pantry). If none clearly fits, use prepared_other.
 
+Recipe categories are DIFFERENT from kitchen categories: they are the user's OWN custom tags/folders for organizing SAVED RECIPES (e.g. "Gluten-Free", "Weeknight Dinners"), and are open-ended (any name is allowed, and a new one is created on demand). Use list_recipe_categories to see them and move_recipe_to_category to file a saved recipe into one. Filing a recipe into a category is NEITHER logging a dish (the user did not eat anything) NOR saving a recipe (nothing new is saved) — it never counts against the save-vs-dish-log rules, so never treat it as either.
+- Explicit request ("move/put/file/categorize my [recipe] under/in/as [category]", "add [recipe] to my [category] recipes"): call move_recipe_to_category with recipe_name = the recipe and category_name = the category. It auto-creates the category if it doesn't exist. Confirm ONLY after the tool returns ok:true. If it returns error "recipe_not_found" (or "recipe_ambiguous"), say so honestly and do NOT claim it was filed — never fabricate.
+- After a SUCCESSFUL recipe save (save_generated_recipe / save_recipe_from_tiktok) where the user did NOT already name a category: FIRST confirm the save (the save already happened — do not delay or gate that confirmation), then add ONE short, optional follow-up offering to file it, e.g. "Want me to file it under a category?" — if the user has existing categories (from list_recipe_categories) mention a couple by name plus "a new one, or leave it uncategorized". Ask this at most once; never nag or repeat it. If the user then names a category, call move_recipe_to_category resolving by the just-saved recipe's exact TITLE (recipe_name). If they decline, ignore it, or the surface can't take a reply, leave the recipe uncategorized — that is fine.
+- If the user names a category as part of the save request itself ("save this and put it in Desserts"), just save then file it — no extra follow-up needed.
+
 Available write actions:
 ${toolNamesToBullets(TOOL_CATEGORIES.write)}
 
@@ -44,6 +49,42 @@ export function buildTools() {
   return buildSharedTools();
 }
 
+// Local-only chat tools for custom recipe categories. Appended here (NOT in the
+// shared tool-definitions.mjs) so only the quick-ack stack advertises them — the
+// matching executors live in quick-ack's lib/tool-actions.mjs. See the
+// CONTAINMENT note in tool-actions.mjs.
+const LOCAL_RECIPE_CATEGORY_CHAT_TOOLS = [
+  {
+    type: "function",
+    function: {
+      name: "list_recipe_categories",
+      description: "List the user's custom saved-recipe categories (their own tags/folders for organizing saved recipes). Use this to see what categories exist before offering to file a recipe.",
+      parameters: {
+        type: "object",
+        properties: {},
+        additionalProperties: false
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "move_recipe_to_category",
+      description: "File a saved recipe into one of the user's custom recipe categories (tag/folder). Adds the tag without removing existing tags. If the named category doesn't exist yet, it is created automatically. Identify the recipe by title (recipe_name); the just-saved recipe's exact title works best. This does NOT log a dish and does NOT save a new recipe.",
+      parameters: {
+        type: "object",
+        properties: {
+          recipe_name: { type: "string", description: "The saved recipe's title to file (use the exact title, e.g. the recipe you just saved)." },
+          recipe_id: { type: "string", description: "Optional saved recipe id, if known. When provided it is used instead of recipe_name to resolve the recipe." },
+          category_name: { type: "string", description: "The custom category to file the recipe under, e.g. 'Gluten-Free' or 'Weeknight Dinners'. Created if it doesn't exist." }
+        },
+        required: ["category_name"],
+        additionalProperties: false
+      }
+    }
+  }
+];
+
 export function buildChatTools() {
-  return buildSharedChatTools();
+  return [...buildSharedChatTools(), ...LOCAL_RECIPE_CATEGORY_CHAT_TOOLS];
 }

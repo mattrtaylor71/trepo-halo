@@ -5628,6 +5628,195 @@ export async function removeSavedRecipe(context, reference = {}, options = {}) {
   };
 }
 
+// ── Custom recipe categories (saved-recipe tags) ─────────────────────────
+// Backed by the grocery API's /recipe-categories endpoints. Categories are
+// per-owner, user-defined tags used to file saved recipes. These are NEITHER a
+// dish log NOR a recipe save — filing a recipe must never trip the
+// recipe-save-vs-dishlog guard (it emits none of those tool names).
+
+function normalizeRecipeCategory(category) {
+  if (!category || typeof category !== "object") {
+    return null;
+  }
+  const id = String(category.id || category._id || "").trim() || null;
+  const name = String(category.name || "").trim();
+  if (!id || !name) {
+    return null;
+  }
+  return {
+    id,
+    name,
+    color: category.color || null,
+    sort_order: category.sort_order ?? null
+  };
+}
+
+// GET /recipe-categories/{owner} -> { categories:[...], assignments:{recipeId:[catId,...]} }
+export async function listRecipeCategories(context, options = {}) {
+  const ownerId = resolveShoppingOwnerId(context);
+  const payload = await fetchHouseholdApiJson(`/recipe-categories/${encodeURIComponent(ownerId)}`, options);
+  const categories = (Array.isArray(payload?.categories) ? payload.categories : [])
+    .map(normalizeRecipeCategory)
+    .filter(Boolean);
+  const rawAssignments = payload?.assignments && typeof payload.assignments === "object" ? payload.assignments : {};
+  const assignments = {};
+  for (const [recipeId, catIds] of Object.entries(rawAssignments)) {
+    assignments[recipeId] = (Array.isArray(catIds) ? catIds : [])
+      .map((value) => String(value || "").trim())
+      .filter(Boolean);
+  }
+  return {
+    owner: payload?.owner || ownerId,
+    categories,
+    assignments
+  };
+}
+
+// POST /recipe-categories/{owner} { name, color? } -> { category:{...} }. Idempotent
+// on the backend: posting an existing name returns the existing category.
+export async function createRecipeCategory(context, name, options = {}) {
+  const ownerId = resolveShoppingOwnerId(context);
+  const trimmed = String(name || "").trim();
+  if (!trimmed) {
+    const error = new Error("A recipe category needs a name.");
+    error.statusCode = 400;
+    throw error;
+  }
+  const body = { name: trimmed };
+  if (options?.color) {
+    body.color = options.color;
+  }
+  const payload = await fetchHouseholdApiJson(`/recipe-categories/${encodeURIComponent(ownerId)}`, {
+    ...options,
+    method: "POST",
+    body
+  });
+  return normalizeRecipeCategory(payload?.category) || {
+    id: null,
+    name: trimmed,
+    color: options?.color || null,
+    sort_order: null
+  };
+}
+
+// Find a category by name case-insensitively; create it if it doesn't exist.
+export async function resolveOrCreateRecipeCategory(context, categoryName, options = {}) {
+  const name = String(categoryName || "").trim();
+  if (!name) {
+    const error = new Error("A recipe category name is required.");
+    error.statusCode = 400;
+    throw error;
+  }
+  const { categories } = await listRecipeCategories(context, options);
+  const normalized = normalizeName(name);
+  const existing = categories.find((category) => normalizeName(category.name) === normalized);
+  if (existing) {
+    return { category: existing, created: false };
+  }
+  const created = await createRecipeCategory(context, name, options);
+  return { category: created, created: true };
+}
+
+// PUT /saved-recipes/{owner}/{recipeId}/categories { category_ids:[...] } is a
+// REPLACE-SET. To ADD one tag without clobbering existing ones, read the current
+// assignments for this recipe, UNION the new category id, then PUT the union.
+export async function assignRecipeToCategory(context, { recipeId, categoryId } = {}, options = {}) {
+  const ownerId = resolveShoppingOwnerId(context);
+  const recipe = String(recipeId || "").trim();
+  const category = String(categoryId || "").trim();
+  if (!recipe || !category) {
+    const error = new Error("A saved recipe and a category are required to file a recipe.");
+    error.statusCode = 400;
+    throw error;
+  }
+  const { assignments } = await listRecipeCategories(context, options);
+  const current = Array.isArray(assignments?.[recipe]) ? assignments[recipe] : [];
+  const alreadyFiled = current.includes(category);
+  const union = Array.from(new Set([...current, category]));
+  await fetchHouseholdApiJson(
+    `/saved-recipes/${encodeURIComponent(ownerId)}/${encodeURIComponent(recipe)}/categories`,
+    {
+      ...options,
+      method: "PUT",
+      body: { category_ids: union }
+    }
+  );
+  return {
+    recipeId: recipe,
+    categoryId: category,
+    category_ids: union,
+    already_filed: alreadyFiled
+  };
+}
+
+// Orchestrator behind the move_recipe_to_category tool. Resolve the saved recipe
+// (by explicit id if given, else fuzzy by name/title), resolve-or-create the
+// category by name, then union-assign. Returns a structured, non-fabricating
+// result: { ok:false, error:"recipe_not_found" | "recipe_ambiguous" } when the
+// recipe can't be pinned down (never invents a confirmation).
+export async function moveRecipeToCategory(context, args = {}, options = {}) {
+  const categoryName = String(args?.category_name || "").trim();
+  if (!categoryName) {
+    const error = new Error("Which category should the recipe be filed in?");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  let recipe = null;
+  const explicitId = String(args?.recipe_id || "").trim();
+  if (explicitId) {
+    try {
+      const list = await getSavedRecipes(context, options);
+      recipe = (list.recipes || []).find((entry) => String(entry.id) === explicitId) || null;
+    } catch {
+      recipe = null;
+    }
+    if (!recipe) {
+      recipe = { id: explicitId, title: String(args?.recipe_name || "").trim() || null };
+    }
+  } else {
+    try {
+      const detail = await getSavedRecipeDetail(context, { recipe_title: args?.recipe_name }, options);
+      recipe = detail?.recipe || null;
+    } catch (error) {
+      if (error?.statusCode === 404) {
+        return { ok: false, error: "recipe_not_found" };
+      }
+      if (error?.statusCode === 409) {
+        return { ok: false, error: "recipe_ambiguous" };
+      }
+      throw error;
+    }
+  }
+
+  if (!recipe?.id) {
+    return { ok: false, error: "recipe_not_found" };
+  }
+
+  const { category, created } = await resolveOrCreateRecipeCategory(context, categoryName, options);
+  if (!category?.id) {
+    const error = new Error("That recipe category could not be created.");
+    error.statusCode = 502;
+    throw error;
+  }
+
+  const assignment = await assignRecipeToCategory(
+    context,
+    { recipeId: recipe.id, categoryId: category.id },
+    options
+  );
+
+  return {
+    ok: true,
+    recipe_id: recipe.id,
+    recipe_title: recipe.title || null,
+    category_id: category.id,
+    category_name: category.name,
+    created_category: Boolean(created),
+    already_filed: Boolean(assignment.already_filed)
+  };
+}
+
 export async function addSavedRecipeIngredientsToShoppingList(context, reference = {}, options = {}) {
   const detail = await getSavedRecipeDetail(context, reference, options);
   if (!detail?.recipe) {
