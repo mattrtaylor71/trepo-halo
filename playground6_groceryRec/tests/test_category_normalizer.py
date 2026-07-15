@@ -36,10 +36,43 @@ def test_name_inference_when_category_null():
     assert N(None, "fridge", "Mystery") == "prepared_other"
 
 
-def test_seasonings_are_pantry_not_meat():
-    assert N("Seasoning", "pantry", "Cajun Seasoning") == "pantry"
+def test_seasonings_are_spices_not_meat():
+    # Seasonings/spice-blends route to the `spices` enum (added in the spices split;
+    # scanned before pantry). Previously this asserted "pantry" — stale since the
+    # spices category was introduced. The point is they must never be meat.
+    assert N("Seasoning", "pantry", "Cajun Seasoning") == "spices"
     assert N(None, None, "Fish Sauce") == "pantry"
     assert N(None, None, "Chicken Bouillon") == "pantry"
+
+
+def test_raw_steak_cuts_are_meat_not_beverages():
+    # THE live bug: the Gemini bulk path mislabeled raw steaks as 'beverages'; the
+    # exact-enum value passed straight through. The strong-meat override must rescue
+    # it — even when the AI category guess is 'beverages'/'Beverage'.
+    assert N("beverages", "fridge", "Ribeye Steak") == "meat_seafood"
+    assert N("Beverage", "fridge", "Steak") == "meat_seafood"
+    assert N("beverages", None, "NY Strip Steak") == "meat_seafood"
+    assert N("beverages", None, "Sirloin") == "meat_seafood"
+    assert N("beverages", None, "Pork steak") == "meat_seafood"
+    assert N("beverages", None, "Ham Steaks") == "meat_seafood"
+    assert N("beverages", None, "Skirt Steak") == "meat_seafood"
+    # name-derived (raw category null) still lands on meat via keyword + override
+    assert N(None, None, "Steak") == "meat_seafood"
+    assert N(None, None, "Sirloin") == "meat_seafood"
+    assert N(None, None, "Beef Brisket") == "meat_seafood"
+
+
+def test_steak_controls_do_not_regress():
+    # Sauces/seasonings must NOT be pulled into meat (guard + keyword order).
+    assert N(None, None, "Steak Seasoning") == "spices"
+    assert N(None, None, "Steak Sauce") == "pantry"
+    assert N("spices", None, "Steak Seasoning") == "spices"
+    # Beverages/broths without a cut word stay put — override must not over-fire.
+    assert N("beverages", None, "Protein Shake") == "beverages"
+    assert N(None, None, "Chicken Broth") == "pantry"
+    assert N("beverages", None, "Beef Broth") == "beverages"   # broth guard -> no override; trusts enum
+    # A leftover steak dish stays leftovers (leftovers wins over the meat override).
+    assert N("leftovers", None, "Leftover Ribeye Steak") == "leftovers"
 
 
 def test_storage_fallback_and_default():

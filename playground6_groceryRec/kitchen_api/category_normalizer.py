@@ -47,7 +47,11 @@ KITCHEN_CATEGORY_KEYWORDS = [
     (["produce", "fruit", "vegetable", "veggie", "lettuce", "spinach", "tomato", "onion",
       "potato", "apple", "banana", "berry", "berries", "corn", "herb", "cilantro"], "produce"),
     (["meat", "seafood", "fish", "poultry", "beef", "pork", "bacon", "sausage", "chicken",
-      "turkey", "ham", "salmon", "shrimp", "tuna", "deli"], "meat_seafood"),
+      "turkey", "ham", "salmon", "shrimp", "tuna", "deli",
+      # Cuts of raw meat. Scanned AFTER spices+pantry so "Steak Seasoning"->spices and
+      # "Steak Sauce"->pantry still win (order matters). "steak" also catches "steaks".
+      "steak", "sirloin", "ribeye", "tbone", "t bone", "porterhouse", "flank", "brisket",
+      "filet", "fillet", "veal", "lamb"], "meat_seafood"),
     (["prepared", "meal", "entree", "other", "misc"], "prepared_other"),
 ]
 
@@ -78,6 +82,17 @@ def normalize_kitchen_category(raw_category, storage_location=None, product_name
     pname = ("" if product_name is None else str(product_name)).lower()
     if raw != 'leftovers' and re.search(r'\b(tofu|tempeh|seitan)\b', pname):
         return 'prepared_other'
+    # Hard override: an unambiguous raw-meat CUT in the product name is meat_seafood,
+    # even when the AI category guess is confidently wrong (the Gemini bulk path
+    # mislabeled raw steaks as 'beverages'; that exact-enum value would otherwise pass
+    # straight through below). Only fires on unmistakable cut words (never generic
+    # "beef"/"chicken" — that would wrongly pull beef/chicken broth out of pantry), and
+    # is suppressed when the name is really a sauce/seasoning/marinade/rub/broth/jerky
+    # (those stay pantry/spices/snacks). Leftovers still win.
+    if (raw != 'leftovers'
+            and re.search(r'\b(steaks?|ribeye|rib eye|sirloin|porterhouse|t-?bone|brisket|filet mignon|veal|lamb chop)\b', pname)
+            and not re.search(r'\b(sauce|seasoning|marinade|rub|broth|stock|bouillon|jerky|flavor|flavored|chips?|crisps?)\b', pname)):
+        return 'meat_seafood'
     if raw in KITCHEN_CATEGORY_ENUM:
         return raw
     return (
