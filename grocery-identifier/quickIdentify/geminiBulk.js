@@ -11,6 +11,18 @@ const GEMINI_MAX_ATTEMPTS = Number(process.env.GEMINI_BULK_ATTEMPTS || 3);
 // same prompt/schema/parser. Budget-capped so the fallback attempt cannot push the
 // invocation past the Lambda timeout. ON flip is Matt's. Marker: ai_fallback_used
 // surface:bulk_deep.
+// App category enum (must stay in lock-step with CATEGORY_ENUM in
+// src/openai/identifyGrocery.ts and KITCHEN_CATEGORY_ENUM in
+// kitchen_api/category_normalizer.py + data-access.mjs). Constrains the Gemini
+// bulk `category` output to these 9 values so raw meat can never land in
+// `beverages` from a free-text guess (root cause of the steak->beverages bug:
+// the schema was free-text `{type:"string"}` and the prompt only showed
+// "Produce, Dairy, Condiment, Beverage" as examples — no meat, no enum).
+const CATEGORY_ENUM = [
+  "leftovers", "produce", "dairy_eggs", "meat_seafood",
+  "pantry", "spices", "snacks_sweets", "beverages", "prepared_other",
+];
+
 const AI_FALLBACK_DEEP = String(process.env.AI_FALLBACK_DEEP || "").toLowerCase() === "true";
 const AI_FALLBACK_DEEP_MODEL = process.env.AI_FALLBACK_DEEP_MODEL || "gemini-2.5-flash";
 const AI_FALLBACK_DEEP_TIMEOUT_MS = Number(process.env.AI_FALLBACK_DEEP_TIMEOUT_MS || 120000);
@@ -41,7 +53,11 @@ const geminiResponseSchema = {
           position_hint: { type: "string", nullable: true },
           estimated_state: { type: "string" },
           fill_level: { type: "string", nullable: true },
-          category: { type: "string" },
+          // Constrained to the 9 app enums (was free-text `{type:"string"}`). Gemini
+          // v1beta responseSchema accepts `enum` on a string (see toGeminiSchema in
+          // src/openai/geminiFallback.ts). This forces raw meat -> meat_seafood
+          // instead of a free-text guess the downstream normalizer can't rescue.
+          category: { type: "string", enum: CATEGORY_ENUM },
           visible_text_OCR: { type: "string", nullable: true },
         },
         required: ["item_name", "brand", "variant", "position_hint", "estimated_state", "fill_level", "category", "visible_text_OCR"],
@@ -457,7 +473,7 @@ Only after completing your reasoning, create the final inventory list. Focus fir
 - position_hint: A coarse human-readable location only when visually obvious, such as "top shelf left", "middle shelf right", "bottom drawer center", or "door shelf upper-right". Do not guess precise coordinates. If location is unclear, return null.
 - estimated_state: A short factual state such as "unopened box", "partially full bottle", or "produce in bag".
 - fill_level: One of "unopened", "full", "mostly_full", "half_full", "low", "nearly_empty", "empty", or "unknown". Use "unknown" if the fill level is not clear.
-- category: e.g. Produce, Dairy, Condiment, Beverage.
+- category: Choose EXACTLY ONE of these 9 values by what the item fundamentally IS, NOT by incidental words in its name: leftovers, produce, dairy_eggs, meat_seafood, pantry, spices, snacks_sweets, beverages, prepared_other. Hard rules: fresh or raw meat, poultry, or fish — including ANY beef/pork/lamb/veal cut such as steak, ribeye, sirloin, NY strip, skirt steak, flank, T-bone, brisket, filet, pork steak, ham steak, chops — = meat_seafood (a raw steak is NEVER a beverage). Any drink = beverages. Chicken or beef broth = pantry. Spices, seasonings, rubs, and spice blends (incl. steak seasoning) = spices. Steak sauce / marinade = pantry. Yogurt = dairy_eggs. Bread/bagels/tortillas = pantry. Muffins/cookies/cakes/pastries = snacks_sweets. Tofu/tempeh/seitan/plant-based meat substitutes = prepared_other. Home leftover food = leftovers.
 - visible_text_OCR: Any text you literally read from the label that guided identification. If nothing readable, return null.
 
 Title examples:
