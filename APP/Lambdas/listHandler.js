@@ -1,6 +1,214 @@
 const mysql = require('mysql2/promise');
 const crypto = require('crypto');
 const { getHouseholdMemberIds } = require('./householdSync');
+// AWS SDK v3 is bundled in the nodejs22.x runtime — no need to ship it in the zip.
+const { LambdaClient, InvokeCommand } = require('@aws-sdk/client-lambda');
+
+// ---- Aisle categorization (shopping-list grouping) ----------------------------
+// Canonical, EXACT lowercase enum. Consumers group by exact string match, so we
+// normalize case-insensitively on the way in and always store lowercase. Anything
+// not in this set clamps to 'other'.
+const AISLE_CATEGORIES = [
+  'produce', 'meat_seafood', 'dairy_eggs', 'bakery', 'frozen', 'canned_goods',
+  'pantry', 'snacks', 'beverages', 'condiments_sauces', 'spices_baking',
+  'household', 'personal_care', 'other',
+];
+const AISLE_SET = new Set(AISLE_CATEGORIES);
+function clampAisle(v) {
+  if (typeof v !== 'string') return 'other';
+  const norm = v.trim().toLowerCase();
+  return AISLE_SET.has(norm) ? norm : 'other';
+}
+
+// Lambda self-invoke client (async fire-and-forget categorization).
+let lambdaClient;
+function getLambdaClient() {
+  if (!lambdaClient) lambdaClient = new LambdaClient({});
+  return lambdaClient;
+}
+// Lambda sets AWS_LAMBDA_FUNCTION_NAME automatically; fall back for local runs.
+const SELF_FUNCTION_NAME = process.env.AWS_LAMBDA_FUNCTION_NAME || 'trepo-list-handler';
+
+// Fire-and-forget self-invoke to categorize any pending (uncategorized) items for
+// this owner's household. Never awaited on the request path — mirrors the feed
+// async-invoke pattern. Swallows all errors so it can never break a mutation/read.
+function dispatchCategorize(owner) {
+  try {
+    getLambdaClient()
+      .send(new InvokeCommand({
+        FunctionName: SELF_FUNCTION_NAME,
+        InvocationType: 'Event',
+        Payload: Buffer.from(JSON.stringify({ action: 'categorize_pending', owner })),
+      }))
+      .catch((e) => console.error(JSON.stringify({
+        evt: 'list_categorize_dispatch_error', owner, error: e.code || e.message,
+      })));
+  } catch (e) {
+    console.error(JSON.stringify({
+      evt: 'list_categorize_dispatch_error', owner, error: e.code || e.message,
+    }));
+  }
+}
+
+// True if any *live* (ADDED) item is still missing an aisle_category — the exact
+// condition categorize_pending fixes, so gating on it avoids infinite re-dispatch
+// (CHECKED/REMOVED rows are never categorized and must not keep re-triggering).
+function needsCategorize(items) {
+  return Array.isArray(items)
+    && items.some((it) => it && it.action === 'ADDED' && !it.aisle_category);
+}
+
+// Idempotent one-time ALTER to add the aisle_category column. Guarded against the
+// concurrent-ALTER race (ER_DUP_FIELDNAME) and missing member tables.
+async function ensureAisleColumn(table) {
+  if (!/^[0-9a-zA-Z_-]{1,80}$/.test(table)) return;
+  try {
+    await getPool().query(`ALTER TABLE \`${table}\` ADD COLUMN aisle_category VARCHAR(40) NULL`);
+  } catch (e) {
+    if (e.code === 'ER_DUP_FIELDNAME') return; // already added (idempotent / concurrent ALTER)
+    if (e.code === 'ER_NO_SUCH_TABLE') return; // member never created a list yet
+    throw e;
+  }
+}
+
+// One OpenAI call: map a deduped array of grocery item names -> aisle enum.
+// gpt-4.1-mini, json_object, temperature 0, 6s AbortSignal budget.
+async function categorizeNames(names) {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) throw new Error('OPENAI_API_KEY not configured');
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 6000);
+  try {
+    const system = `You categorize grocery items into supermarket aisles. `
+      + `Return a JSON object of the form {"categories": {"<item_name>": "<category>"}} `
+      + `where every key is an input item name (verbatim) and every value is EXACTLY one of: `
+      + `${AISLE_CATEGORIES.join(', ')}. Use "other" when unsure. Do not invent categories.`;
+    const resp = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify({
+        model: 'gpt-4.1-mini',
+        temperature: 0,
+        response_format: { type: 'json_object' },
+        messages: [
+          { role: 'system', content: system },
+          { role: 'user', content: `Categorize these grocery item names: ${JSON.stringify(names)}` },
+        ],
+      }),
+      signal: controller.signal,
+    });
+    if (!resp.ok) {
+      const t = await resp.text().catch(() => '');
+      throw new Error(`openai ${resp.status}: ${String(t).slice(0, 200)}`);
+    }
+    const data = await resp.json();
+    const content = data && data.choices && data.choices[0]
+      && data.choices[0].message && data.choices[0].message.content;
+    const parsed = JSON.parse(content || '{}');
+    return parsed.categories || {};
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// Internal async action `categorize_pending`: resolve household members, ensure the
+// column exists in every store, collect ADDED+uncategorized rows across per-user
+// tables AND shared_shopping_list, one LLM call, then write categories back by _id
+// in BOTH stores. Never throws to the caller (invoked fire-and-forget).
+async function categorizePending(owner) {
+  try {
+    if (!owner || !/^[0-9a-zA-Z-]{1,36}$/.test(owner)) {
+      console.error(JSON.stringify({ evt: 'list_categorize_error', owner, error: 'invalid owner' }));
+      return { ok: false };
+    }
+    const pool = getPool();
+    const memberIds = await getHouseholdMemberIds(pool, owner);
+    if (!memberIds.length) return { ok: true, updated: 0 };
+
+    // b. one-time idempotent ALTER on each store.
+    for (const memberId of memberIds) {
+      await ensureAisleColumn(`${memberId}_new_list`);
+    }
+    await ensureAisleColumn('shared_shopping_list');
+
+    // c. collect ADDED rows still missing a category (carry ids for exact write-back).
+    const perUser = []; // { table, id, name }
+    for (const memberId of memberIds) {
+      const t = `${memberId}_new_list`;
+      try {
+        const [rows] = await pool.execute(
+          `SELECT _id, product_name FROM \`${t}\` WHERE action = 'ADDED' AND aisle_category IS NULL`
+        );
+        for (const r of rows) perUser.push({ table: t, id: r._id, name: r.product_name });
+      } catch (e) {
+        if (e.code !== 'ER_NO_SUCH_TABLE') {
+          console.error(JSON.stringify({ evt: 'list_categorize_error', owner, table: t, error: e.code || e.message }));
+        }
+      }
+    }
+    const shared = []; // { id, name }
+    try {
+      const ph = memberIds.map(() => '?').join(',');
+      const [rows] = await pool.execute(
+        `SELECT _id, product_name FROM shared_shopping_list
+         WHERE action = 'ADDED' AND aisle_category IS NULL AND owner_id IN (${ph})`,
+        memberIds
+      );
+      for (const r of rows) shared.push({ id: r._id, name: r.product_name });
+    } catch (e) {
+      if (e.code !== 'ER_NO_SUCH_TABLE') {
+        console.error(JSON.stringify({ evt: 'list_categorize_error', owner, table: 'shared_shopping_list', error: e.code || e.message }));
+      }
+    }
+
+    const names = [...new Set(
+      [...perUser, ...shared].map((x) => String(x.name || '').trim()).filter(Boolean)
+    )];
+    if (names.length === 0) {
+      console.log(JSON.stringify({ evt: 'list_categorized', owner, updated: 0 }));
+      return { ok: true, updated: 0 };
+    }
+
+    // d. single LLM call, then normalize keys for case-insensitive lookup.
+    const raw = await categorizeNames(names);
+    const lookup = {};
+    for (const [k, v] of Object.entries(raw)) {
+      lookup[String(k).trim().toLowerCase()] = clampAisle(v);
+    }
+    const catFor = (name) => lookup[String(name || '').trim().toLowerCase()] || 'other';
+
+    // e. write back by _id in BOTH stores (no fuzzy matching).
+    let updated = 0;
+    for (const item of perUser) {
+      try {
+        const [res] = await pool.execute(
+          `UPDATE \`${item.table}\` SET aisle_category = ? WHERE _id = ?`,
+          [catFor(item.name), item.id]
+        );
+        updated += res.affectedRows || 0;
+      } catch (e) {
+        console.error(JSON.stringify({ evt: 'list_categorize_error', owner, table: item.table, id: item.id, error: e.code || e.message }));
+      }
+    }
+    for (const item of shared) {
+      try {
+        const [res] = await pool.execute(
+          'UPDATE shared_shopping_list SET aisle_category = ? WHERE _id = ?',
+          [catFor(item.name), item.id]
+        );
+        updated += res.affectedRows || 0;
+      } catch (e) {
+        console.error(JSON.stringify({ evt: 'list_categorize_error', owner, table: 'shared_shopping_list', id: item.id, error: e.code || e.message }));
+      }
+    }
+
+    console.log(JSON.stringify({ evt: 'list_categorized', owner, updated }));
+    return { ok: true, updated };
+  } catch (err) {
+    console.error(JSON.stringify({ evt: 'list_categorize_error', owner, error: err.code || err.message }));
+    return { ok: false };
+  }
+}
 
 const {
   DB_HOST,
@@ -50,6 +258,7 @@ function mapListRow(r) {
     quantity: null,
     itemUUID: r.household_item_uuid || String(r._id),
     sortOrder: r.sort_order != null ? Number(r.sort_order) : null,
+    aisle_category: r.aisle_category || null,
   };
 }
 
@@ -170,6 +379,15 @@ function response(statusCode, body) {
 exports.handler = async (event) => {
   try {
     const body = parseEvent(event);
+
+    // Internal async action (self-invoked, InvocationType Event): categorize any
+    // pending list items for this household via one LLM call. Routed before the
+    // normal owner validation because its payload carries `owner`, not `ownerId`.
+    if (body && body.action === 'categorize_pending') {
+      const result = await categorizePending(body.owner);
+      return response(200, { message: 'categorize_pending done', ...result });
+    }
+
     const {
       operation,
       ownerId,
@@ -223,6 +441,8 @@ exports.handler = async (event) => {
             return new Date(b._createdDate) - new Date(a._createdDate);
           });
           const items = rows.map(mapListRow);
+          // Fire-and-forget: backfill missing aisle categories without blocking.
+          if (needsCategorize(items)) dispatchCategorize(ownerId);
           return response(200, { message: 'List items fetched', items, count: items.length, union: true });
         } catch (err) {
           console.error('[UNION-READ] failed, falling back to single-table:', err.message);
@@ -283,6 +503,8 @@ exports.handler = async (event) => {
 
         // Map _id to id for iOS client compatibility
         const items = rows.map(mapListRow);
+        // Fire-and-forget: backfill missing aisle categories without blocking.
+        if (needsCategorize(items)) dispatchCategorize(ownerId);
         return response(200, {
           message: 'List items fetched',
           items,
@@ -393,6 +615,8 @@ exports.handler = async (event) => {
       }
 
       console.log(JSON.stringify({ evt: 'list_op', op: 'add', ownerId, uuid: sharedUUID, insertId: result.insertId ?? null }));
+      // Fire-and-forget: categorize the just-added item (and any pending ones).
+      try { dispatchCategorize(ownerId); } catch (e) { /* never block the add */ }
       return response(200, {
         message: 'List item added',
         insertId: result.insertId ?? null,
@@ -480,6 +704,8 @@ exports.handler = async (event) => {
       }
 
       console.log(JSON.stringify({ evt: 'list_op', op: 'add_batch', ownerId, count: addedItems.length }));
+      // Fire-and-forget: categorize the just-added items (and any pending ones).
+      try { dispatchCategorize(ownerId); } catch (e) { /* never block the batch add */ }
       return response(200, {
         message: `Added ${addedItems.length} items`,
         count: addedItems.length,
