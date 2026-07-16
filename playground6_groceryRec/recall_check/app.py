@@ -78,6 +78,11 @@ OPENAI_MATCH_MODEL = os.getenv('RECALL_MATCH_MODEL', 'gpt-4.1-mini')
 # batches concurrently, with retries OFF so one slow batch can't blow the Lambda budget.
 OPENAI_TIMEOUT_SECONDS = int(os.getenv('RECALL_OPENAI_TIMEOUT', '22'))
 OPENAI_MAX_RETRIES = int(os.getenv('RECALL_OPENAI_MAX_RETRIES', '0'))
+# A 'possible' match only surfaces when the KITCHEN ITEM carries a non-empty brand.
+# Unbranded generics ("eggs", "beef jerky" with brand NULL) can't be verified against a
+# recall notice anyway, so they no longer flag. 'likely' is unaffected (it already
+# requires brand/establishment alignment). Flip to 'false' to restore prior behavior.
+POSSIBLE_BRANDED_ONLY = os.getenv('RECALL_POSSIBLE_BRANDED_ONLY', 'true').lower() == 'true'
 # Items per LLM call (latency is ~linear in item count: ~7s@15, ~11s@25, ~19s@40; 104
 # in one call hung >120s). Small batches keep each call fast; batches run concurrently.
 LLM_ITEMS_PER_BATCH = int(os.getenv('RECALL_LLM_ITEMS_PER_BATCH', '14'))
@@ -1222,6 +1227,17 @@ def check_owner(owner, recalls, item_override=None):
                 'reason': 'brand_aligns_product_differs',
             }), file=sys.stderr)
             level = 'possible'
+        # Branded-only 'possible' gate: a generic/unbranded kitchen item can't be verified
+        # against a recall notice, so drop its 'possible' match (keep 'likely' — that tier
+        # already required brand alignment). Logged so we can measure what the gate hides.
+        if level == 'possible' and POSSIBLE_BRANDED_ONLY and not str(it.get('brand') or '').strip():
+            print(json.dumps({
+                'evt': 'recall_match_dropped_unbranded',
+                'owner': owner,
+                'item': (it.get('product_name') or '')[:80],
+                'recall_title': (r.get('title') or r.get('product_description') or '')[:80],
+            }), file=sys.stderr)
+            continue
         matches.append({
             'kitchen_item_id': iid,
             'kitchen_item_name': it.get('product_name'),
