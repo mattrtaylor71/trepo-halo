@@ -3993,87 +3993,202 @@ def _fetch_saved_recipe_by_hash(conn, owner, resolved_url_hash):
         return cur.fetchone()
 
 
-def _get_saved_recipes(owner, query=None, request_id=None):
-    conn = _mysql_conn()
-    try:
-        table = _saved_recipes_table(owner)
-        limit = _parse_limit(query)
-        before = _parse_before(query)
-        # Shared-table read cutover (reversible via env flag, default off = per-owner).
-        # MANDATORY owner_id filter. Internal fetch-by-id/hash + mutations stay per-owner
-        # (source of truth); only this user-facing list read flips.
-        use_shared = os.getenv('READ_SHARED_SAVED_RECIPES', '').strip().lower() == 'true'
-        if not use_shared:
-            with conn.cursor() as cur:
-                cur.execute("""
-                    SELECT COUNT(*) AS n FROM information_schema.tables
-                    WHERE table_schema = DATABASE() AND table_name = %s
-                """, [table])
-                if cur.fetchone()['n'] == 0:
-                    return _success({'owner': owner, 'recipes': [], 'count': 0})
-            _ensure_saved_recipes_table(conn, owner)
+def _read_own_saved_recipe_rows(conn, owner, limit, before):
+    """Existing single-owner read (source of truth). Returns (rows, has_more)."""
+    table = _saved_recipes_table(owner)
+    # Shared-table read cutover (reversible via env flag, default off = per-owner).
+    # MANDATORY owner_id filter. Internal fetch-by-id/hash + mutations stay per-owner
+    # (source of truth); only this user-facing list read flips.
+    use_shared = os.getenv('READ_SHARED_SAVED_RECIPES', '').strip().lower() == 'true'
+    if not use_shared:
         with conn.cursor() as cur:
+            cur.execute("""
+                SELECT COUNT(*) AS n FROM information_schema.tables
+                WHERE table_schema = DATABASE() AND table_name = %s
+            """, [table])
+            if cur.fetchone()['n'] == 0:
+                return [], False
+        _ensure_saved_recipes_table(conn, owner)
+    with conn.cursor() as cur:
+        params = []
+        where_parts = []
+        if use_shared:
+            from_ref = '`shared_saved_recipes`'
+            where_parts.append("owner_id = %s")
+            params.append(owner)
+        else:
+            from_ref = f'`{table}`'
+        if before:
+            where_parts.append("COALESCE(_updatedDate, _createdDate) < %s")
+            params.append(before)
+        where_clause = ("WHERE " + " AND ".join(where_parts)) if where_parts else ""
+        cur.execute(
+            f"""SELECT {_SAVED_RECIPE_SELECT_FIELDS}
+                FROM {from_ref}
+                {where_clause}
+                ORDER BY COALESCE(_updatedDate, _createdDate) DESC
+                LIMIT {limit + 1}""",
+            params,
+        )
+        rows = cur.fetchall() or []
+    has_more = len(rows) > limit
+    return rows[:limit], has_more
+
+
+def _read_household_saved_recipe_rows(conn, acting_owner, member_ids, limit, before):
+    """Household read-union: merge every member's `{member}_saved_recipes` (same fields
+    /order/limit as own reads), sort by recency DESC, then collapse duplicates by
+    resolved_url_hash — preferring the ACTING user's own copy so tapping opens an
+    editable row — while keeping null-hash rows as-is. Limit is applied AFTER merge.
+    Returns (rows, has_more). Each row carries `_owner` (for saved_by) and
+    `resolved_url_hash` (popped from the serialized payload later)."""
+    acting = _safe_owner_token(acting_owner)
+    fields = _SAVED_RECIPE_SELECT_FIELDS + ", resolved_url_hash"
+    collected = []
+    for member_id in member_ids:
+        table = _saved_recipes_table(member_id)
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT COUNT(*) AS n FROM information_schema.tables
+                WHERE table_schema = DATABASE() AND table_name = %s
+            """, [table])
+            if (cur.fetchone() or {}).get('n', 0) == 0:
+                continue  # member never saved a recipe yet
             params = []
-            where_parts = []
-            if use_shared:
-                from_ref = '`shared_saved_recipes`'
-                where_parts.append("owner_id = %s")
-                params.append(owner)
-            else:
-                from_ref = f'`{table}`'
+            where = ""
             if before:
-                where_parts.append("COALESCE(_updatedDate, _createdDate) < %s")
+                where = "WHERE COALESCE(_updatedDate, _createdDate) < %s"
                 params.append(before)
-            where_clause = ("WHERE " + " AND ".join(where_parts)) if where_parts else ""
             cur.execute(
-                f"""SELECT {_SAVED_RECIPE_SELECT_FIELDS}
-                    FROM {from_ref}
-                    {where_clause}
+                f"""SELECT {fields}
+                    FROM `{table}`
+                    {where}
                     ORDER BY COALESCE(_updatedDate, _createdDate) DESC
                     LIMIT {limit + 1}""",
                 params,
             )
-            rows = cur.fetchall() or []
-        has_more = len(rows) > limit
-        rows = rows[:limit]
-        rows = [_ensure_owned_saved_recipe_image(conn, owner, row, request_id=request_id) for row in rows]
-        serialized_rows = [_serialize_row(row) for row in rows]
-        recipe_ids = [s.get('id') for s in serialized_rows if s.get('id')]
-        current_kv = _get_owner_kitchen_version(conn, owner)
-        availability_map = _get_cached_recipe_availability(conn, owner, recipe_ids, min_kitchen_version=current_kv)
-        recipes = []
-        for serialized in serialized_rows:
-            avail = availability_map.get(serialized.get('id'))
-            if avail:
-                serialized['availability'] = {
-                    'kitchen_version': avail['kitchen_version'],
-                    'can_make_exact': avail['can_make_exact'],
-                    'can_make_with_subs': avail['can_make_with_subs'],
-                    'matched_count': avail['matched_count'],
-                    'missing_count': avail['missing_count'],
-                }
-                serialized['ingredient_matches'] = avail['ingredient_matches']
-                serialized['missing_ingredients'] = avail['missing_ingredients']
-                serialized['substitution_candidates'] = avail['substitution_candidates']
-                serialized['substitution_summary'] = avail['substitution_summary']
-                serialized['substitution_status'] = avail['substitution_status']
-            else:
-                serialized['availability'] = None
-                serialized['ingredient_matches'] = None
-                serialized['missing_ingredients'] = None
-                serialized['substitution_candidates'] = None
-                serialized['substitution_summary'] = None
-                serialized['substitution_status'] = None
-            recipes.append(serialized)
-        return _success({
-            'owner': owner,
-            'recipes': recipes,
-            'count': len(recipes),
-            'limit': limit,
-            'has_more': has_more,
-        })
-    finally:
-        pass
+            collected.extend(cur.fetchall() or [])
+
+    def _recency(r):
+        return r.get('_updatedDate') or r.get('_createdDate') or datetime.min
+
+    collected.sort(key=_recency, reverse=True)
+
+    seen = {}          # resolved_url_hash -> index into deduped
+    deduped = []
+    for r in collected:
+        h = _safe_text(r.get('resolved_url_hash'))
+        if not h:
+            deduped.append(r)  # null/blank hash never collapses (legacy rows)
+            continue
+        if h not in seen:
+            seen[h] = len(deduped)
+            deduped.append(r)
+        else:
+            idx = seen[h]
+            existing = deduped[idx]
+            # Prefer the acting user's own copy for the surviving row's content.
+            if _safe_owner_token(r.get('_owner')) == acting and _safe_owner_token(existing.get('_owner')) != acting:
+                deduped[idx] = r
+
+    has_more = len(deduped) > limit
+    return deduped[:limit], has_more
+
+
+def _stamp_saved_by(conn, recipes):
+    """Stamp each serialized recipe with `saved_by` (the row's owner user_id) and
+    `saved_by_name` (first_name from new_users; one query for all owners; fallback
+    'Housemate'). Applied in BOTH scopes (cheap). Never raises."""
+    owner_ids = list(dict.fromkeys(
+        _safe_owner_token(r.get('_owner')) for r in recipes if r.get('_owner')
+    ))
+    owner_ids = [o for o in owner_ids if o]
+    names = {}
+    if owner_ids:
+        try:
+            placeholders = ','.join(['%s'] * len(owner_ids))
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"SELECT user_id, first_name FROM new_users WHERE user_id IN ({placeholders})",
+                    owner_ids,
+                )
+                for r in (cur.fetchall() or []):
+                    uid = _safe_owner_token(r.get('user_id'))
+                    if uid:
+                        names[uid] = _safe_text(r.get('first_name')) or 'Housemate'
+        except Exception:
+            names = {}
+    for r in recipes:
+        oid = _safe_owner_token(r.get('_owner'))
+        r['saved_by'] = oid or None
+        r['saved_by_name'] = names.get(oid) or 'Housemate'
+    return recipes
+
+
+def _get_saved_recipes(owner, query=None, request_id=None):
+    conn = _mysql_conn()
+    limit = _parse_limit(query)
+    before = _parse_before(query)
+    scope = _safe_text((query or {}).get('scope')).lower()
+
+    # Household read-union (additive; default = own). Solo users, or any non-household
+    # scope, fall through to the identical own-table read (cheap early-out).
+    member_ids = _get_household_member_ids(conn, owner) if scope == 'household' else []
+    others = [m for m in member_ids if m != _safe_owner_token(owner)]
+    if scope == 'household' and others:
+        rows, has_more = _read_household_saved_recipe_rows(conn, owner, member_ids, limit, before)
+        effective_scope = 'household'
+    else:
+        rows, has_more = _read_own_saved_recipe_rows(conn, owner, limit, before)
+        effective_scope = 'own'
+
+    # Self-heal images against each row's REAL owner table so a household read never
+    # cross-writes one member's recipe into the acting user's table.
+    rows = [
+        _ensure_owned_saved_recipe_image(conn, _safe_owner_token(r.get('_owner')) or owner, r, request_id=request_id)
+        for r in rows
+    ]
+    serialized_rows = [_serialize_row(row) for row in rows]
+    for s in serialized_rows:
+        s.pop('resolved_url_hash', None)  # keep the payload field set identical to own reads
+    recipe_ids = [s.get('id') for s in serialized_rows if s.get('id')]
+    # Availability is keyed to the ACTING owner's kitchen (housemate copies simply
+    # show availability=None until personalized — same as an uncomputed own recipe).
+    current_kv = _get_owner_kitchen_version(conn, owner)
+    availability_map = _get_cached_recipe_availability(conn, owner, recipe_ids, min_kitchen_version=current_kv)
+    recipes = []
+    for serialized in serialized_rows:
+        avail = availability_map.get(serialized.get('id'))
+        if avail:
+            serialized['availability'] = {
+                'kitchen_version': avail['kitchen_version'],
+                'can_make_exact': avail['can_make_exact'],
+                'can_make_with_subs': avail['can_make_with_subs'],
+                'matched_count': avail['matched_count'],
+                'missing_count': avail['missing_count'],
+            }
+            serialized['ingredient_matches'] = avail['ingredient_matches']
+            serialized['missing_ingredients'] = avail['missing_ingredients']
+            serialized['substitution_candidates'] = avail['substitution_candidates']
+            serialized['substitution_summary'] = avail['substitution_summary']
+            serialized['substitution_status'] = avail['substitution_status']
+        else:
+            serialized['availability'] = None
+            serialized['ingredient_matches'] = None
+            serialized['missing_ingredients'] = None
+            serialized['substitution_candidates'] = None
+            serialized['substitution_summary'] = None
+            serialized['substitution_status'] = None
+        recipes.append(serialized)
+    _stamp_saved_by(conn, recipes)
+    return _success({
+        'owner': owner,
+        'recipes': recipes,
+        'count': len(recipes),
+        'limit': limit,
+        'has_more': has_more,
+        'scope': effective_scope,
+    })
 
 
 def _personalize_saved_recipes(owner, request_id=None, recipe_ids=None):
