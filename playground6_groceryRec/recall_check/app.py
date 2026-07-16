@@ -87,9 +87,12 @@ LLM_MAX_WORKERS = int(os.getenv('RECALL_LLM_MAX_WORKERS', '8'))
 LLM_TOTAL_DEADLINE_S = int(os.getenv('RECALL_LLM_TOTAL_DEADLINE_S', '35'))
 # Per-BATCH recall cap (each batch is sent only the recalls its own items overlap).
 MAX_RECALLS_TO_LLM = int(os.getenv('RECALL_MAX_TO_LLM', '40'))
-# Global cap on the candidate recall pool the prefilter hands to the matcher (kept high
-# so no relevant recall is dropped; per-batch subsetting controls actual payload size).
-MAX_CANDIDATE_RECALLS = int(os.getenv('RECALL_MAX_CANDIDATE_RECALLS', '250'))
+# Global cap on the candidate recall pool the prefilter hands to the matcher. Must exceed
+# the active-feed size or it silently drops recalls candidate items actually overlap — a
+# 250 cap dropped Matt's jerky recall (global index 470 of 483, sorted-index order). The
+# per-batch subsetting — NOT this cap — controls real LLM payload, so keep it well above
+# the feed size.
+MAX_CANDIDATE_RECALLS = int(os.getenv('RECALL_MAX_CANDIDATE_RECALLS', '2000'))
 # Absolute cap on candidate items sent to the LLM in one request (protects against a
 # pathologically large kitchen). Most-recently-added items win (prefilter preserves order).
 MAX_CANDIDATE_ITEMS = int(os.getenv('RECALL_MAX_CANDIDATE_ITEMS', '120'))
@@ -484,6 +487,14 @@ _PETFOOD_RE = re.compile(
     r'dog treat|cat treat|pet treat|animal feed|livestock|equine|poultry feed|'
     r'wild bird|birdseed|bird seed|aquarium|veterinary)\b', re.I)
 
+# Facility-wide catch-all recalls ("all human food products distributed from X", "all
+# products manufactured at ...") name no specific product, so they token-match arbitrary
+# kitchen items (a user can't tell if their item came from that firm). Drop from the feed.
+_CATCHALL_RE = re.compile(
+    r'\ball\s+human\s+food\s+products?\b|'
+    r'\ball\s+(food\s+)?products?\s+(distributed|produced|manufactured|made|packaged|'
+    r'sold)\b', re.I)
+
 
 def _is_non_human_food(r):
     ptype = (r.get('product_type') or '').lower()
@@ -491,7 +502,9 @@ def _is_non_human_food(r):
         return True
     blob = (r.get('product_description', '') + ' ' + r.get('title', '') + ' ' +
             r.get('reason', ''))
-    return bool(_PETFOOD_RE.search(blob))
+    if _PETFOOD_RE.search(blob):
+        return True
+    return bool(_CATCHALL_RE.search(r.get('product_description') or r.get('title') or ''))
 
 
 # ---------------------------------------------------------------------------
