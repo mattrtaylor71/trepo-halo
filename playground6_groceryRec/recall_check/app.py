@@ -1,22 +1,28 @@
 # recall_check/app.py
-# Standalone Lambda: match a user's checked-in kitchen items against USDA FSIS
-# meat/poultry/egg recalls.
+# Standalone Lambda: match a user's checked-in kitchen items against a MERGED,
+# full-US food-recall feed (USDA FSIS + FDA), persisted in MySQL (`recall_feed`).
 #
-#   GET /recall-check/{owner}          -> run the check for that owner's LIVE kitchen
-#   GET /recall-check/{owner}?refresh=1  force-refresh the cached FSIS feed
-#   GET /recall-check/{owner}?probe=1    return raw sample recall records (debug/field discovery)
-#   GET /recall-check/_feed              return the compact ACTIVE recall list (fleet-scan helper)
+#   GET  /recall-check/{owner}            -> run the check for that owner's LIVE kitchen
+#   GET  /recall-check/{owner}?probe=1    -> feed diagnostics (per-source + merge stats)
+#   GET  /recall-check/_feed              -> compact ACTIVE recall list (fleet-scan helper)
+#   EventBridge/manual {action:"refresh_feed"} -> refresh + re-merge the persisted feed
 #
-# FSIS covers MEAT, POULTRY, and EGG products only. Packaged/produce/seafood/FDA-
-# regulated foods are NOT in this feed (the FDA food-enforcement API is the complement).
+# SOURCES (merged + de-duplicated):
+#  - FSIS recall API           meat/poultry/egg, same-day-ish; needs browser headers
+#                              (Akamai 403s default UAs). COMPLETENESS for USDA products.
+#  - openFDA food/enforcement  FDA-regulated food/supplements; weekly, post-classification.
+#                              COMPLETENESS layer (FDA says don't use as the alert trigger).
+#  - FDA press-release XLSX     same-day FDA announcements. FAST/freshness layer.
+#  - CDC combined food-safety RSS  aggregates FDA+FSIS, rolling ~20 items. FAST layer only.
 #
 # Design notes:
-#  - The FSIS feed is fetched with urllib (stdlib) on cold start and cached in a module
-#    global with a 6h TTL. `?refresh=1` forces a re-fetch.
-#  - Matching is two-tier ("likely" = brand/product alignment, "possible" = generic
-#    item type appears in an active recall) via ONE batched gpt-4.1-mini call.
-#  - A deterministic pre-filter (recent recalls + token overlap) runs first so the LLM
-#    only sees plausible candidates and most checks skip the LLM entirely.
+#  - The merged feed lives in the `recall_feed` table (built by refresh_feed); the matcher
+#    reads it. openFDA is only re-pulled when its export_date advances (~weekly); other
+#    sources are pulled every refresh. A stale table (>26h) triggers an inline refresh.
+#  - DEDUPE: union-find on normalized recall_number, else fuzzy (company + product tokens
+#    within a date window). The richest member is kept and back-filled; sources tracked.
+#  - Matching is two-tier ("likely" = brand+form, "possible" = generic same-form) via ONE
+#    batched gpt-4.1-mini call, after a deterministic recent+token-overlap pre-filter.
 
 import os
 import re
@@ -38,9 +44,23 @@ except ImportError as exc:  # pragma: no cover
 # ---------------------------------------------------------------------------
 FSIS_FEED_URL = os.getenv(
     'FSIS_FEED_URL', 'https://www.fsis.usda.gov/fsis/api/recall/v/1')
+OPENFDA_URL = os.getenv('OPENFDA_URL', 'https://api.fda.gov/food/enforcement.json')
+OPENFDA_DOWNLOAD_URL = os.getenv('OPENFDA_DOWNLOAD_URL', 'https://api.fda.gov/download.json')
+OPENFDA_API_KEY = os.getenv('OPENFDA_API_KEY', '')  # optional; keyless works
+FDA_XLSX_URL = os.getenv(
+    'FDA_XLSX_URL',
+    'https://www.fda.gov/safety/recalls-market-withdrawals-safety-alerts/datatables-data?_format=xlsx')
+CDC_RSS_URL = os.getenv('CDC_RSS_URL', 'https://tools.cdc.gov/api/v2/resources/media/316422.rss')
+
 FEED_TTL_SECONDS = int(os.getenv('RECALL_FEED_TTL_SECONDS', str(6 * 3600)))
-FEED_FETCH_TIMEOUT = int(os.getenv('RECALL_FEED_FETCH_TIMEOUT', '20'))
+FEED_FETCH_TIMEOUT = int(os.getenv('RECALL_FEED_FETCH_TIMEOUT', '30'))
 RECALL_LOOKBACK_DAYS = int(os.getenv('RECALL_LOOKBACK_DAYS', '365'))
+# How far back to ingest FDA sources into the feed table (matcher still applies its own
+# RECALL_LOOKBACK_DAYS window). openFDA/XLSX carry years of history; cap ingestion.
+FEED_INGEST_DAYS = int(os.getenv('RECALL_FEED_INGEST_DAYS', '550'))  # ~18 months
+FEED_STALE_SECONDS = int(os.getenv('RECALL_FEED_STALE_SECONDS', str(26 * 3600)))
+FEED_TABLE = os.getenv('RECALL_FEED_TABLE', 'recall_feed')
+FEED_META_TABLE = os.getenv('RECALL_FEED_META_TABLE', 'recall_feed_meta')
 
 DB_HOST = os.getenv('DB_HOST', 'database-1.cvig8u6s25dz.us-east-1.rds.amazonaws.com')
 DB_USER = os.getenv('DB_USER', 'admin')
@@ -57,9 +77,6 @@ OPENAI_TIMEOUT_SECONDS = int(os.getenv('RECALL_OPENAI_TIMEOUT', '40'))
 # Only send the LLM recalls that share a token with SOME kitchen item, and only items
 # that overlap SOME recall. Belt-and-suspenders context bounds.
 MAX_RECALLS_TO_LLM = int(os.getenv('RECALL_MAX_TO_LLM', '60'))
-
-# Module-global feed cache (survives warm invocations).
-_FEED_CACHE = {'fetched_at': 0.0, 'recalls': [], 'raw_sample': [], 'source_status': None}
 
 # Tokens that carry no product-identity signal — dropped before overlap matching.
 _NOISE_TOKENS = {
@@ -148,38 +165,60 @@ def _recall_date(rec):
     return m.group(1) if m else raw
 
 
+def _record(source, source_id, title='', product_description='', reason='',
+            classification='', status='', active=True, date='', link='',
+            establishment='', brand='', states='', product_type='',
+            recall_number='', raw=None):
+    """Build the common cross-source recall record shape (matcher + table use this)."""
+    return {
+        'source': source,
+        'source_id': str(source_id or '')[:120],
+        'recall_number': str(recall_number or '')[:120],
+        'brand': brand or '',
+        'title': title or product_description,
+        'product_description': product_description,
+        'reason': reason,
+        'classification': classification,
+        'status': status,
+        'active': bool(active),
+        'date': date or '',
+        'link': link or '',
+        'establishment': establishment or '',
+        'states': states or '',
+        'product_type': product_type or '',
+        'sources': [source],
+        'raw': raw if raw is not None else {},
+    }
+
+
 def normalize_recall(rec):
-    """Map a raw FSIS record onto our stable shape."""
-    title = _strip_html(_first(rec, 'field_title', 'title'))
-    product = _strip_html(_first(rec, 'field_product_items', 'field_products',
-                                 'field_summary'))
-    reason = _strip_html(_first(rec, 'field_recall_reason', 'field_reason',
-                                'field_recall_reason_id'))
-    classification = _strip_html(_first(rec, 'field_recall_classification',
-                                        'field_risk_level', 'field_recall_type'))
-    establishment = _strip_html(_first(rec, 'field_establishment', 'field_company',
-                                       'field_company_media_contact',
-                                       'field_processing'))
-    states = _strip_html(_first(rec, 'field_states'))
+    """Map a raw FSIS record onto the common shape (source='FSIS')."""
     number = _strip_html(_first(rec, 'field_recall_number', 'field_recall_number_2'))
-    link = _first(rec, 'field_press_release', 'field_recall_url', 'field_url', 'url')
-    link = _strip_html(link)
+    link = _strip_html(_first(rec, 'field_recall_url', 'field_press_release',
+                              'field_url', 'url'))
     if link and link.startswith('/'):
         link = 'https://www.fsis.usda.gov' + link
     active = _is_active(rec)
-    return {
-        'title': title,
-        'product_description': product,
-        'reason': reason,
-        'classification': classification,
-        'status': 'Active' if active else 'Closed',
-        'active': active,
-        'date': _recall_date(rec),
-        'link': link,
-        'establishment': establishment,
-        'states': states,
-        'recall_number': number,
-    }
+    return _record(
+        source='FSIS',
+        source_id=number or _strip_html(_first(rec, 'field_title'))[:120],
+        recall_number=number,
+        title=_strip_html(_first(rec, 'field_title', 'title')),
+        product_description=_strip_html(_first(rec, 'field_product_items',
+                                               'field_products', 'field_summary')),
+        reason=_strip_html(_first(rec, 'field_recall_reason', 'field_reason')),
+        classification=_strip_html(_first(rec, 'field_recall_classification',
+                                          'field_risk_level', 'field_recall_type')),
+        establishment=_strip_html(_first(rec, 'field_establishment', 'field_company',
+                                         'field_company_media_contact')),
+        states=_strip_html(_first(rec, 'field_states')),
+        status='Active' if active else 'Closed',
+        active=active,
+        date=_recall_date(rec),
+        link=link,
+        product_type='Meat/Poultry/Egg',
+        raw={'establishment': _strip_html(_first(rec, 'field_establishment'))},
+    )
 
 
 _BROWSER_HEADERS = {
@@ -199,37 +238,376 @@ _BROWSER_HEADERS = {
 }
 
 
-def _http_get_json(url):
-    req = urllib.request.Request(url, headers=_BROWSER_HEADERS)
-    with urllib.request.urlopen(req, timeout=FEED_FETCH_TIMEOUT) as resp:
-        data = resp.read()
-    return json.loads(data.decode('utf-8', 'replace'))
+def _http_get(url, headers=None, timeout=None):
+    req = urllib.request.Request(url, headers=headers or _BROWSER_HEADERS)
+    with urllib.request.urlopen(req, timeout=timeout or FEED_FETCH_TIMEOUT) as resp:
+        return resp.read()
 
 
-def fetch_feed(force=False):
-    """Fetch + cache the FSIS feed. Returns (recalls, meta)."""
-    now = time.time()
-    age = now - _FEED_CACHE['fetched_at']
-    if not force and _FEED_CACHE['recalls'] and age < FEED_TTL_SECONDS:
-        return _FEED_CACHE['recalls'], {'cache': 'hit', 'age_s': round(age, 1),
-                                        'fetch_ms': 0}
-    t0 = time.time()
+def _http_get_json(url, headers=None):
+    return json.loads(_http_get(url, headers=headers).decode('utf-8', 'replace'))
+
+
+def _ingest_cutoff():
+    return time.time() - FEED_INGEST_DAYS * 86400
+
+
+def _date_ok(date_str):
+    """True if date_str (YYYY-MM-DD) is within the ingest window (or undated)."""
+    if not date_str or not re.match(r'\d{4}-\d{2}-\d{2}', date_str):
+        return True
+    try:
+        return time.mktime(time.strptime(date_str[:10], '%Y-%m-%d')) >= _ingest_cutoff()
+    except Exception:
+        return True
+
+
+# ---- Source: FSIS ---------------------------------------------------------
+def fetch_fsis():
     raw = _http_get_json(FSIS_FEED_URL)
-    fetch_ms = int((time.time() - t0) * 1000)
     if isinstance(raw, dict):
-        # Some Drupal JSON endpoints wrap rows in a top-level key.
         for k in ('results', 'data', 'rows', 'items'):
             if isinstance(raw.get(k), list):
                 raw = raw[k]
                 break
         else:
             raw = [raw]
-    recalls = [normalize_recall(r) for r in raw if isinstance(r, dict)]
-    _FEED_CACHE['fetched_at'] = now
-    _FEED_CACHE['recalls'] = recalls
-    _FEED_CACHE['raw_sample'] = [r for r in raw[:3] if isinstance(r, dict)]
-    _FEED_CACHE['source_status'] = 'ok'
-    return recalls, {'cache': 'miss', 'fetch_ms': fetch_ms, 'count': len(recalls)}
+    return [normalize_recall(r) for r in raw if isinstance(r, dict)]
+
+
+# ---- Source: openFDA food enforcement -------------------------------------
+def _openfda_export_date():
+    """The export_date on the food/enforcement partition — advances ~weekly."""
+    try:
+        d = _http_get_json(OPENFDA_DOWNLOAD_URL)
+        return d['results']['food']['enforcement'].get('export_date', '')
+    except Exception:
+        return ''
+
+
+def _yyyymmdd_to_iso(s):
+    s = re.sub(r'\D', '', str(s or ''))
+    return '%s-%s-%s' % (s[0:4], s[4:6], s[6:8]) if len(s) >= 8 else ''
+
+
+def fetch_openfda():
+    """Recent + Ongoing FDA food/supplement enforcement reports, paginated."""
+    start = time.strftime('%Y%m%d', time.gmtime(_ingest_cutoff()))
+    end = time.strftime('%Y%m%d', time.gmtime(time.time() + 86400))
+    out = []
+    skip = 0
+    limit = 1000
+    for _ in range(20):  # hard page cap (<=20k rows)
+        params = ('?search=report_date:[%s+TO+%s]+AND+status:Ongoing'
+                  '&limit=%d&skip=%d' % (start, end, limit, skip))
+        if OPENFDA_API_KEY:
+            params += '&api_key=' + OPENFDA_API_KEY
+        try:
+            d = _http_get_json(OPENFDA_URL + params)
+        except urllib.error.HTTPError as e:
+            if e.code == 404:  # openFDA returns 404 when skip past the end
+                break
+            raise
+        results = d.get('results') or []
+        for r in results:
+            iso = _yyyymmdd_to_iso(r.get('report_date'))
+            out.append(_record(
+                source='openFDA',
+                source_id=r.get('recall_number') or r.get('event_id'),
+                recall_number=r.get('recall_number', ''),
+                product_description=r.get('product_description', ''),
+                reason=r.get('reason_for_recall', ''),
+                classification=r.get('classification', ''),
+                establishment=r.get('recalling_firm', ''),
+                states=r.get('distribution_pattern', ''),
+                status=r.get('status', ''),
+                active=str(r.get('status', '')).strip().lower() == 'ongoing',
+                date=iso,
+                link='',
+                product_type=r.get('product_type', 'Food'),
+                raw={'code_info': r.get('code_info', '')},
+            ))
+        if len(results) < limit:
+            break
+        skip += limit
+    return out
+
+
+# ---- Source: FDA press-release XLSX ---------------------------------------
+def _parse_xlsx_rows(data):
+    """Minimal .xlsx reader (avoids the openpyxl dep): unzip, read sharedStrings +
+    sheet1, yield rows of cell strings."""
+    import zipfile
+    import io
+    import xml.etree.ElementTree as ET
+    ns = '{http://schemas.openxmlformats.org/spreadsheetml/2006/main}'
+    with zipfile.ZipFile(io.BytesIO(data)) as z:
+        shared = []
+        if 'xl/sharedStrings.xml' in z.namelist():
+            st = ET.fromstring(z.read('xl/sharedStrings.xml'))
+            for si in st.findall('%ssi' % ns):
+                shared.append(''.join(t.text or '' for t in si.iter('%st' % ns)))
+        sheet = ET.fromstring(z.read('xl/worksheets/sheet1.xml'))
+        for row in sheet.iter('%srow' % ns):
+            cells = {}
+            maxc = 0
+            for c in row.findall('%sc' % ns):
+                ref = c.get('r', '')
+                col = re.match(r'[A-Z]+', ref)
+                ci = 0
+                for ch in (col.group(0) if col else 'A'):
+                    ci = ci * 26 + (ord(ch) - 64)
+                ci -= 1
+                v = c.find('%sv' % ns)
+                text = ''
+                if v is not None and v.text is not None:
+                    text = shared[int(v.text)] if c.get('t') == 's' else v.text
+                cells[ci] = text
+                maxc = max(maxc, ci)
+            yield [cells.get(i, '') for i in range(maxc + 1)]
+
+
+def fetch_fda_xlsx():
+    data = _http_get(FDA_XLSX_URL, headers={'User-Agent': _BROWSER_HEADERS['User-Agent'],
+                                            'Accept': '*/*'})
+    rows = list(_parse_xlsx_rows(data))
+    if not rows:
+        return []
+    hdr = [str(h).strip().lower() for h in rows[0]]
+
+    def col(*names):
+        for n in names:
+            if n in hdr:
+                return hdr.index(n)
+        return -1
+    i_date = col('date')
+    i_brand = col('brand-names', 'brand names', 'brand-name(s)')
+    i_prod = col('product-description', 'product description')
+    i_type = col('product-types', 'product type', 'product-type')
+    i_reason = col('recall-reason-description', 'recall reason description')
+    i_co = col('company-name', 'company name')
+    i_term = col('terminated recall', 'terminated')
+    out = []
+
+    def g(r, i):
+        return (r[i].strip() if 0 <= i < len(r) and r[i] else '')
+    for r in rows[1:]:
+        ptype = g(r, i_type)
+        if not ('food' in ptype.lower() or 'dietary' in ptype.lower()):
+            continue  # skip pet food / devices / drugs / cosmetics
+        # Date is MM/DD/YYYY.
+        iso = ''
+        m = re.match(r'(\d{1,2})/(\d{1,2})/(\d{4})', g(r, i_date))
+        if m:
+            iso = '%s-%02d-%02d' % (m.group(3), int(m.group(1)), int(m.group(2)))
+        if not _date_ok(iso):
+            continue
+        terminated = g(r, i_term).lower().startswith('terminat')
+        brand = g(r, i_brand)
+        prod = g(r, i_prod)
+        out.append(_record(
+            source='FDA-press',
+            source_id=(brand + '|' + prod + '|' + iso)[:120],
+            brand=brand,
+            product_description=prod,
+            reason=g(r, i_reason),
+            establishment=g(r, i_co),
+            status='Terminated' if terminated else 'Ongoing',
+            active=not terminated,
+            date=iso,
+            product_type=ptype,
+            link='https://www.fda.gov/safety/recalls-market-withdrawals-safety-alerts',
+        ))
+    return out
+
+
+# ---- Source: CDC combined food-safety RSS ---------------------------------
+def fetch_cdc_rss():
+    import xml.etree.ElementTree as ET
+    data = _http_get(CDC_RSS_URL, headers={'User-Agent': _BROWSER_HEADERS['User-Agent'],
+                                           'Accept': '*/*'})
+    root = ET.fromstring(data)
+    out = []
+    for it in root.iter('item'):
+        def t(tag):
+            e = it.find(tag)
+            return (e.text or '').strip() if e is not None else ''
+        title = t('title')
+        iso = ''
+        pd = t('pubDate')  # e.g. 'Mon, 13 Jul 2026 21:46:00 GMT'
+        m = re.search(r'(\d{1,2})\s+(\w{3})\s+(\d{4})', pd)
+        if m:
+            mm = {'jan': 1, 'feb': 2, 'mar': 3, 'apr': 4, 'may': 5, 'jun': 6, 'jul': 7,
+                  'aug': 8, 'sep': 9, 'oct': 10, 'nov': 11, 'dec': 12}.get(
+                      m.group(2).lower(), 0)
+            if mm:
+                iso = '%s-%02d-%02d' % (m.group(3), mm, int(m.group(1)))
+        # RSS titles are "<Company> Issues Recall of <Product> Due to <Reason>".
+        est = title.split(' Issues')[0].split(' Recalls')[0].strip()
+        out.append(_record(
+            source='CDC-RSS',
+            source_id=t('guid') or title[:120],
+            title=title,
+            product_description=t('description') or title,
+            establishment=est,
+            status='Announced',
+            active=True,
+            date=iso,
+            link=t('link'),
+            product_type='Food',
+        ))
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Non-human-food filter (openFDA food/enforcement includes pet/animal feed; drop it —
+# users' kitchens are human food, and "Ground Beef for Dogs" was matching human meat).
+# ---------------------------------------------------------------------------
+_PETFOOD_RE = re.compile(
+    r'\b(for dogs|for cats|dog food|cat food|pet food|puppy|kitten|canine|feline|'
+    r'dog treat|cat treat|pet treat|animal feed|livestock|equine|poultry feed|'
+    r'wild bird|birdseed|bird seed|aquarium|veterinary)\b', re.I)
+
+
+def _is_non_human_food(r):
+    ptype = (r.get('product_type') or '').lower()
+    if 'animal' in ptype or 'veterinary' in ptype or 'pet' in ptype:
+        return True
+    blob = (r.get('product_description', '') + ' ' + r.get('title', '') + ' ' +
+            r.get('reason', ''))
+    return bool(_PETFOOD_RE.search(blob))
+
+
+# ---------------------------------------------------------------------------
+# Merge / dedupe
+# ---------------------------------------------------------------------------
+def _norm_num(n):
+    return re.sub(r'[^a-z0-9]', '', str(n or '').lower())
+
+
+def _company_tokens(r):
+    return _tokens(r.get('brand'), r.get('establishment'))
+
+
+def _product_tokens(r):
+    return _tokens(r.get('product_description'), r.get('title'))
+
+
+def _jaccard(a, b):
+    if not a or not b:
+        return 0.0
+    return len(a & b) / float(len(a | b))
+
+
+def _date_diff_days(a, b):
+    if not a or not b:
+        return 9999
+    try:
+        ta = time.mktime(time.strptime(a[:10], '%Y-%m-%d'))
+        tb = time.mktime(time.strptime(b[:10], '%Y-%m-%d'))
+        return abs(ta - tb) / 86400.0
+    except Exception:
+        return 9999
+
+
+def _fuzzy_same(x, y):
+    """Same recall across sources w/o a shared number: strong company + product token
+    overlap. Press-release vs post-classification dates can be weeks apart, so a very
+    strong match tolerates a wider window; a moderate match needs the recall within
+    ~3 days (per spec)."""
+    cj = _jaccard(_company_tokens(x), _company_tokens(y))
+    pj = _jaccard(_product_tokens(x), _product_tokens(y))
+    if cj >= 0.6 and pj >= 0.6:
+        return _date_diff_days(x['date'], y['date']) <= 60
+    if cj >= 0.5 and pj >= 0.4:
+        return _date_diff_days(x['date'], y['date']) <= 3
+    return False
+
+
+def _richness(r):
+    return sum(1 for k in ('recall_number', 'brand', 'classification', 'reason',
+                           'link', 'establishment', 'states') if r.get(k))
+
+
+def merge_recalls(records):
+    """Union-find dedupe across sources. Returns merged records with a `sources` list
+    and back-filled fields (richest member kept as the base)."""
+    n = len(records)
+    parent = list(range(n))
+
+    def find(i):
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    def union(i, j):
+        ri, rj = find(i), find(j)
+        if ri != rj:
+            parent[ri] = rj
+
+    # Pass 1: identical recall_number.
+    bynum = {}
+    for i, r in enumerate(records):
+        nn = _norm_num(r.get('recall_number'))
+        if nn:
+            bynum.setdefault(nn, []).append(i)
+    for idxs in bynum.values():
+        for j in idxs[1:]:
+            union(idxs[0], j)
+
+    # Pass 2: fuzzy company+product+date, bucketed by a company token to bound work.
+    buckets = {}
+    for i, r in enumerate(records):
+        for tkn in list(_company_tokens(r))[:4]:
+            buckets.setdefault(tkn, []).append(i)
+    for idxs in buckets.values():
+        if len(idxs) > 400:      # skip pathological mega-buckets (a common word)
+            continue
+        for a in range(len(idxs)):
+            for b in range(a + 1, len(idxs)):
+                i, j = idxs[a], idxs[b]
+                if find(i) != find(j) and _fuzzy_same(records[i], records[j]):
+                    union(i, j)
+
+    groups = {}
+    for i in range(n):
+        groups.setdefault(find(i), []).append(i)
+
+    merged = []
+    for members in groups.values():
+        recs = [records[i] for i in members]
+        base = dict(max(recs, key=_richness))
+        srcs = []
+        for r in recs:
+            for s in r['sources']:
+                if s not in srcs:
+                    srcs.append(s)
+        base['sources'] = srcs
+        base['active'] = any(r['active'] for r in recs)  # active if ANY source active
+        # Back-fill empty fields from other members; prefer non-empty recall_number/link.
+        for k in ('recall_number', 'brand', 'link', 'classification', 'reason',
+                  'establishment', 'states', 'product_type', 'date'):
+            if not base.get(k):
+                for r in recs:
+                    if r.get(k):
+                        base[k] = r[k]
+                        break
+        # Preserve ALL distinct product text across members (a single recall_number can
+        # cover several product lines) so matching signal is not lost to the collapse.
+        if len(recs) > 1:
+            seen_p = set()
+            parts = []
+            for r in recs:
+                p = (r.get('product_description') or '').strip()
+                key = p.lower()[:60]
+                if p and key not in seen_p:
+                    seen_p.add(key)
+                    parts.append(p)
+            if parts:
+                base['product_description'] = ' | '.join(parts)[:2000]
+        merged.append(base)
+    return merged
 
 
 # ---------------------------------------------------------------------------
@@ -256,6 +634,210 @@ def read_live_kitchen(owner):
             return cur.fetchall()
     finally:
         conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Feed persistence (recall_feed table) + refresh orchestration
+# ---------------------------------------------------------------------------
+def _meta_get(cur, k):
+    cur.execute("SELECT v FROM `%s` WHERE k=%%s" % FEED_META_TABLE, (k,))
+    row = cur.fetchone()
+    return row['v'] if row else None
+
+
+def _meta_set(cur, k, v):
+    cur.execute(
+        "INSERT INTO `%s` (k, v, updated_at) VALUES (%%s, %%s, UTC_TIMESTAMP()) "
+        "ON DUPLICATE KEY UPDATE v=VALUES(v), updated_at=VALUES(updated_at)"
+        % FEED_META_TABLE, (k, str(v)[:255]))
+
+
+def _feed_id(r):
+    """Stable primary key for a merged record: recall_number if present, else a hash of
+    company+product tokens (source_id as last resort)."""
+    nn = _norm_num(r.get('recall_number'))
+    if nn:
+        return ('rn:' + nn)[:80]
+    import hashlib
+    sig = '|'.join(sorted(_company_tokens(r))) + '#' + '|'.join(sorted(_product_tokens(r)))
+    if sig.strip('|#'):
+        return 'fz:' + hashlib.sha1(sig.encode('utf-8')).hexdigest()[:60]
+    return ('sid:' + r['source'] + ':' + r['source_id'])[:80]
+
+
+def write_feed_table(merged):
+    """Full-replace the recall_feed table transactionally (feed is small)."""
+    conn = _connect()
+    conn.autocommit(False)
+    try:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM `%s`" % FEED_TABLE)
+            rows = []
+            seen = set()
+            for r in merged:
+                fid = _feed_id(r)
+                if fid in seen:      # collapse any residual id collisions
+                    continue
+                seen.add(fid)
+                rd = r['date'] if re.match(r'\d{4}-\d{2}-\d{2}', r.get('date') or '') else None
+                rows.append((
+                    fid, ','.join(r['sources'])[:255], r.get('recall_number', '')[:120],
+                    (r.get('brand') or '')[:500], r.get('product_description', ''),
+                    (r.get('reason') or '')[:1200], (r.get('classification') or '')[:120],
+                    (r.get('status') or '')[:60], 1 if r['active'] else 0, rd,
+                    (r.get('link') or '')[:1200], (r.get('establishment') or '')[:600],
+                    (r.get('states') or '')[:600], (r.get('product_type') or '')[:255],
+                    json.dumps(r.get('raw') or {})[:60000],
+                ))
+            cur.executemany(
+                "INSERT INTO `%s` (id, sources, recall_number, brand, product_description,"
+                " reason, classification, status, active, recall_date, link, establishment,"
+                " states, product_type, raw, updated_at) VALUES "
+                "(%s)" % (FEED_TABLE, ','.join(['%s'] * 15) + ',UTC_TIMESTAMP()'), rows)
+            _meta_set(cur, 'last_refresh_ts', str(int(time.time())))
+        conn.commit()
+        return len(rows)
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def read_feed_table(active_only=True, recent_days=None):
+    """Load merged recalls from the table into the common shape."""
+    where = []
+    if active_only:
+        where.append('active=1')
+    if recent_days:
+        cutoff = time.strftime('%Y-%m-%d',
+                               time.gmtime(time.time() - recent_days * 86400))
+        where.append("(recall_date IS NULL OR recall_date >= '%s')" % cutoff)
+    sql = "SELECT * FROM `%s`" % FEED_TABLE
+    if where:
+        sql += ' WHERE ' + ' AND '.join(where)
+    conn = _connect()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(sql)
+            out = []
+            for row in cur.fetchall():
+                d = row['recall_date']
+                out.append({
+                    'source': (row['sources'] or '').split(',')[0],
+                    'sources': (row['sources'] or '').split(',') if row['sources'] else [],
+                    'recall_number': row['recall_number'] or '',
+                    'brand': row['brand'] or '',
+                    'title': row['product_description'] or '',
+                    'product_description': row['product_description'] or '',
+                    'reason': row['reason'] or '',
+                    'classification': row['classification'] or '',
+                    'status': row['status'] or '',
+                    'active': bool(row['active']),
+                    'date': d.strftime('%Y-%m-%d') if d else '',
+                    'link': row['link'] or '',
+                    'establishment': row['establishment'] or '',
+                    'states': row['states'] or '',
+                    'product_type': row['product_type'] or '',
+                })
+            return out
+    finally:
+        conn.close()
+
+
+def _feed_last_refresh_age():
+    conn = _connect()
+    try:
+        with conn.cursor() as cur:
+            ts = _meta_get(cur, 'last_refresh_ts')
+            cur.execute("SELECT COUNT(*) AS c FROM `%s`" % FEED_TABLE)
+            count = cur.fetchone()['c']
+        return (time.time() - float(ts)) if ts else None, count
+    finally:
+        conn.close()
+
+
+_SOURCE_FETCHERS = [('FSIS', fetch_fsis), ('openFDA', fetch_openfda),
+                    ('FDA-press', fetch_fda_xlsx), ('CDC-RSS', fetch_cdc_rss)]
+
+
+def refresh_feed(force_openfda=False):
+    """Fetch every source, merge/dedupe, and persist. openFDA is only re-pulled when its
+    export_date advances (else its rows are carried over from the table). Returns stats."""
+    per_source = {}
+    latency = {}
+    records = []
+
+    # openFDA gating by export_date.
+    prev_export = None
+    conn = _connect()
+    try:
+        with conn.cursor() as cur:
+            prev_export = _meta_get(cur, 'openfda_export_date')
+    finally:
+        conn.close()
+    cur_export = _openfda_export_date()
+    pull_openfda = force_openfda or (cur_export and cur_export != prev_export)
+
+    for name, fn in _SOURCE_FETCHERS:
+        if name == 'openFDA' and not pull_openfda:
+            carried = [r for r in read_feed_table(active_only=False)
+                       if 'openFDA' in r.get('sources', [])]
+            for r in carried:
+                r['sources'] = ['openFDA']
+                r['source'] = 'openFDA'
+                r['raw'] = {}
+            records.extend(carried)
+            per_source[name] = len(carried)
+            latency[name] = 0
+            continue
+        t0 = time.time()
+        try:
+            recs = fn()
+            per_source[name] = len(recs)
+            records.extend(recs)
+        except Exception as e:
+            per_source[name] = 'ERROR: %s' % (str(e)[:120],)
+            print(json.dumps({'evt': 'recall_source_error', 'source': name,
+                              'error': str(e)[:300]}), file=sys.stderr)
+        latency[name] = int((time.time() - t0) * 1000)
+
+    pre = len(records)
+    records = [r for r in records if not _is_non_human_food(r)]
+    dropped_nonfood = pre - len(records)
+    merged = merge_recalls(records)
+    written = write_feed_table(merged)
+
+    conn = _connect()
+    try:
+        with conn.cursor() as cur:
+            if pull_openfda and cur_export:
+                _meta_set(cur, 'openfda_export_date', cur_export)
+    finally:
+        conn.close()
+
+    active = sum(1 for r in merged if r['active'])
+    stats = {'per_source': per_source, 'latency_ms': latency, 'pre_merge': pre,
+             'dropped_non_human_food': dropped_nonfood,
+             'merged_total': written, 'deduped': (pre - dropped_nonfood) - written,
+             'active': active, 'openfda_pulled': bool(pull_openfda),
+             'openfda_export_date': cur_export}
+    print(json.dumps({'evt': 'recall_feed_refreshed', **{
+        'src_' + k: v for k, v in per_source.items()},
+        'merged_total': written, 'deduped': pre - written, 'active': active}))
+    return stats
+
+
+def get_active_feed():
+    """Feed the matcher reads. Auto-refreshes if the table is empty or stale (>26h)."""
+    age, count = _feed_last_refresh_age()
+    if count == 0 or age is None or age > FEED_STALE_SECONDS:
+        try:
+            refresh_feed()
+        except Exception as e:
+            print(json.dumps({'evt': 'recall_feed_refresh_failed',
+                              'error': str(e)[:300]}), file=sys.stderr)
+    return read_feed_table(active_only=True, recent_days=RECALL_LOOKBACK_DAYS)
 
 
 # ---------------------------------------------------------------------------
@@ -309,8 +891,9 @@ def prefilter(items, recalls):
 
 _MATCH_SYSTEM = (
     "You are a food-safety matcher for a kitchen app. You are given a USER'S KITCHEN "
-    "ITEMS and a list of ACTIVE USDA FSIS meat/poultry/egg RECALLS. For each kitchen "
-    "item, decide whether it could be the SAME PRODUCT that was recalled.\n\n"
+    "ITEMS and a list of ACTIVE US FOOD RECALLS (USDA FSIS meat/poultry/egg + FDA food, "
+    "produce, seafood, packaged & supplements). For each kitchen item, decide whether it "
+    "could be the SAME PRODUCT that was recalled.\n\n"
     "The core test is PRODUCT-FORM identity, not a shared word. The recalled product has "
     "a specific form/preparation (e.g. beef JERKY, ground beef, chicken nuggets, "
     "summer sausage, deli ham). A kitchen item only matches if it is that SAME specific "
@@ -356,8 +939,9 @@ def run_llm_match(items, recalls):
     recall_lines = [{
         'index': i,
         'product': (r['product_description'] or r['title'])[:300],
-        'establishment': r['establishment'][:120],
-        'reason': r['reason'][:120],
+        'brand': (r.get('brand') or '')[:120],
+        'establishment': (r.get('establishment') or '')[:120],
+        'reason': (r.get('reason') or '')[:120],
     } for i, r in enumerate(recalls)]
     user = ("KITCHEN ITEMS:\n" + json.dumps(item_lines, ensure_ascii=False) +
             "\n\nACTIVE RECALLS:\n" + json.dumps(recall_lines, ensure_ascii=False))
@@ -383,6 +967,26 @@ def run_llm_match(items, recalls):
     return out
 
 
+def _validate_match(it, r, level):
+    """Deterministic guard against LLM hallucination: the CHOSEN recall must actually
+    share a product-identity token with the item (kills 'tuna -> ice cream'). And
+    'likely' additionally requires real brand/establishment overlap, else it is
+    downgraded to 'possible'. Returns the effective level, or None to reject."""
+    it_toks = _tokens(it.get('product_name'), it.get('variant'))
+    r_prod = _tokens(r.get('product_description'), r.get('title'))
+    # A shared token that is ONLY a generic prep/packaging word is not product identity.
+    shared = it_toks & r_prod
+    if not shared or shared <= {'ground', 'sliced', 'frozen', 'fresh', 'cooked',
+                                'roasted', 'smoked', 'dried', 'canned', 'mini'}:
+        return None
+    if level == 'likely':
+        it_brand = _tokens(it.get('brand'))
+        r_brand = _tokens(r.get('brand'), r.get('establishment'))
+        if not (it_brand and r_brand and (it_brand & r_brand)):
+            return 'possible'  # no genuine brand alignment -> soften
+    return level
+
+
 def check_owner(owner, recalls, item_override=None):
     """Core check for one owner. Returns (matches, stats). Read-only."""
     items = item_override if item_override is not None else read_live_kitchen(owner)
@@ -403,11 +1007,14 @@ def check_owner(owner, recalls, item_override=None):
         if not isinstance(ri, int) or ri < 0 or ri >= len(cand_recalls):
             continue
         r = cand_recalls[ri]
+        level = _validate_match(it, r, v['level'])
+        if level is None:
+            continue  # LLM hallucination — item and chosen recall don't share a product
         matches.append({
             'kitchen_item_id': iid,
             'kitchen_item_name': it.get('product_name'),
             'brand': it.get('brand'),
-            'match_level': v['level'],
+            'match_level': level,
             'recall': {
                 'title': r['title'],
                 'product_description': r['product_description'],
@@ -446,39 +1053,72 @@ def _iso(ts):
     return time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime(ts))
 
 
+def _source_counts(recalls):
+    counts = {}
+    for r in recalls:
+        for s in (r.get('sources') or [r.get('source')]):
+            if s:
+                counts[s] = counts.get(s, 0) + 1
+    return counts
+
+
 def lambda_handler(event, context):
     t_start = time.time()
-    params = (event or {}).get('pathParameters') or {}
-    qs = (event or {}).get('queryStringParameters') or {}
+    event = event or {}
+    params = event.get('pathParameters') or {}
+    qs = event.get('queryStringParameters') or {}
     owner = params.get('owner')
+
+    # --- Feed refresh (EventBridge cron or manual). Not an HTTP route. ---
+    action = event.get('action') or (event.get('detail') or {}).get('action')
+    if action == 'refresh_feed':
+        force_openfda = bool(event.get('force_openfda'))
+        try:
+            stats = refresh_feed(force_openfda=force_openfda)
+            return {'ok': True, 'stats': stats}
+        except Exception as e:
+            print(json.dumps({'evt': 'recall_feed_refresh_failed',
+                              'error': str(e)[:400]}), file=sys.stderr)
+            return {'ok': False, 'error': str(e)[:400]}
+
     force = str(qs.get('refresh', '')).lower() in ('1', 'true', 'yes')
+    if force:
+        try:
+            refresh_feed(force_openfda=str(qs.get('openfda', '')).lower()
+                         in ('1', 'true', 'yes'))
+        except Exception as e:
+            print(json.dumps({'evt': 'recall_feed_refresh_failed',
+                              'error': str(e)[:300]}), file=sys.stderr)
 
     try:
-        recalls, feed_meta = fetch_feed(force=force)
-    except urllib.error.HTTPError as e:
-        return _resp(502, {'error': 'fsis_fetch_failed', 'http_status': e.code,
-                           'detail': str(e)})
+        recalls = read_feed_table(active_only=True, recent_days=RECALL_LOOKBACK_DAYS)
+        if not recalls:
+            recalls = get_active_feed()  # empty/stale -> refresh then read
     except Exception as e:
-        return _resp(502, {'error': 'fsis_fetch_failed', 'detail': str(e)})
+        return _resp(502, {'error': 'feed_read_failed', 'detail': str(e)})
 
-    # Debug: raw sample of records (field discovery / reachability probe).
+    age, total_rows = _feed_last_refresh_age()
+    feed_date = _iso(time.time() - age) if age is not None else ''
+
+    # Diagnostics: per-source + merge stats.
     if str(qs.get('probe', '')).lower() in ('1', 'true', 'yes'):
+        all_rows = read_feed_table(active_only=False)
         return _resp(200, {
-            'feed_meta': feed_meta,
-            'total_records': len(recalls),
-            'active_records': sum(1 for r in recalls if r['active']),
-            'raw_keys': sorted(_FEED_CACHE['raw_sample'][0].keys())
-            if _FEED_CACHE['raw_sample'] else [],
-            'raw_sample': _FEED_CACHE['raw_sample'][:2],
-            'normalized_sample': [normalize_recall(r)
-                                  for r in _FEED_CACHE['raw_sample'][:2]],
+            'feed_table_rows': total_rows,
+            'active_recent_records': len(recalls),
+            'feed_age_hours': round(age / 3600, 1) if age is not None else None,
+            'source_counts_all': _source_counts(all_rows),
+            'source_counts_active_recent': _source_counts(recalls),
+            'multi_source_merged': sum(1 for r in all_rows if len(r.get('sources', [])) > 1),
+            'sample': recalls[:3],
         })
 
-    # Fleet-scan helper: return compact ACTIVE recall list (no owner needed).
+    # Fleet-scan helper: compact ACTIVE recall list (no owner needed).
     if owner in (None, '_feed'):
-        active = [r for r in recalls if r['active']]
-        return _resp(200, {'recall_feed_date': _iso(_FEED_CACHE['fetched_at']),
-                           'active_recalls': len(active), 'recalls': active})
+        return _resp(200, {'recall_feed_date': feed_date,
+                           'active_recalls': len(recalls),
+                           'source_counts': _source_counts(recalls),
+                           'recalls': recalls})
 
     try:
         matches, stats = check_owner(owner, recalls)
@@ -487,12 +1127,11 @@ def lambda_handler(event, context):
 
     return _resp(200, {
         'checked_at': _iso(t_start),
-        'recall_feed_date': _iso(_FEED_CACHE['fetched_at']),
+        'recall_feed_date': feed_date,
         'matches': matches,
-        'feed_stats': {'active_recalls': stats['active_recalls']},
+        'feed_stats': {'active_recalls': stats['active_recalls'],
+                       'sources': _source_counts(recalls)},
         'timing': {
-            'feed_fetch_ms': feed_meta.get('fetch_ms', 0),
-            'feed_cache': feed_meta.get('cache'),
             'llm_ms': stats['llm_ms'],
             'llm_called': stats['llm_called'],
             'total_ms': int((time.time() - t_start) * 1000),

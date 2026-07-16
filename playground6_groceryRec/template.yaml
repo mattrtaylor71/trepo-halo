@@ -1755,13 +1755,19 @@ Resources:
         - { SecurityGroupIds: [ !Ref LambdaSecurityGroupId ], SubnetIds: !Ref LambdaSubnetIds }
         - !Ref AWS::NoValue
 
-  # Food-recall check: match a user's checked-in kitchen items against USDA FSIS
-  # (meat/poultry/egg) recalls. FSIS feed cached in-process (6h TTL); two-tier match
-  # (likely = brand+type, possible = generic type) via one batched gpt-4.1-mini call.
+  # Food-recall check: match a user's checked-in kitchen items against a MERGED,
+  # full-US food-recall feed (USDA FSIS + openFDA food-enforcement + FDA press-release
+  # XLSX + CDC food-safety RSS), persisted + de-duplicated in the `recall_feed` MySQL
+  # table. Two-tier match (likely = brand+form, possible = generic same-form) via one
+  # batched gpt-4.1-mini call. A daily EventBridge Schedule event fires the handler with
+  # {action:"refresh_feed"} to rebuild the merged feed (openFDA re-pulled only when its
+  # export_date advances). Reads auto-refresh if the table is stale >26h.
   # NOTE: initially provisioned standalone via `aws lambda create-function`
   # (FunctionName pinned below so a future clean `sam deploy` reconciles to the same
-  # name/route). Requires internet egress for the FSIS feed + OpenAI, so it must stay
-  # OUT of the VPC (RDS is reached over its public endpoint, same as the other fns).
+  # name/route/schedule). Requires internet egress (FSIS/FDA/CDC feeds + OpenAI), so it
+  # stays OUT of the VPC (RDS reached over its public endpoint, same as the other fns).
+  # DB tables `recall_feed` + `recall_feed_meta` are created out-of-band (see
+  # recall_check/README not tracked; DDL in the deploy notes).
   RecallCheckFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -1769,7 +1775,7 @@ Resources:
       CodeUri: recall_check/
       Handler: app.lambda_handler
       Runtime: python3.9
-      Timeout: 60
+      Timeout: 120
       MemorySize: 512
       ReservedConcurrentExecutions: !Ref LightApiReservedConcurrency
       Environment:
@@ -1782,7 +1788,9 @@ Resources:
           OPENAI_API_KEY: !Ref OpenAIApiKey
           RECALL_MATCH_MODEL: gpt-4.1-mini
           RECALL_LOOKBACK_DAYS: '365'
-          RECALL_FEED_TTL_SECONDS: '21600'
+          RECALL_FEED_INGEST_DAYS: '550'
+          RECALL_FEED_STALE_SECONDS: '93600'
+          # OPENFDA_API_KEY: ''   # optional; keyless works (240 req/min, 120k/day)
       Events:
         RecallCheckRoute:
           Type: HttpApi
@@ -1790,6 +1798,12 @@ Resources:
             ApiId: !Ref Api
             Path: /recall-check/{owner}
             Method: GET
+        DailyFeedRefresh:
+          Type: Schedule
+          Properties:
+            Schedule: rate(1 day)
+            Description: Daily rebuild of the merged food-recall feed
+            Input: '{"action":"refresh_feed"}'
 
   RecipesGeneratorFunction:
     Type: AWS::Serverless::Function
