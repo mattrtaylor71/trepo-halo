@@ -1755,6 +1755,42 @@ Resources:
         - { SecurityGroupIds: [ !Ref LambdaSecurityGroupId ], SubnetIds: !Ref LambdaSubnetIds }
         - !Ref AWS::NoValue
 
+  # Food-recall check: match a user's checked-in kitchen items against USDA FSIS
+  # (meat/poultry/egg) recalls. FSIS feed cached in-process (6h TTL); two-tier match
+  # (likely = brand+type, possible = generic type) via one batched gpt-4.1-mini call.
+  # NOTE: initially provisioned standalone via `aws lambda create-function`
+  # (FunctionName pinned below so a future clean `sam deploy` reconciles to the same
+  # name/route). Requires internet egress for the FSIS feed + OpenAI, so it must stay
+  # OUT of the VPC (RDS is reached over its public endpoint, same as the other fns).
+  RecallCheckFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: trepo-recall-check
+      CodeUri: recall_check/
+      Handler: app.lambda_handler
+      Runtime: python3.9
+      Timeout: 60
+      MemorySize: 512
+      ReservedConcurrentExecutions: !Ref LightApiReservedConcurrency
+      Environment:
+        Variables:
+          DB_HOST:  !Ref DBHost
+          DB_PORT:  !Ref DBPort
+          DB_USER:  !Ref DBUser
+          DB_PASS:  !Ref DBPass
+          DB_NAME:  !Ref DBName
+          OPENAI_API_KEY: !Ref OpenAIApiKey
+          RECALL_MATCH_MODEL: gpt-4.1-mini
+          RECALL_LOOKBACK_DAYS: '365'
+          RECALL_FEED_TTL_SECONDS: '21600'
+      Events:
+        RecallCheckRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /recall-check/{owner}
+            Method: GET
+
   RecipesGeneratorFunction:
     Type: AWS::Serverless::Function
     Properties:
