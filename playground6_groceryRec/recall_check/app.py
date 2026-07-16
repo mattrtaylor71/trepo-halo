@@ -988,7 +988,9 @@ _MATCH_SYSTEM = (
     "from beef jerky and must NOT match a beef-jerky recall.\n\n"
     "Assign exactly one level per item:\n"
     "  \"likely\"  = the item's BRAND (or establishment) matches the recalling company/"
-    "brand AND it is the same product form. Strong, specific match.\n"
+    "brand AND it is the same product form. Strong, specific match. A shared BRAND alone "
+    "is NOT enough: the SAME brand's DIFFERENT product is only 'possible' (e.g. a brand's "
+    "chili crisp vs that same brand's recalled sesame noodles -> possible, not likely).\n"
     "  \"possible\" = the item is a GENERIC/unbranded (or different-brand) version of the "
     "SAME product form as a recalled product. Only use this when the form genuinely "
     "matches (e.g. unbranded 'beef jerky' vs a beef-jerky recall; unbranded 'ground "
@@ -1004,7 +1006,10 @@ _MATCH_SYSTEM = (
     "  - {name:'Beef Tenderloin Steak'} -> none (steak is NOT jerky).\n"
     "  - {name:'Beef Smoked Sausage'} -> none (sausage is NOT jerky).\n"
     "  - {name:'Jerky Seasoning'} -> none (a seasoning, not a jerky product).\n"
-    "  - {name:'Plastic Wrap'} -> none (not a food).\n\n"
+    "  - {name:'Plastic Wrap'} -> none (not a food).\n"
+    "  - {name:'Fly By Jing Chili Crisp', brand:'Fly By Jing'} vs a 'Fly By Jing Sesame "
+    "Noodles' recall -> possible (same brand, but chili crisp is a DIFFERENT product than "
+    "noodles — not likely).\n\n"
     "Each kitchen item has a small integer \"i\" field — echo that SAME integer in your "
     "verdict (do not invent ids or repeat names). "
     "Return STRICT JSON: {\"verdicts\":[{\"i\":<the item's i>,"
@@ -1131,6 +1136,23 @@ def run_llm_match(items, recalls):
     return out
 
 
+# Generic prep/packaging words — a shared one of these is NOT product identity.
+_GENERIC_PREP_TOKENS = {'ground', 'sliced', 'frozen', 'fresh', 'cooked',
+                        'roasted', 'smoked', 'dried', 'canned', 'mini'}
+
+
+def _shares_product_identity(it, r):
+    """True if the item and the recall share a real PRODUCT token beyond the brand name
+    and generic prep words. Keeps 'likely' honest: same brand + DIFFERENT product (e.g.
+    Fly By Jing Chili Crisp vs a Fly By Jing Sesame Noodles recall) shares only brand
+    tokens, so it is not a same-product likely match."""
+    it_toks = _tokens(it.get('product_name'), it.get('variant'))
+    r_prod = _tokens(r.get('product_description'), r.get('title'))
+    brand = _tokens(it.get('brand')) | _tokens(r.get('brand'), r.get('establishment'))
+    identity = (it_toks & r_prod) - brand - _GENERIC_PREP_TOKENS
+    return bool(identity)
+
+
 def _validate_match(it, r, level):
     """Deterministic guard against LLM hallucination: the CHOSEN recall must actually
     share a product-identity token with the item (kills 'tuna -> ice cream'). And
@@ -1140,8 +1162,7 @@ def _validate_match(it, r, level):
     r_prod = _tokens(r.get('product_description'), r.get('title'))
     # A shared token that is ONLY a generic prep/packaging word is not product identity.
     shared = it_toks & r_prod
-    if not shared or shared <= {'ground', 'sliced', 'frozen', 'fresh', 'cooked',
-                                'roasted', 'smoked', 'dried', 'canned', 'mini'}:
+    if not shared or shared <= _GENERIC_PREP_TOKENS:
         return None
     if level == 'likely':
         it_brand = _tokens(it.get('brand'))
@@ -1187,6 +1208,20 @@ def check_owner(owner, recalls, item_override=None):
                 'recall_title': (r.get('title') or r.get('product_description') or '')[:80],
             }), file=sys.stderr)
             continue  # item and chosen recall don't share a real product token
+        # Tier precision: 'likely' means SAME brand AND same product. If the brand
+        # aligns but the only shared tokens ARE the brand (same brand, different
+        # product — e.g. Fly By Jing Chili Crisp vs a Fly By Jing Sesame Noodles
+        # recall), downgrade to 'possible' ("worth double-checking your brand/product").
+        if level == 'likely' and not _shares_product_identity(it, r):
+            print(json.dumps({
+                'evt': 'recall_match_tier_downgraded',
+                'owner': owner,
+                'item': (it.get('product_name') or '')[:80],
+                'recall_title': (r.get('title') or r.get('product_description') or '')[:80],
+                'from': 'likely', 'to': 'possible',
+                'reason': 'brand_aligns_product_differs',
+            }), file=sys.stderr)
+            level = 'possible'
         matches.append({
             'kitchen_item_id': iid,
             'kitchen_item_name': it.get('product_name'),
