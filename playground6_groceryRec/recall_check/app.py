@@ -73,10 +73,26 @@ KITCHEN_TABLE = os.getenv('SHARED_KITCHEN_TABLE', 'shared_kitchen')
 
 OPENAI_API_KEY = os.getenv('OPENAI_API_KEY', '')
 OPENAI_MATCH_MODEL = os.getenv('RECALL_MATCH_MODEL', 'gpt-4.1-mini')
-OPENAI_TIMEOUT_SECONDS = int(os.getenv('RECALL_OPENAI_TIMEOUT', '40'))
-# Only send the LLM recalls that share a token with SOME kitchen item, and only items
-# that overlap SOME recall. Belt-and-suspenders context bounds.
-MAX_RECALLS_TO_LLM = int(os.getenv('RECALL_MAX_TO_LLM', '60'))
+# Per-call timeout. A single batched call over a big kitchen (100+ items) generating a
+# verdict per item is SUPERLINEAR and hung past 60s -> we now chunk items and run the
+# batches concurrently, with retries OFF so one slow batch can't blow the Lambda budget.
+OPENAI_TIMEOUT_SECONDS = int(os.getenv('RECALL_OPENAI_TIMEOUT', '22'))
+OPENAI_MAX_RETRIES = int(os.getenv('RECALL_OPENAI_MAX_RETRIES', '0'))
+# Items per LLM call (latency is ~linear in item count: ~7s@15, ~11s@25, ~19s@40; 104
+# in one call hung >120s). Small batches keep each call fast; batches run concurrently.
+LLM_ITEMS_PER_BATCH = int(os.getenv('RECALL_LLM_ITEMS_PER_BATCH', '14'))
+LLM_MAX_WORKERS = int(os.getenv('RECALL_LLM_MAX_WORKERS', '8'))
+# Hard wall-clock ceiling for the whole matching step; batches still pending when this
+# elapses are abandoned and we return partial results (never hang the request).
+LLM_TOTAL_DEADLINE_S = int(os.getenv('RECALL_LLM_TOTAL_DEADLINE_S', '35'))
+# Per-BATCH recall cap (each batch is sent only the recalls its own items overlap).
+MAX_RECALLS_TO_LLM = int(os.getenv('RECALL_MAX_TO_LLM', '40'))
+# Global cap on the candidate recall pool the prefilter hands to the matcher (kept high
+# so no relevant recall is dropped; per-batch subsetting controls actual payload size).
+MAX_CANDIDATE_RECALLS = int(os.getenv('RECALL_MAX_CANDIDATE_RECALLS', '250'))
+# Absolute cap on candidate items sent to the LLM in one request (protects against a
+# pathologically large kitchen). Most-recently-added items win (prefilter preserves order).
+MAX_CANDIDATE_ITEMS = int(os.getenv('RECALL_MAX_CANDIDATE_ITEMS', '120'))
 
 # Tokens that carry no product-identity signal — dropped before overlap matching.
 _NOISE_TOKENS = {
@@ -914,7 +930,8 @@ def prefilter(items, recalls):
         if overlaps:
             cand_items.append(it)
             cand_recall_ids.update(overlaps)
-    cand_recalls = [r_toks[i][1] for i in sorted(cand_recall_ids)][:MAX_RECALLS_TO_LLM]
+    cand_items = cand_items[:MAX_CANDIDATE_ITEMS]  # bound worst-case LLM work
+    cand_recalls = [r_toks[i][1] for i in sorted(cand_recall_ids)][:MAX_CANDIDATE_RECALLS]
     return cand_items, cand_recalls, len(active)
 
 
@@ -948,51 +965,124 @@ _MATCH_SYSTEM = (
     "  - {name:'Beef Smoked Sausage'} -> none (sausage is NOT jerky).\n"
     "  - {name:'Jerky Seasoning'} -> none (a seasoning, not a jerky product).\n"
     "  - {name:'Plastic Wrap'} -> none (not a food).\n\n"
-    "Return STRICT JSON: {\"verdicts\":[{\"item_id\":\"...\","
+    "Each kitchen item has a small integer \"i\" field — echo that SAME integer in your "
+    "verdict (do not invent ids or repeat names). "
+    "Return STRICT JSON: {\"verdicts\":[{\"i\":<the item's i>,"
     "\"level\":\"none|possible|likely\",\"recall_index\":<int or null>}]}. "
-    "Include an entry for EVERY kitchen item. recall_index is the 0-based index into the "
-    "RECALLS list for the matched recall, or null when level is none."
+    "Include an entry for EVERY kitchen item (by its \"i\"). recall_index is the 0-based "
+    "index into the RECALLS list for the matched recall, or null when level is none."
 )
 
 
-def run_llm_match(items, recalls):
-    """One batched gpt-4.1-mini call. Returns {item_id: {level, recall_index}}."""
-    from openai import OpenAI
-    client = OpenAI(api_key=OPENAI_API_KEY, timeout=OPENAI_TIMEOUT_SECONDS)
+def _match_one_batch(client, item_batch, recalls, recall_toks):
+    """One LLM call over a SMALL batch of items. Each batch is sent ONLY the recalls its
+    own items token-overlap (keeps the payload small and never drops a relevant recall to
+    a global cap). Returns {item_id: {level, recall_index(GLOBAL)}}; empty on any error so
+    a failed batch cannot sink the request."""
+    # Global recall indices relevant to THIS batch, collected ROUND-ROBIN across items so
+    # every item's top matches survive the per-batch cap (item-by-item order would let a
+    # few early items exhaust the cap and starve later items of their own recall).
+    import itertools
+    per_item = []
+    for it in item_batch:
+        it_toks = _tokens(it.get('product_name'), it.get('brand'), it.get('variant'))
+        per_item.append([gi for gi, rt in enumerate(recall_toks) if it_toks & rt])
+    rel = []
+    seen = set()
+    for tier in itertools.zip_longest(*per_item):
+        for gi in tier:
+            if gi is not None and gi not in seen:
+                seen.add(gi)
+                rel.append(gi)
+    rel = rel[:MAX_RECALLS_TO_LLM]
+    if not rel:
+        return {}
+    local_to_global = rel
+    recall_lines = [{
+        'index': li,
+        'product': (recalls[gi]['product_description'] or recalls[gi]['title'])[:220],
+        'brand': (recalls[gi].get('brand') or '')[:100],
+        'establishment': (recalls[gi].get('establishment') or '')[:100],
+        'reason': (recalls[gi].get('reason') or '')[:100],
+    } for li, gi in enumerate(local_to_global)]
+    # Reference items by a small per-batch integer "i" (0..len-1) instead of the 36-char
+    # _id UUID. The LLM echoes "i" per verdict; without this ~half the completion tokens
+    # (and thus latency — this call is OUTPUT-token-bound) were spent re-emitting UUIDs.
+    # Map "i" back to the real _id locally.
     item_lines = [{
-        'item_id': it['_id'],
+        'i': idx,
         'name': it.get('product_name') or '',
         'brand': it.get('brand') or '',
         'variant': it.get('variant') or '',
-    } for it in items]
-    recall_lines = [{
-        'index': i,
-        'product': (r['product_description'] or r['title'])[:300],
-        'brand': (r.get('brand') or '')[:120],
-        'establishment': (r.get('establishment') or '')[:120],
-        'reason': (r.get('reason') or '')[:120],
-    } for i, r in enumerate(recalls)]
+    } for idx, it in enumerate(item_batch)]
     user = ("KITCHEN ITEMS:\n" + json.dumps(item_lines, ensure_ascii=False) +
             "\n\nACTIVE RECALLS:\n" + json.dumps(recall_lines, ensure_ascii=False))
-    resp = _create_chat(
-        client,
-        model=OPENAI_MATCH_MODEL,
-        temperature=0,
-        response_format={'type': 'json_object'},
-        messages=[{'role': 'system', 'content': _MATCH_SYSTEM},
-                  {'role': 'user', 'content': user}],
-    )
-    content = resp.choices[0].message.content or '{}'
     try:
-        parsed = json.loads(content)
-    except Exception:
-        parsed = {}
+        resp = _create_chat(
+            client,
+            model=OPENAI_MATCH_MODEL,
+            temperature=0,
+            response_format={'type': 'json_object'},
+            messages=[{'role': 'system', 'content': _MATCH_SYSTEM},
+                      {'role': 'user', 'content': user}],
+        )
+        parsed = json.loads(resp.choices[0].message.content or '{}')
+    except Exception as e:
+        print(json.dumps({'evt': 'recall_llm_batch_error', 'n_items': len(item_batch),
+                          'error': str(e)[:200]}), file=sys.stderr)
+        return {}
     out = {}
     for v in (parsed.get('verdicts') or []):
-        iid = v.get('item_id')
+        # Accept the compact "i" index; tolerate a stray "item_id" echo just in case.
+        ref = v.get('i')
+        if ref is None:
+            ref = v.get('item_id')
+        try:
+            bi = int(ref)
+        except (TypeError, ValueError):
+            continue
+        if not (0 <= bi < len(item_batch)):
+            continue
         lvl = str(v.get('level') or 'none').lower()
-        if iid and lvl in ('possible', 'likely'):
-            out[iid] = {'level': lvl, 'recall_index': v.get('recall_index')}
+        li = v.get('recall_index')
+        if lvl in ('possible', 'likely') and isinstance(li, int) \
+                and 0 <= li < len(local_to_global):
+            out[item_batch[bi]['_id']] = {'level': lvl, 'recall_index': local_to_global[li]}
+    return out
+
+
+def run_llm_match(items, recalls):
+    """Chunk candidate items into small batches and run the batches CONCURRENTLY, each a
+    bounded (retries-off, short-timeout) gpt-4.1-mini call. Returns {item_id: {level,
+    recall_index}} with recall_index into `recalls`. A single batched call over 100+ items
+    is superlinear and hung past the Lambda timeout; chunking bounds each call and
+    parallelism bounds wall-clock. Any batch still pending at the total deadline is
+    abandoned (partial results returned)."""
+    from concurrent.futures import (ThreadPoolExecutor, as_completed,
+                                    TimeoutError as _FuturesTimeout)
+    from openai import OpenAI
+    client = OpenAI(api_key=OPENAI_API_KEY, timeout=OPENAI_TIMEOUT_SECONDS,
+                    max_retries=OPENAI_MAX_RETRIES)
+    recall_toks = [_recall_tokens(r) for r in recalls]
+    batches = [items[i:i + LLM_ITEMS_PER_BATCH]
+               for i in range(0, len(items), LLM_ITEMS_PER_BATCH)]
+    out = {}
+    ex = ThreadPoolExecutor(max_workers=LLM_MAX_WORKERS)
+    try:
+        futs = [ex.submit(_match_one_batch, client, b, recalls, recall_toks)
+                for b in batches]
+        try:
+            for f in as_completed(futs, timeout=LLM_TOTAL_DEADLINE_S):
+                try:
+                    out.update(f.result())
+                except Exception:
+                    pass
+        except _FuturesTimeout:
+            done = sum(1 for f in futs if f.done())
+            print(json.dumps({'evt': 'recall_llm_deadline', 'batches': len(batches),
+                              'completed': done}), file=sys.stderr)
+    finally:
+        ex.shutdown(wait=False)
     return out
 
 
