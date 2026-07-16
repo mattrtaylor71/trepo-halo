@@ -124,6 +124,43 @@ _SAVED_RECIPE_SELECT_FIELDS = """_id, _owner, source_type, source_url, resolved_
                        source_image_url, source_image_urls, image_storage_key,
                        ingredients, instructions, notes, raw_caption, raw_content, extraction_source,
                        author_name, caption_field, status, meal_category, _createdDate, _updatedDate"""
+# Canonical field order the readers expect (parsed from the list above). Per-owner
+# saved_recipes tables drifted over time — ~5185 of 7643 predate columns like
+# source_image_url/source_image_urls/image_storage_key/image_urls/raw_content/
+# caption_field/meal_category. Reads MUST NOT hard-list those or a stale table 500s with
+# 1054 "Unknown column". _drift_safe_select() NULL-fills any expected-but-missing column.
+_SAVED_RECIPE_FIELDS = [f.strip() for f in _SAVED_RECIPE_SELECT_FIELDS.replace('\n', ' ').split(',') if f.strip()]
+
+
+def _table_column_set(conn, table):
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_schema = DATABASE() AND table_name = %s",
+            [table],
+        )
+        return {
+            (row.get('column_name') or row.get('COLUMN_NAME'))
+            for row in (cur.fetchall() or [])
+            if (row.get('column_name') or row.get('COLUMN_NAME'))
+        }
+
+
+def _drift_safe_select(conn, table, extra_fields=None):
+    """Build a schema-drift-tolerant SELECT list for a saved_recipes table: columns that
+    exist are selected as-is; expected columns the table LACKS are NULL-filled (aliased)
+    so a legacy per-owner table missing e.g. source_image_url can never raise 1054. Field
+    set/order matches _SAVED_RECIPE_SELECT_FIELDS so downstream mapping is unchanged."""
+    fields = list(_SAVED_RECIPE_FIELDS)
+    for extra in (extra_fields or []):
+        if extra not in fields:
+            fields.append(extra)
+    present = _table_column_set(conn, table)
+    return ', '.join(
+        (f'`{f}`' if f in present else f'NULL AS `{f}`') for f in fields
+    )
+
+
 _OWNER_KITCHEN_STATE_TABLE = 'owner_kitchen_state'
 _OWNER_RECIPE_AVAILABILITY_TABLE = 'owner_recipe_availability'
 # Max saved recipes to LLM-match synchronously in one /personalize call. Cache-read
@@ -3971,7 +4008,7 @@ def _fetch_saved_recipe_by_id(conn, owner, item_id):
     table = _saved_recipes_table(owner)
     with conn.cursor() as cur:
         cur.execute(
-            f"""SELECT {_SAVED_RECIPE_SELECT_FIELDS}
+            f"""SELECT {_drift_safe_select(conn, table)}
                 FROM `{table}`
                 WHERE _id = %s
                 LIMIT 1""",
@@ -3984,7 +4021,7 @@ def _fetch_saved_recipe_by_hash(conn, owner, resolved_url_hash):
     table = _saved_recipes_table(owner)
     with conn.cursor() as cur:
         cur.execute(
-            f"""SELECT {_SAVED_RECIPE_SELECT_FIELDS}
+            f"""SELECT {_drift_safe_select(conn, table)}
                 FROM `{table}`
                 WHERE resolved_url_hash = %s
                 LIMIT 1""",
@@ -4013,17 +4050,19 @@ def _read_own_saved_recipe_rows(conn, owner, limit, before):
         params = []
         where_parts = []
         if use_shared:
+            from_table = 'shared_saved_recipes'
             from_ref = '`shared_saved_recipes`'
             where_parts.append("owner_id = %s")
             params.append(owner)
         else:
+            from_table = table
             from_ref = f'`{table}`'
         if before:
             where_parts.append("COALESCE(_updatedDate, _createdDate) < %s")
             params.append(before)
         where_clause = ("WHERE " + " AND ".join(where_parts)) if where_parts else ""
         cur.execute(
-            f"""SELECT {_SAVED_RECIPE_SELECT_FIELDS}
+            f"""SELECT {_drift_safe_select(conn, from_table)}
                 FROM {from_ref}
                 {where_clause}
                 ORDER BY COALESCE(_updatedDate, _createdDate) DESC
@@ -4043,7 +4082,6 @@ def _read_household_saved_recipe_rows(conn, acting_owner, member_ids, limit, bef
     Returns (rows, has_more). Each row carries `_owner` (for saved_by) and
     `resolved_url_hash` (popped from the serialized payload later)."""
     acting = _safe_owner_token(acting_owner)
-    fields = _SAVED_RECIPE_SELECT_FIELDS + ", resolved_url_hash"
     collected = []
     for member_id in member_ids:
         table = _saved_recipes_table(member_id)
@@ -4054,6 +4092,9 @@ def _read_household_saved_recipe_rows(conn, acting_owner, member_ids, limit, bef
             """, [table])
             if (cur.fetchone() or {}).get('n', 0) == 0:
                 continue  # member never saved a recipe yet
+            # Drift-tolerant per-member SELECT: legacy tables lacking source_image_url (etc)
+            # NULL-fill instead of 500ing the whole household read (the bug this fixes).
+            fields = _drift_safe_select(conn, table, extra_fields=['resolved_url_hash'])
             params = []
             where = ""
             if before:
@@ -4210,7 +4251,7 @@ def _personalize_saved_recipes(owner, request_id=None, recipe_ids=None):
         with conn.cursor() as cur:
             if use_shared:
                 cur.execute(
-                    f"""SELECT {_SAVED_RECIPE_SELECT_FIELDS}
+                    f"""SELECT {_drift_safe_select(conn, 'shared_saved_recipes')}
                         FROM `shared_saved_recipes`
                         WHERE owner_id = %s
                         ORDER BY COALESCE(_updatedDate, _createdDate) DESC""",
@@ -4218,7 +4259,7 @@ def _personalize_saved_recipes(owner, request_id=None, recipe_ids=None):
                 )
             else:
                 cur.execute(
-                    f"""SELECT {_SAVED_RECIPE_SELECT_FIELDS}
+                    f"""SELECT {_drift_safe_select(conn, table)}
                         FROM `{table}`
                         ORDER BY COALESCE(_updatedDate, _createdDate) DESC""",
                 )
