@@ -950,8 +950,8 @@ def _generate_recipes_with_gpt(ingredients_list, kitchen_only_count=10, need_gro
     system = """You are a recipe assistant. Return valid JSON only, no markdown.
 Output schema:
 {
-  "kitchen_only": [ exactly the requested number of recipes. Each: { "title": "Recipe name", "meal_category": "breakfast|lunch|dinner|snacks", "ingredients": ["item1", "item2"], "steps": ["Step 1.", "Step 2."] }. Use ONLY the provided kitchen list of grocery products (reference by exact product name) plus pantry staples (salt, pepper, oil, water, basic spices). ],
-  "need_grocery": [ exactly the requested number of recipes. Each: { "title": "Recipe name", "meal_category": "breakfast|lunch|dinner|snacks", "ingredients": ["item1", "item2", ...], "steps": ["Step 1.", "Step 2."], "missing_ingredients": ["item to buy 1", "item to buy 2"] }. Each recipe should use some grocery products from the kitchen list (reference by exact product name) but require at least one additional ingredient the user must buy. List those in missing_ingredients. ]
+  "kitchen_only": [ exactly the requested number of recipes. Each: { "title": "Recipe name", "emoji": "🍝", "meal_category": "breakfast|lunch|dinner|snacks", "ingredients": ["item1", "item2"], "steps": ["Step 1.", "Step 2."] }. Use ONLY the provided kitchen list of grocery products (reference by exact product name) plus pantry staples (salt, pepper, oil, water, basic spices). ],
+  "need_grocery": [ exactly the requested number of recipes. Each: { "title": "Recipe name", "emoji": "🌮", "meal_category": "breakfast|lunch|dinner|snacks", "ingredients": ["item1", "item2", ...], "steps": ["Step 1.", "Step 2."], "missing_ingredients": ["item to buy 1", "item to buy 2"] }. Each recipe should use some grocery products from the kitchen list (reference by exact product name) but require at least one additional ingredient the user must buy. List those in missing_ingredients. ]
 }
 Each kitchen item may include a short description in parentheses (e.g. "Ice Cubes Gum (chewing gum, not edible ice)"). Use that to avoid misuse: do NOT suggest recipes that treat a product as something it is not (e.g. do not use gum as ice in drinks). Reference items by their exact product name in the ingredients array. Keep titles short. Steps concise.
 
@@ -960,6 +960,7 @@ Coherence rules:
 - Do NOT use beverage items (sparkling water, soda, seltzer, etc.) as cooking liquids or cereal bases.
 - Recipes should be FOOD dishes, not beverages. If a beverage item exists, it can be omitted.
 - Every recipe must include exactly one meal_category value chosen from: breakfast, lunch, dinner, snacks.
+- Every recipe must include an "emoji" field: exactly ONE emoji that best represents the finished dish (e.g. 🍝 pasta, 🌮 tacos, 🥞 pancakes, 🍜 stir-fry/noodles, 🥗 salad, 🍲 soup/stew, 🍳 eggs, 🥪 sandwich). It MUST be a single food or dish emoji — never a flag, letter, number, punctuation, symbol, or more than one emoji.
 - If a recipe cannot be made coherently with the available items, choose a different combination of available items (still only from the list + pantry).
 
 Meal substantiality rules (IMPORTANT):
@@ -1037,6 +1038,28 @@ Return the JSON object only."""
         return _generate_once(fallback_client, RECIPE_GEN_FALLBACK_MODEL)
 
 
+# Leading emoji grapheme: one pictographic base (excludes the regional-indicator
+# block used for flags, letters, and ASCII symbols) plus any skin-tone modifier /
+# variation selector. ZWJ-joined extras are intentionally dropped to the base.
+_RECIPE_EMOJI_RE = re.compile(
+    "[\U0001F300-\U0001FAFF\U00002600-\U000027BF]"
+    "[\U0001F3FB-\U0001F3FF️]*"
+)
+
+
+def _clean_recipe_emoji(value):
+    """Return a single food/dish emoji grapheme, or None. Keeps only the first
+    grapheme when the model returns more than one char, and drops anything that
+    isn't in the emoji unicode ranges (flags, letters, numbers, symbols)."""
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    match = _RECIPE_EMOJI_RE.match(text)
+    return match.group(0) if match else None
+
+
 def _build_recipe_record(recipe, fallback_index=0):
     recipe = recipe or {}
     record = dict(recipe)
@@ -1045,6 +1068,8 @@ def _build_recipe_record(recipe, fallback_index=0):
         'meal_category': _recipe_meal_category(recipe, fallback_index=fallback_index),
         'ingredients': recipe.get('ingredients') or [],
         'steps': recipe.get('steps') or [],
+        # One food emoji for the dish; None when absent/invalid (old parses stay valid).
+        'emoji': _clean_recipe_emoji(recipe.get('emoji')),
     })
     if 'missing_ingredients' in (recipe or {}):
         record['missing_ingredients'] = recipe.get('missing_ingredients') or []
