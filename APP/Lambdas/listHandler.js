@@ -77,7 +77,10 @@ async function categorizeNames(names) {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) throw new Error('OPENAI_API_KEY not configured');
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 6000);
+  // 15s: the 6s budget TimeoutError'd in prod on normal batches (DOMException
+  // code 20). The categorize branch is always an async self-invoke (20s fn
+  // timeout), so nothing user-facing waits on this.
+  const timer = setTimeout(() => controller.abort(), 15000);
   try {
     const system = `You categorize grocery items into supermarket aisles. `
       + `Return a JSON object of the form {"categories": {"<item_name>": "<category>"}} `
@@ -205,7 +208,7 @@ async function categorizePending(owner) {
     console.log(JSON.stringify({ evt: 'list_categorized', owner, updated }));
     return { ok: true, updated };
   } catch (err) {
-    console.error(JSON.stringify({ evt: 'list_categorize_error', owner, error: err.code || err.message }));
+    console.error(JSON.stringify({ evt: 'list_categorize_error', owner, error: err.name === 'TimeoutError' ? 'llm_timeout' : (err.message || err.code || err.name) }));
     return { ok: false };
   }
 }
