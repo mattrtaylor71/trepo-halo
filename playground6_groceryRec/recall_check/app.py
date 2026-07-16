@@ -87,15 +87,18 @@ LLM_MAX_WORKERS = int(os.getenv('RECALL_LLM_MAX_WORKERS', '8'))
 LLM_TOTAL_DEADLINE_S = int(os.getenv('RECALL_LLM_TOTAL_DEADLINE_S', '35'))
 # Per-BATCH recall cap (each batch is sent only the recalls its own items overlap).
 MAX_RECALLS_TO_LLM = int(os.getenv('RECALL_MAX_TO_LLM', '40'))
-# Global cap on the candidate recall pool the prefilter hands to the matcher. Must exceed
-# the active-feed size or it silently drops recalls candidate items actually overlap — a
-# 250 cap dropped Matt's jerky recall (global index 470 of 483, sorted-index order). The
-# per-batch subsetting — NOT this cap — controls real LLM payload, so keep it well above
-# the feed size.
-MAX_CANDIDATE_RECALLS = int(os.getenv('RECALL_MAX_CANDIDATE_RECALLS', '2000'))
+# Global cap on the candidate recall pool the prefilter hands to the matcher (kept high
+# so no relevant recall is dropped; per-batch subsetting controls actual payload size).
+MAX_CANDIDATE_RECALLS = int(os.getenv('RECALL_MAX_CANDIDATE_RECALLS', '250'))
 # Absolute cap on candidate items sent to the LLM in one request (protects against a
 # pathologically large kitchen). Most-recently-added items win (prefilter preserves order).
 MAX_CANDIDATE_ITEMS = int(os.getenv('RECALL_MAX_CANDIDATE_ITEMS', '120'))
+# Per-item cap on how many of ITS OWN best-overlapping recalls each candidate item
+# contributes to the pool. The pool is built as a rank-round-robin UNION of these, so
+# every item's strongest recalls are guaranteed in — a global position cap previously
+# dropped an item's only real recall (e.g. a lone "Beef Jerky" whose 2 jerky recalls
+# sat past the 250th DB row => it could never match).
+TOP_K_RECALLS_PER_ITEM = int(os.getenv('RECALL_TOP_K_PER_ITEM', '25'))
 
 # Tokens that carry no product-identity signal — dropped before overlap matching.
 _NOISE_TOKENS = {
@@ -487,14 +490,6 @@ _PETFOOD_RE = re.compile(
     r'dog treat|cat treat|pet treat|animal feed|livestock|equine|poultry feed|'
     r'wild bird|birdseed|bird seed|aquarium|veterinary)\b', re.I)
 
-# Facility-wide catch-all recalls ("all human food products distributed from X", "all
-# products manufactured at ...") name no specific product, so they token-match arbitrary
-# kitchen items (a user can't tell if their item came from that firm). Drop from the feed.
-_CATCHALL_RE = re.compile(
-    r'\ball\s+human\s+food\s+products?\b|'
-    r'\ball\s+(food\s+)?products?\s+(distributed|produced|manufactured|made|packaged|'
-    r'sold)\b', re.I)
-
 
 def _is_non_human_food(r):
     ptype = (r.get('product_type') or '').lower()
@@ -502,9 +497,7 @@ def _is_non_human_food(r):
         return True
     blob = (r.get('product_description', '') + ' ' + r.get('title', '') + ' ' +
             r.get('reason', ''))
-    if _PETFOOD_RE.search(blob):
-        return True
-    return bool(_CATCHALL_RE.search(r.get('product_description') or r.get('title') or ''))
+    return bool(_PETFOOD_RE.search(blob))
 
 
 # ---------------------------------------------------------------------------
@@ -917,6 +910,7 @@ def prefilter(items, recalls):
       - keep only (item, recall) pairs with >=1 shared token,
       - return the surviving items and the union of candidate recalls.
     """
+    import itertools
     cutoff = time.time() - RECALL_LOOKBACK_DAYS * 86400
     active = []
     for r in recalls:
@@ -933,18 +927,38 @@ def prefilter(items, recalls):
             active.append(r)
     r_toks = [(_recall_tokens(r), r) for r in active]
 
+    # For each candidate item, RANK its overlapping recalls by shared-token count (desc)
+    # and keep its top-K. This is the item's own relevance order — never a global cap.
     cand_items = []
-    cand_recall_ids = set()
+    per_item_ranked = []  # aligned with cand_items: list of global recall indices, best-first
     for it in items:
         it_toks = _tokens(it.get('product_name'), it.get('brand'), it.get('variant'))
         if not it_toks:
             continue
-        overlaps = [i for i, (rt, _) in enumerate(r_toks) if it_toks & rt]
-        if overlaps:
-            cand_items.append(it)
-            cand_recall_ids.update(overlaps)
-    cand_items = cand_items[:MAX_CANDIDATE_ITEMS]  # bound worst-case LLM work
-    cand_recalls = [r_toks[i][1] for i in sorted(cand_recall_ids)][:MAX_CANDIDATE_RECALLS]
+        scored = []
+        for i, (rt, _) in enumerate(r_toks):
+            sh = it_toks & rt
+            if sh:
+                scored.append((len(sh), -i, i))  # more shared tokens first; stable by index
+        if not scored:
+            continue
+        scored.sort(reverse=True)
+        cand_items.append(it)
+        per_item_ranked.append([i for _, _, i in scored[:TOP_K_RECALLS_PER_ITEM]])
+    cand_items = cand_items[:MAX_CANDIDATE_ITEMS]
+    per_item_ranked = per_item_ranked[:MAX_CANDIDATE_ITEMS]
+    # UNION via rank round-robin: every item's #1 is taken before anyone's #2, etc., so no
+    # item is starved by the pool cap (each item's best recalls are guaranteed present).
+    chosen = []
+    seen = set()
+    for tier in itertools.zip_longest(*per_item_ranked):
+        for gi in tier:
+            if gi is not None and gi not in seen:
+                seen.add(gi)
+                chosen.append(gi)
+        if len(chosen) >= MAX_CANDIDATE_RECALLS:
+            break
+    cand_recalls = [r_toks[i][1] for i in chosen[:MAX_CANDIDATE_RECALLS]]
     return cand_items, cand_recalls, len(active)
 
 
@@ -999,7 +1013,12 @@ def _match_one_batch(client, item_batch, recalls, recall_toks):
     per_item = []
     for it in item_batch:
         it_toks = _tokens(it.get('product_name'), it.get('brand'), it.get('variant'))
-        per_item.append([gi for gi, rt in enumerate(recall_toks) if it_toks & rt])
+        # rank THIS item's overlapping recalls by shared-token count (desc) so its BEST
+        # matches enter the batch subset first (a lone jerky item's jerky recall must not
+        # be crowded out by higher-global-index recalls of other items in the batch).
+        scored = [(len(it_toks & rt), gi) for gi, rt in enumerate(recall_toks) if it_toks & rt]
+        scored.sort(key=lambda x: (-x[0], x[1]))
+        per_item.append([gi for _, gi in scored])
     rel = []
     seen = set()
     for tier in itertools.zip_longest(*per_item):
@@ -1139,9 +1158,22 @@ def check_owner(owner, recalls, item_override=None):
         if not isinstance(ri, int) or ri < 0 or ri >= len(cand_recalls):
             continue
         r = cand_recalls[ri]
+        # Belt-and-suspenders OUTSIDE the LLM path: the item and the CHOSEN recall must
+        # share a real product-identity token. This catches an LLM that returns a wrong
+        # recall_index (e.g. confusing an item "i" with a recall index) — the misassigned
+        # pair won't share a token, so it is dropped + logged rather than shown as a scary
+        # false recall. _validate_match performs this exact check; a None means drop.
         level = _validate_match(it, r, v['level'])
         if level is None:
-            continue  # LLM hallucination — item and chosen recall don't share a product
+            print(json.dumps({
+                'evt': 'recall_match_dropped_invalid',
+                'owner': owner,
+                'item': (it.get('product_name') or '')[:80],
+                'llm_level': v.get('level'),
+                'recall_index': ri,
+                'recall_title': (r.get('title') or r.get('product_description') or '')[:80],
+            }), file=sys.stderr)
+            continue  # item and chosen recall don't share a real product token
         matches.append({
             'kitchen_item_id': iid,
             'kitchen_item_name': it.get('product_name'),
