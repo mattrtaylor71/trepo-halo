@@ -7,6 +7,13 @@ import {
   appendToRecentDish,
   listRecipeCategories,
   moveRecipeToCategory,
+  moveManyRecipesToCategory,
+  createRecipeCategory,
+  getMealCalendar,
+  addRecipeToMealCalendar,
+  addManyToMealCalendar,
+  moveMealCalendarEntry,
+  removeMealCalendarEntry,
   checkInKitchenItem,
   checkInManyKitchenItems,
   clearKitchenInventory,
@@ -117,18 +124,160 @@ const executeSharedToolAction = createToolActionExecutor({
   recommendItemsToUseUp
 });
 
-// ── Local-only recipe-category tools ─────────────────────────────────────
-// CONTAINMENT: these two tools are NOT in the shared tool-definitions.mjs (and
-// must not be — other services consume that module and would advertise tools
-// their executors can't implement). They are advertised locally by quick-ack's
+// ── Local-only tools: recipe categories + meal calendar ──────────────────
+// CONTAINMENT: these tools are NOT in the shared tool-definitions.mjs (and must
+// not be — other services consume that module and would advertise tools their
+// executors can't implement). They are advertised locally by quick-ack's
 // buildChatTools() and executed here by wrapping the shared executor: unknown
-// (to shared) category tools are handled locally, everything else delegates
-// unchanged. Filing a recipe into a category is NEITHER a dish log NOR a recipe
-// save, so it emits none of the guarded tool names and cannot trip the
-// recipe-save-vs-dishlog guard.
-const LOCAL_CATEGORY_TOOLS = new Set(["list_recipe_categories", "move_recipe_to_category"]);
+// (to shared) local tools are handled here, everything else delegates unchanged.
+// Filing a recipe into a category AND planning a meal onto the calendar are each
+// NEITHER a dish log NOR a recipe save, so they emit none of the guarded tool
+// names and cannot trip the recipe-save-vs-dishlog guard.
+const LOCAL_CATEGORY_TOOLS = new Set([
+  "list_recipe_categories",
+  "move_recipe_to_category",
+  "create_recipe_category"
+]);
+const LOCAL_MEAL_CALENDAR_TOOLS = new Set([
+  "get_meal_calendar",
+  "add_recipe_to_meal_calendar",
+  "add_many_to_meal_calendar",
+  "move_meal_calendar_entry",
+  "remove_meal_calendar_entry"
+]);
+const LOCAL_TOOLS = new Set([...LOCAL_CATEGORY_TOOLS, ...LOCAL_MEAL_CALENDAR_TOOLS]);
 
-async function executeLocalCategoryTool({ toolName, args, env, userContext }) {
+// Honest-error → HTTP status mapping. A resolution miss must surface as non-ok so
+// the model narrates truthfully instead of confirming an unperformed action.
+const LOCAL_ERROR_STATUS = {
+  recipe_not_found: 404,
+  recipe_ambiguous: 409,
+  entry_not_found: 404,
+  entry_ambiguous: 409,
+  invalid_date: 400,
+  invalid_meal_slot: 400,
+  no_recipes: 400,
+  no_entries: 400
+};
+
+function slotLabel(slot) {
+  const s = String(slot || "").trim();
+  return s || "a slot";
+}
+
+// Compute a human action summary for a successful local tool result. Returns null
+// when there is nothing to confirm (so the model never fabricates a confirmation).
+function summarizeLocalResult(toolName, toolResult, args) {
+  switch (toolName) {
+    case "list_recipe_categories": {
+      const names = (toolResult.categories || []).map((c) => c.name);
+      return names.length
+        ? `Found ${names.length} recipe categor${names.length === 1 ? "y" : "ies"}: ${names.join(", ")}.`
+        : "No custom recipe categories yet.";
+    }
+    case "create_recipe_category":
+      return toolResult.created
+        ? `Created the "${toolResult.name}" category.`
+        : `The "${toolResult.name}" category already exists.`;
+    case "move_recipe_to_category": {
+      if (Array.isArray(toolResult.results)) {
+        const okOnes = toolResult.results.filter((r) => r.ok).map((r) => r.recipe_name);
+        const failed = toolResult.results.filter((r) => !r.ok).map((r) => r.recipe_name);
+        let s = okOnes.length ? `Filed ${okOnes.join(", ")} under ${toolResult.category_name}.` : "";
+        if (failed.length) s += ` Couldn't find: ${failed.join(", ")}.`;
+        return s.trim() || null;
+      }
+      return `Filed ${toolResult.recipe_title || "the recipe"} under ${toolResult.category_name}.`;
+    }
+    case "get_meal_calendar": {
+      const n = (toolResult.entries || []).length;
+      return n
+        ? `Found ${n} planned meal${n === 1 ? "" : "s"}.`
+        : "Nothing planned on the calendar for that range.";
+    }
+    case "add_recipe_to_meal_calendar":
+      return `Scheduled ${toolResult.title || "the recipe"} for ${toolResult.plan_date} ${slotLabel(toolResult.meal_slot)}.`;
+    case "add_many_to_meal_calendar": {
+      const okOnes = (toolResult.results || []).filter((r) => r.ok);
+      const failed = (toolResult.results || []).filter((r) => !r.ok);
+      let s = okOnes.length
+        ? `Added ${okOnes.length} meal${okOnes.length === 1 ? "" : "s"} to the calendar.`
+        : "";
+      if (failed.length) s += ` ${failed.length} couldn't be added.`;
+      return s.trim() || null;
+    }
+    case "move_meal_calendar_entry":
+      return `Moved ${toolResult.title || "the entry"} to ${toolResult.new_date}${toolResult.new_meal_slot ? ` ${toolResult.new_meal_slot}` : ""}.`;
+    case "remove_meal_calendar_entry":
+      return `Removed ${toolResult.title || "the entry"} from the calendar.`;
+    default:
+      return null;
+  }
+}
+
+async function runLocalToolReal(toolName, args, userContext, options) {
+  switch (toolName) {
+    case "list_recipe_categories":
+      return listRecipeCategories(userContext, options);
+    case "create_recipe_category": {
+      // createRecipeCategory is idempotent on the backend; determine created-ness
+      // by checking whether the name pre-existed BEFORE creating.
+      const norm = String(args.category_name || "").trim().toLowerCase();
+      let existedBefore = false;
+      try {
+        const { categories } = await listRecipeCategories(userContext, options);
+        existedBefore = categories.some((c) => String(c.name || "").trim().toLowerCase() === norm);
+      } catch {
+        existedBefore = false;
+      }
+      const category = await createRecipeCategory(userContext, args.category_name, options);
+      return { ok: true, id: category.id, name: category.name, created: !existedBefore };
+    }
+    case "move_recipe_to_category":
+      return Array.isArray(args.recipe_names) && args.recipe_names.length
+        ? moveManyRecipesToCategory(userContext, args, options)
+        : moveRecipeToCategory(userContext, args, options);
+    case "get_meal_calendar":
+      return getMealCalendar(userContext, args, options);
+    case "add_recipe_to_meal_calendar":
+      return addRecipeToMealCalendar(userContext, args, options);
+    case "add_many_to_meal_calendar":
+      return addManyToMealCalendar(userContext, args, options);
+    case "move_meal_calendar_entry":
+      return moveMealCalendarEntry(userContext, args, options);
+    case "remove_meal_calendar_entry":
+      return removeMealCalendarEntry(userContext, args, options);
+    default:
+      throw new Error(`Unknown local tool: ${toolName}`);
+  }
+}
+
+function mockLocalToolResult(toolName, args) {
+  switch (toolName) {
+    case "list_recipe_categories":
+      return { owner: "mock", categories: [], assignments: {} };
+    case "create_recipe_category":
+      return { ok: true, id: "mock-cat", name: String(args.category_name || "").trim(), created: true };
+    case "move_recipe_to_category":
+      return Array.isArray(args.recipe_names) && args.recipe_names.length
+        ? { ok: true, category_name: String(args.category_name || "").trim(), created_category: false, moved: args.recipe_names.length, total: args.recipe_names.length, results: args.recipe_names.map((n) => ({ recipe_name: String(n || "").trim(), ok: true, already_filed: false })) }
+        : { ok: true, recipe_title: String(args.recipe_name || "").trim() || null, category_name: String(args.category_name || "").trim(), created_category: false, already_filed: false };
+    case "get_meal_calendar":
+      return { owner: "mock", start: null, end: null, entries: [] };
+    case "add_recipe_to_meal_calendar":
+      return { ok: true, entry: { id: "mock-entry" }, plan_date: args.plan_date, meal_slot: args.meal_slot, title: String(args.recipe_name || "").trim() || null };
+    case "add_many_to_meal_calendar":
+      return { ok: true, added: (args.entries || []).length, total: (args.entries || []).length, results: (args.entries || []).map((e) => ({ recipe_name: e?.recipe_name || null, plan_date: e?.plan_date || null, meal_slot: e?.meal_slot || null, ok: true, entry_id: "mock-entry" })) };
+    case "move_meal_calendar_entry":
+      return { ok: true, entry: { id: "mock-entry" }, new_date: args.new_date, new_meal_slot: args.new_meal_slot || null, title: args.title || null };
+    case "remove_meal_calendar_entry":
+      return { ok: true, removed_id: "mock-entry", title: args.title || null, plan_date: args.plan_date || null, meal_slot: args.meal_slot || null };
+    default:
+      return { ok: true };
+  }
+}
+
+async function executeLocalTool({ toolName, args, env, userContext }) {
   const normalizedArgs = typeof args === "object" && args !== null ? args : {};
 
   if (!userContext?.ownerId) {
@@ -154,42 +303,18 @@ async function executeLocalCategoryTool({ toolName, args, env, userContext }) {
   }));
 
   try {
-    let toolResult;
-    let actionSummary = null;
+    const toolResult = actionMode === "real"
+      ? await runLocalToolReal(toolName, normalizedArgs, userContext, options)
+      : mockLocalToolResult(toolName, normalizedArgs);
 
-    if (toolName === "list_recipe_categories") {
-      toolResult = actionMode === "real"
-        ? await listRecipeCategories(userContext, options)
-        : { owner: userContext.ownerId, categories: [], assignments: {} };
-      const names = (toolResult.categories || []).map((category) => category.name);
-      actionSummary = names.length
-        ? `Found ${names.length} recipe categor${names.length === 1 ? "y" : "ies"}: ${names.join(", ")}.`
-        : "No custom recipe categories yet.";
-    } else {
-      // move_recipe_to_category
-      toolResult = actionMode === "real"
-        ? await moveRecipeToCategory(userContext, normalizedArgs, options)
-        : {
-          ok: true,
-          recipe_title: String(normalizedArgs.recipe_name || "").trim() || null,
-          category_name: String(normalizedArgs.category_name || "").trim(),
-          created_category: false,
-          already_filed: false
-        };
-      if (toolResult?.ok) {
-        actionSummary = `Filed ${toolResult.recipe_title || "the recipe"} under ${toolResult.category_name}.`;
-      } else {
-        actionSummary = null;
-      }
-    }
-
-    // Surface a not-found / ambiguous resolution as a non-ok result so the model
-    // narrates honestly (never confirm an unperformed action).
+    // Surface a not-found / ambiguous / invalid resolution as a non-ok result so
+    // the model narrates honestly (never confirm an unperformed action).
     if (toolResult && toolResult.ok === false) {
+      const error = toolResult.error || "not_found";
       const response = {
         ok: false,
-        statusCode: toolResult.error === "recipe_ambiguous" ? 409 : 404,
-        error: toolResult.error || "recipe_not_found",
+        statusCode: LOCAL_ERROR_STATUS[error] || 404,
+        error,
         toolName,
         args: normalizedArgs,
         actionMode,
@@ -202,6 +327,7 @@ async function executeLocalCategoryTool({ toolName, args, env, userContext }) {
       return response;
     }
 
+    const actionSummary = summarizeLocalResult(toolName, toolResult || {}, normalizedArgs);
     const response = {
       ok: true,
       statusCode: 200,
@@ -233,8 +359,8 @@ async function executeLocalCategoryTool({ toolName, args, env, userContext }) {
 }
 
 export async function executeToolAction({ toolName, args, env, userContext, responseSurface }) {
-  if (LOCAL_CATEGORY_TOOLS.has(toolName)) {
-    return executeLocalCategoryTool({ toolName, args, env, userContext, responseSurface });
+  if (LOCAL_TOOLS.has(toolName)) {
+    return executeLocalTool({ toolName, args, env, userContext, responseSurface });
   }
   return executeSharedToolAction({ toolName, args, env, userContext, responseSurface });
 }

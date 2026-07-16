@@ -5817,6 +5817,392 @@ export async function moveRecipeToCategory(context, args = {}, options = {}) {
   };
 }
 
+// Batch variant of move_recipe_to_category: file MANY saved recipes into ONE
+// category in a single call. Resolve-or-create the category ONCE, then resolve +
+// union-assign each recipe INDEPENDENTLY so one bad name never aborts the rest.
+// Returns per-recipe results (never all-or-nothing); a recipe already in the
+// category still reports ok:true (already_filed) — an idempotent no-op is success.
+export async function moveManyRecipesToCategory(context, args = {}, options = {}) {
+  const categoryName = String(args?.category_name || "").trim();
+  if (!categoryName) {
+    const error = new Error("Which category should the recipes be filed in?");
+    error.statusCode = 400;
+    throw error;
+  }
+  const names = (Array.isArray(args?.recipe_names) ? args.recipe_names : [])
+    .map((n) => String(n || "").trim())
+    .filter(Boolean);
+  if (names.length === 0) {
+    return { ok: false, error: "no_recipes" };
+  }
+
+  const { category, created } = await resolveOrCreateRecipeCategory(context, categoryName, options);
+  if (!category?.id) {
+    const error = new Error("That recipe category could not be created.");
+    error.statusCode = 502;
+    throw error;
+  }
+
+  const results = [];
+  for (const name of names) {
+    try {
+      const detail = await getSavedRecipeDetail(context, { recipe_title: name }, options);
+      const recipe = detail?.recipe || null;
+      if (!recipe?.id) {
+        results.push({ recipe_name: name, ok: false, error: "recipe_not_found" });
+        continue;
+      }
+      const assignment = await assignRecipeToCategory(
+        context,
+        { recipeId: recipe.id, categoryId: category.id },
+        options
+      );
+      results.push({
+        recipe_name: recipe.title || name,
+        recipe_id: recipe.id,
+        ok: true,
+        already_filed: Boolean(assignment.already_filed)
+      });
+    } catch (error) {
+      const code = error?.statusCode === 409
+        ? "recipe_ambiguous"
+        : (error?.statusCode === 404 ? "recipe_not_found" : (error?.message || "move_failed"));
+      results.push({ recipe_name: name, ok: false, error: code });
+    }
+  }
+
+  const moved = results.filter((r) => r.ok).length;
+  return {
+    ok: moved > 0,
+    category_id: category.id,
+    category_name: category.name,
+    created_category: Boolean(created),
+    moved,
+    total: results.length,
+    results
+  };
+}
+
+// ── Meal calendar (the user-planned WEEK) ────────────────────────────────
+// Backed by the meal-calendar HTTP API (Lambda trepo-meal-calendar-api) on the
+// SAME grocery base as the category helpers. This is the CALENDAR the user plans
+// by hand — NOT the auto-generated meal_plan behind getMealPlan/get_meal_plan.
+// A slot is (plan_date, meal_slot) holding a denormalized recipe snapshot.
+// Adding/moving/removing a calendar entry is NEITHER a dish log NOR a recipe save.
+const _MEAL_CALENDAR_SLOTS = new Set(["breakfast", "lunch", "dinner", "snack"]);
+
+function normalizeMealSlot(value) {
+  const slot = String(value || "").trim().toLowerCase();
+  return _MEAL_CALENDAR_SLOTS.has(slot) ? slot : null;
+}
+
+// Strict YYYY-MM-DD validator that also rejects calendar-overflow dates the
+// backend would 400 on (e.g. 2026-02-30). Returns the normalized string or null.
+function normalizePlanDate(value) {
+  const raw = String(value || "").trim().slice(0, 10);
+  const match = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) {
+    return null;
+  }
+  const [, y, m, d] = match.map((v, i) => (i === 0 ? v : Number(v)));
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  if (dt.getUTCFullYear() !== y || dt.getUTCMonth() + 1 !== m || dt.getUTCDate() !== d) {
+    return null; // overflow like Feb 30 rolled into March
+  }
+  return raw;
+}
+
+function resolveMealCalendarOwnerId(context) {
+  // Keep the calendar owner aligned with saved-recipe resolution (userId-first),
+  // so a calendar entry's source_id and the recipe it snapshots live under the
+  // same owner. For the household-less test user all ids collapse to one value.
+  return resolveShoppingOwnerId(context);
+}
+
+function normalizeMealCalendarEntry(row) {
+  if (!row || typeof row !== "object") {
+    return null;
+  }
+  const id = String(row._id || row.id || "").trim() || null;
+  if (!id) {
+    return null;
+  }
+  const arr = (value) => (Array.isArray(value) ? value.filter((v) => v !== null && v !== undefined) : []);
+  return {
+    id,
+    plan_date: row.plan_date || null,
+    meal_slot: row.meal_slot || null,
+    source_type: row.source_type || null,
+    source_id: row.source_id || null,
+    title: row.title || null,
+    image_url: row.image_url || null,
+    ingredients: arr(row.ingredients),
+    instructions: arr(row.instructions),
+    notes: arr(row.notes),
+    meal_category: row.meal_category || null,
+    need_grocery: Boolean(row.need_grocery),
+    missing_ingredients: arr(row.missing_ingredients)
+  };
+}
+
+// GET /meal-calendar/{owner}?start&end -> { owner, start, end, entries:[...] }
+export async function getMealCalendar(context, args = {}, options = {}) {
+  const ownerId = resolveMealCalendarOwnerId(context);
+  const start = normalizePlanDate(args?.start_date);
+  const end = normalizePlanDate(args?.end_date);
+  const params = new URLSearchParams();
+  if (start) params.set("start", start);
+  if (end) params.set("end", end);
+  const query = params.toString() ? `?${params.toString()}` : "";
+  const payload = await fetchHouseholdApiJson(
+    `/meal-calendar/${encodeURIComponent(ownerId)}${query}`,
+    options
+  );
+  const entries = (Array.isArray(payload?.entries) ? payload.entries : [])
+    .map(normalizeMealCalendarEntry)
+    .filter(Boolean);
+  return {
+    owner: payload?.owner || ownerId,
+    start: payload?.start || start || null,
+    end: payload?.end || end || null,
+    entries
+  };
+}
+
+// Resolve a saved recipe reference (explicit id, else fuzzy by title) into a row
+// for snapshotting. Mirrors moveRecipeToCategory's non-fabricating contract:
+// { ok:false, error:"recipe_not_found" | "recipe_ambiguous" } when unresolved.
+async function resolveSavedRecipeForCalendar(context, { recipe_id, recipe_name }, options) {
+  const explicitId = String(recipe_id || "").trim();
+  if (explicitId) {
+    try {
+      const list = await getSavedRecipes(context, options);
+      const found = (list.recipes || []).find((entry) => String(entry.id) === explicitId);
+      if (found) {
+        return { ok: true, recipe: found };
+      }
+    } catch {
+      // fall through to a minimal snapshot
+    }
+    const title = String(recipe_name || "").trim();
+    if (!title) {
+      return { ok: false, error: "recipe_not_found" };
+    }
+    return { ok: true, recipe: { id: explicitId, title } };
+  }
+  try {
+    const detail = await getSavedRecipeDetail(context, { recipe_title: recipe_name }, options);
+    if (!detail?.recipe?.id) {
+      return { ok: false, error: "recipe_not_found" };
+    }
+    return { ok: true, recipe: detail.recipe };
+  } catch (error) {
+    if (error?.statusCode === 404) return { ok: false, error: "recipe_not_found" };
+    if (error?.statusCode === 409) return { ok: false, error: "recipe_ambiguous" };
+    throw error;
+  }
+}
+
+// POST /meal-calendar/{owner} — add one saved recipe to a (date, slot). Resolves
+// the saved recipe by title (honest recipe_not_found/recipe_ambiguous), carries a
+// denormalized snapshot (source_type 'saved', source_id, title, image, ings, steps,
+// meal_category). Validates date/slot locally so bad input is an honest error, not
+// a fabricated confirmation.
+export async function addRecipeToMealCalendar(context, args = {}, options = {}) {
+  const planDate = normalizePlanDate(args?.plan_date);
+  if (!planDate) {
+    return { ok: false, error: "invalid_date" };
+  }
+  const slot = normalizeMealSlot(args?.meal_slot);
+  if (!slot) {
+    return { ok: false, error: "invalid_meal_slot" };
+  }
+
+  const resolved = await resolveSavedRecipeForCalendar(
+    context,
+    { recipe_id: args?.recipe_id, recipe_name: args?.recipe_name },
+    options
+  );
+  if (!resolved.ok) {
+    return resolved;
+  }
+  const recipe = resolved.recipe;
+  const title = String(recipe.title || args?.recipe_name || "").trim();
+  if (!title) {
+    return { ok: false, error: "recipe_not_found" };
+  }
+
+  const ownerId = resolveMealCalendarOwnerId(context);
+  const body = {
+    plan_date: planDate,
+    meal_slot: slot,
+    source_type: "saved",
+    source_id: recipe.id || null,
+    title,
+    image_url: recipe.image_url || null,
+    ingredients: Array.isArray(recipe.ingredients) ? recipe.ingredients : [],
+    instructions: Array.isArray(recipe.instructions) ? recipe.instructions : [],
+    meal_category: recipe.meal_category || null
+  };
+  const payload = await fetchHouseholdApiJson(
+    `/meal-calendar/${encodeURIComponent(ownerId)}`,
+    { ...options, method: "POST", body }
+  );
+  return {
+    ok: true,
+    entry: normalizeMealCalendarEntry(payload?.entry),
+    plan_date: planDate,
+    meal_slot: slot,
+    title
+  };
+}
+
+// Add MANY entries in one call. Each entry resolves + writes INDEPENDENTLY; one
+// failure never aborts the others. Returns per-entry results with partial success.
+export async function addManyToMealCalendar(context, args = {}, options = {}) {
+  const entries = Array.isArray(args?.entries) ? args.entries : [];
+  if (entries.length === 0) {
+    return { ok: false, error: "no_entries" };
+  }
+  const results = [];
+  for (const entry of entries) {
+    const label = {
+      recipe_name: entry?.recipe_name || null,
+      plan_date: entry?.plan_date || null,
+      meal_slot: entry?.meal_slot || null
+    };
+    try {
+      const res = await addRecipeToMealCalendar(context, {
+        recipe_name: entry?.recipe_name,
+        recipe_id: entry?.recipe_id,
+        plan_date: entry?.plan_date,
+        meal_slot: entry?.meal_slot
+      }, options);
+      results.push({
+        ...label,
+        ok: Boolean(res?.ok),
+        error: res?.ok ? null : (res?.error || "add_failed"),
+        entry_id: res?.entry?.id || null
+      });
+    } catch (error) {
+      results.push({ ...label, ok: false, error: error?.message || "add_failed" });
+    }
+  }
+  const added = results.filter((r) => r.ok).length;
+  return { ok: added > 0, added, total: results.length, results };
+}
+
+// Resolve a calendar entry reference: explicit entry_id, else fuzzy by title
+// (optionally constrained to a date and/or slot) over a broad window. Returns
+// { ok:false, error:"entry_not_found" | "entry_ambiguous" } when it can't pin one.
+async function resolveMealCalendarEntryRef(context, { entry_id, title, plan_date, meal_slot }, options) {
+  // Fetch a broad window (backend caps range at 60d) to match against.
+  const today = new Date();
+  const startDt = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate() - 7));
+  const start = startDt.toISOString().slice(0, 10);
+  const endDt = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate() + 52));
+  const end = endDt.toISOString().slice(0, 10);
+  let entries = [];
+  try {
+    const cal = await getMealCalendar(context, { start_date: start, end_date: end }, options);
+    entries = cal.entries || [];
+  } catch {
+    entries = [];
+  }
+
+  const explicitId = String(entry_id || "").trim();
+  if (explicitId) {
+    const found = entries.find((e) => String(e.id) === explicitId);
+    if (found) return { ok: true, entry: found };
+    // Not in the window — still act on the id and let the backend 404 honestly.
+    return { ok: true, entry: { id: explicitId, plan_date: null, meal_slot: null, title: null } };
+  }
+
+  // Resolve by any combination of title / date / slot. "Move tomorrow's dinner"
+  // has no title, only date+slot — that must still pin a single entry.
+  const wantTitle = normalizeName(title);
+  const wantDate = normalizePlanDate(plan_date);
+  const wantSlot = normalizeMealSlot(meal_slot);
+  if (!wantTitle && !wantDate && !wantSlot) {
+    return { ok: false, error: "entry_not_found" };
+  }
+  let matches = entries;
+  if (wantTitle) matches = matches.filter((e) => normalizeName(e.title) === wantTitle);
+  if (wantDate) matches = matches.filter((e) => String(e.plan_date).slice(0, 10) === wantDate);
+  if (wantSlot) matches = matches.filter((e) => e.meal_slot === wantSlot);
+  if (matches.length === 0) return { ok: false, error: "entry_not_found" };
+  if (matches.length > 1) return { ok: false, error: "entry_ambiguous" };
+  return { ok: true, entry: matches[0] };
+}
+
+// PUT /meal-calendar/{owner}/{item_id} — move an entry to a new date (and slot).
+export async function moveMealCalendarEntry(context, args = {}, options = {}) {
+  const newDate = normalizePlanDate(args?.new_date);
+  if (!newDate) {
+    return { ok: false, error: "invalid_date" };
+  }
+  const slotProvided = args?.new_meal_slot != null && String(args.new_meal_slot).trim() !== "";
+  const newSlot = slotProvided ? normalizeMealSlot(args.new_meal_slot) : null;
+  if (slotProvided && !newSlot) {
+    return { ok: false, error: "invalid_meal_slot" };
+  }
+
+  const resolved = await resolveMealCalendarEntryRef(
+    context,
+    { entry_id: args?.entry_id, title: args?.title, plan_date: args?.from_date, meal_slot: args?.from_meal_slot },
+    options
+  );
+  if (!resolved.ok) {
+    return resolved;
+  }
+  const entry = resolved.entry;
+  const ownerId = resolveMealCalendarOwnerId(context);
+  const body = { plan_date: newDate };
+  if (newSlot) body.meal_slot = newSlot;
+  try {
+    const payload = await fetchHouseholdApiJson(
+      `/meal-calendar/${encodeURIComponent(ownerId)}/${encodeURIComponent(entry.id)}`,
+      { ...options, method: "PUT", body }
+    );
+    return {
+      ok: true,
+      entry: normalizeMealCalendarEntry(payload?.entry),
+      moved_from: { plan_date: entry.plan_date, meal_slot: entry.meal_slot },
+      new_date: newDate,
+      new_meal_slot: newSlot || (payload?.entry?.meal_slot ?? null),
+      title: entry.title || (payload?.entry?.title ?? null)
+    };
+  } catch (error) {
+    if (error?.statusCode === 404) return { ok: false, error: "entry_not_found" };
+    throw error;
+  }
+}
+
+// DELETE /meal-calendar/{owner}/{item_id} — remove an entry (backend idempotent).
+export async function removeMealCalendarEntry(context, args = {}, options = {}) {
+  const resolved = await resolveMealCalendarEntryRef(
+    context,
+    { entry_id: args?.entry_id, title: args?.title, plan_date: args?.plan_date, meal_slot: args?.meal_slot },
+    options
+  );
+  if (!resolved.ok) {
+    return resolved;
+  }
+  const entry = resolved.entry;
+  const ownerId = resolveMealCalendarOwnerId(context);
+  await fetchHouseholdApiJson(
+    `/meal-calendar/${encodeURIComponent(ownerId)}/${encodeURIComponent(entry.id)}`,
+    { ...options, method: "DELETE" }
+  );
+  return {
+    ok: true,
+    removed_id: entry.id,
+    title: entry.title || null,
+    plan_date: entry.plan_date || null,
+    meal_slot: entry.meal_slot || null
+  };
+}
+
 export async function addSavedRecipeIngredientsToShoppingList(context, reference = {}, options = {}) {
   const detail = await getSavedRecipeDetail(context, reference, options);
   if (!detail?.recipe) {

@@ -793,6 +793,13 @@ const WRITE_INTENT_PATTERNS = [
   { pattern: /\b(discard|threw away|throw away|toss out|get rid of)\b/i,                tool: "discard_item" },
   { pattern: /\b(remove|removed|take out|took out|pull|use up|used up)\b.{0,30}\b(kitchen|pantry|fridge|freezer)\b/i, tool: "discard_item" },
   { pattern: /\b(mark|it.s|it is).{0,10}\bopen/i,                                      tool: "mark_item_opened" },
+  // Meal-calendar commands (planning to cook LATER) must win over the dish-log
+  // "for <slot>" pattern below — an add/put/schedule verb here means schedule, not
+  // "I ate". A genuine "I had X for dinner" uses had/ate (no add verb) → dish log.
+  { pattern: /\b(add|put|schedule|slot|pencil)\b.{0,40}\b(calendar|meal[-\s]?plan|meal[-\s]?calendar)\b/i, tool: "add_recipe_to_meal_calendar" },
+  { pattern: /\b(add|put|schedule|slot|pencil)\b.{0,40}\b(?:for|to)\s+(breakfast|lunch|dinner|snack)\b/i,   tool: "add_recipe_to_meal_calendar" },
+  { pattern: /\b(move|reschedule|shift|bump)\b.{0,50}\b(calendar|to\s+(?:mon|tue|wed|thu|fri|sat|sun|monday|tuesday|wednesday|thursday|friday|saturday|sunday|tomorrow|next|this|\d{4}-\d{2}-\d{2}))\b/i, tool: "move_meal_calendar_entry" },
+  { pattern: /\b(remove|take\s+off|unschedule)\b.{0,40}\b(calendar|meal[-\s]?plan|meal[-\s]?calendar)\b/i,   tool: "remove_meal_calendar_entry" },
   { pattern: /\b(log|had|ate|just ate|i ate|i had|eaten|for (breakfast|lunch|dinner|snack))\b/i, tool: "log_dish_from_voice" },
   { pattern: /\b(bought|picked up|got it|checked off)\b.{0,20}\b(list|shopping)?\b/i,  tool: "mark_shopping_item_bought" },
 ];
@@ -823,6 +830,29 @@ function detectWriteIntent(transcript) {
 // slipped the old regex, which is how Matt's 07-06 lunch turn produced a green
 // confirmation with no DB write).
 const ACTION_CLAIM_RULES = [
+  {
+    // Meal-calendar confirmations. Placed FIRST so a "scheduled/added ... to your
+    // calendar" reply resolves to THIS domain (satisfied by a calendar write) and
+    // never falls through to the dishes rule (which would demand a dish-log tool
+    // and flag a real calendar action as a false confirmation). Planning a meal is
+    // NOT eating one. Patterns are PAST-TENSE only, so capability answers ("I can
+    // add things to your calendar") never match.
+    domain: "meal_calendar",
+    expectedTool: "add_recipe_to_meal_calendar",
+    okTools: new Set([
+      "add_recipe_to_meal_calendar",
+      "add_many_to_meal_calendar",
+      "move_meal_calendar_entry",
+      "remove_meal_calendar_entry"
+    ]),
+    failText: "I couldn't update your meal calendar just now — please try again, or check the recipe title and date.",
+    patterns: [
+      /\b(added|scheduled|planned|booked|slotted|penciled|pencilled)\b[^.?!\n]{0,60}\b(calendar|meal\s+plan|meal\s+calendar)\b/i,
+      /\b(added|scheduled|planned|booked|slotted|put)\b[^.?!\n]{0,60}\b(?:for|to)\s+(?:your\s+)?(?:breakfast|lunch|dinner|snack)\b\s+(?:on\s+|for\s+)?(?:mon|tue|wed|thu|fri|sat|sun|monday|tuesday|wednesday|thursday|friday|saturday|sunday|tomorrow|today|next|this|\d{4}-\d{2}-\d{2})/i,
+      /\b(moved|rescheduled|shifted|bumped)\b[^.?!\n]{0,60}\b(?:to|on)\s+(?:mon|tue|wed|thu|fri|sat|sun|monday|tuesday|wednesday|thursday|friday|saturday|sunday|\d{4}-\d{2}-\d{2}|next|this|tomorrow)\b/i,
+      /\b(removed|took\s+off|taken\s+off|cleared|deleted|unscheduled)\b[^.?!\n]{0,60}\b(?:from\s+)?(?:your\s+)?(calendar|meal\s+plan|meal\s+calendar)\b/i,
+    ],
+  },
   {
     domain: "dishes",
     expectedTool: "log_dish_ingredients",
