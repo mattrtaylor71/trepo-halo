@@ -490,6 +490,15 @@ _PETFOOD_RE = re.compile(
     r'dog treat|cat treat|pet treat|animal feed|livestock|equine|poultry feed|'
     r'wild bird|birdseed|bird seed|aquarium|veterinary)\b', re.I)
 
+# Facility-wide catch-all recalls ("all human food products distributed from X", "all
+# products manufactured at ...") name no specific product, so they token-match arbitrary
+# kitchen items (a user can't tell if their item came from that firm). Drop from the feed
+# at INGEST so the daily refresh never re-adds them. (from f2ab094)
+_CATCHALL_RE = re.compile(
+    r'\ball\s+human\s+food\s+products?\b|'
+    r'\ball\s+(food\s+)?products?\s+(distributed|produced|manufactured|made|packaged|'
+    r'sold)\b', re.I)
+
 
 def _is_non_human_food(r):
     ptype = (r.get('product_type') or '').lower()
@@ -497,7 +506,11 @@ def _is_non_human_food(r):
         return True
     blob = (r.get('product_description', '') + ' ' + r.get('title', '') + ' ' +
             r.get('reason', ''))
-    return bool(_PETFOOD_RE.search(blob))
+    if _PETFOOD_RE.search(blob):
+        return True
+    # Match the catch-all pattern only against the PRODUCT text (not the reason), so a
+    # specific recall whose reason happens to say "all products" isn't wrongly dropped.
+    return bool(_CATCHALL_RE.search(r.get('product_description') or r.get('title') or ''))
 
 
 # ---------------------------------------------------------------------------
