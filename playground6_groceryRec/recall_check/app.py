@@ -828,16 +828,45 @@ def refresh_feed(force_openfda=False):
     return stats
 
 
-def get_active_feed():
-    """Feed the matcher reads. Auto-refreshes if the table is empty or stale (>26h)."""
+# Warm-container guard so a burst of GETs during a stale window fires at most one
+# self-invoke per container per throttle window.
+_LAST_ASYNC_TRIGGER = {'ts': 0.0}
+ASYNC_TRIGGER_THROTTLE_S = int(os.getenv('RECALL_ASYNC_TRIGGER_THROTTLE_S', '600'))
+
+
+def _async_self_refresh(context):
+    """Fire-and-forget: invoke THIS function asynchronously with {action:refresh_feed}
+    so a user GET never blocks on a multi-source fetch. Throttled + best-effort; a
+    failure here must never affect the GET response."""
+    now = time.time()
+    if now - _LAST_ASYNC_TRIGGER['ts'] < ASYNC_TRIGGER_THROTTLE_S:
+        return
+    fn_name = (getattr(context, 'function_name', None)
+               or os.getenv('AWS_LAMBDA_FUNCTION_NAME'))
+    if not fn_name:
+        return
+    _LAST_ASYNC_TRIGGER['ts'] = now
+    try:
+        import boto3
+        boto3.client('lambda').invoke(
+            FunctionName=fn_name, InvocationType='Event',
+            Payload=json.dumps({'action': 'refresh_feed', 'trigger': 'stale_get'}).encode())
+        print(json.dumps({'evt': 'recall_feed_async_refresh_fired', 'fn': fn_name}))
+    except Exception as e:
+        print(json.dumps({'evt': 'recall_feed_async_refresh_failed',
+                          'error': str(e)[:300]}), file=sys.stderr)
+
+
+def read_active_feed_nonblocking(context):
+    """The feed the GET path reads. STRICTLY READ-ONLY: never fetches sources inline.
+    If the table is empty or stale (>26h) it serves whatever is present (possibly stale)
+    and fires an async self-invoke to rebuild in the background.
+    Returns (recalls, age_seconds_or_None, total_row_count)."""
     age, count = _feed_last_refresh_age()
     if count == 0 or age is None or age > FEED_STALE_SECONDS:
-        try:
-            refresh_feed()
-        except Exception as e:
-            print(json.dumps({'evt': 'recall_feed_refresh_failed',
-                              'error': str(e)[:300]}), file=sys.stderr)
-    return read_feed_table(active_only=True, recent_days=RECALL_LOOKBACK_DAYS)
+        _async_self_refresh(context)
+    recalls = read_feed_table(active_only=True, recent_days=RECALL_LOOKBACK_DAYS)
+    return recalls, age, count
 
 
 # ---------------------------------------------------------------------------
@@ -1081,23 +1110,17 @@ def lambda_handler(event, context):
                               'error': str(e)[:400]}), file=sys.stderr)
             return {'ok': False, 'error': str(e)[:400]}
 
-    force = str(qs.get('refresh', '')).lower() in ('1', 'true', 'yes')
-    if force:
-        try:
-            refresh_feed(force_openfda=str(qs.get('openfda', '')).lower()
-                         in ('1', 'true', 'yes'))
-        except Exception as e:
-            print(json.dumps({'evt': 'recall_feed_refresh_failed',
-                              'error': str(e)[:300]}), file=sys.stderr)
+    # `?refresh=1` is a convenience trigger — it fires the SAME async self-invoke as the
+    # stale fallback (never a synchronous multi-source fetch on the HTTP path).
+    if str(qs.get('refresh', '')).lower() in ('1', 'true', 'yes'):
+        _async_self_refresh(context)
 
+    # STRICTLY READ-ONLY feed load; serves stale + async-rebuilds if the table lapsed.
     try:
-        recalls = read_feed_table(active_only=True, recent_days=RECALL_LOOKBACK_DAYS)
-        if not recalls:
-            recalls = get_active_feed()  # empty/stale -> refresh then read
+        recalls, age, total_rows = read_active_feed_nonblocking(context)
     except Exception as e:
         return _resp(502, {'error': 'feed_read_failed', 'detail': str(e)})
 
-    age, total_rows = _feed_last_refresh_age()
     feed_date = _iso(time.time() - age) if age is not None else ''
 
     # Diagnostics: per-source + merge stats.

@@ -1761,7 +1761,9 @@ Resources:
   # table. Two-tier match (likely = brand+form, possible = generic same-form) via one
   # batched gpt-4.1-mini call. A daily EventBridge Schedule event fires the handler with
   # {action:"refresh_feed"} to rebuild the merged feed (openFDA re-pulled only when its
-  # export_date advances). Reads auto-refresh if the table is stale >26h.
+  # export_date advances). The GET path is STRICTLY READ-ONLY — it never fetches feeds
+  # inline; if the table is stale >26h it serves the stale table and fires an async
+  # self-invoke {action:"refresh_feed"} (hence the self-invoke policy below).
   # NOTE: initially provisioned standalone via `aws lambda create-function`
   # (FunctionName pinned below so a future clean `sam deploy` reconciles to the same
   # name/route/schedule). Requires internet egress (FSIS/FDA/CDC feeds + OpenAI), so it
@@ -1791,6 +1793,12 @@ Resources:
           RECALL_FEED_INGEST_DAYS: '550'
           RECALL_FEED_STALE_SECONDS: '93600'
           # OPENFDA_API_KEY: ''   # optional; keyless works (240 req/min, 120k/day)
+      Policies:
+        # Async self-invoke for the stale-feed background refresh (GET stays non-blocking).
+        - Statement:
+            Effect: Allow
+            Action: lambda:InvokeFunction
+            Resource: !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:trepo-recall-check"
       Events:
         RecallCheckRoute:
           Type: HttpApi
