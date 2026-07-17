@@ -950,8 +950,8 @@ def _generate_recipes_with_gpt(ingredients_list, kitchen_only_count=10, need_gro
     system = """You are a recipe assistant. Return valid JSON only, no markdown.
 Output schema:
 {
-  "kitchen_only": [ exactly the requested number of recipes. Each: { "title": "Recipe name", "emoji": "🍝", "meal_category": "breakfast|lunch|dinner|snacks", "ingredients": ["item1", "item2"], "steps": ["Step 1.", "Step 2."] }. Use ONLY the provided kitchen list of grocery products (reference by exact product name) plus pantry staples (salt, pepper, oil, water, basic spices). ],
-  "need_grocery": [ exactly the requested number of recipes. Each: { "title": "Recipe name", "emoji": "🌮", "meal_category": "breakfast|lunch|dinner|snacks", "ingredients": ["item1", "item2", ...], "steps": ["Step 1.", "Step 2."], "missing_ingredients": ["item to buy 1", "item to buy 2"] }. Each recipe should use some grocery products from the kitchen list (reference by exact product name) but require at least one additional ingredient the user must buy. List those in missing_ingredients. ]
+  "kitchen_only": [ exactly the requested number of recipes. Each: { "title": "Recipe name", "emoji": "🍝", "meal_category": "breakfast|lunch|dinner|snacks", "ingredients": ["1 lb Chicken Breasts", "2 cups White Rice"], "steps": ["Step 1.", "Step 2."] }. Every ingredient string MUST begin with a realistic amount/measurement, then the item name. Use ONLY the provided kitchen list of grocery products (keep each item's EXACT product name after the amount, e.g. "1 lb Chicken Breasts", so it can be matched) plus pantry staples (salt, pepper, oil, water, basic spices), each with an amount (e.g. "1 tsp salt", "2 tbsp olive oil"). ],
+  "need_grocery": [ exactly the requested number of recipes. Each: { "title": "Recipe name", "emoji": "🌮", "meal_category": "breakfast|lunch|dinner|snacks", "ingredients": ["1 lb Chicken Breasts", "1 cup Shredded Cheese", ...], "steps": ["Step 1.", "Step 2."], "missing_ingredients": ["item to buy 1", "item to buy 2"] }. Every ingredient string begins with a realistic amount/measurement followed by the item name (keep kitchen items' exact product name after the amount). Each recipe should use some grocery products from the kitchen list (reference by exact product name) but require at least one additional ingredient the user must buy. List those in missing_ingredients. ]
 }
 Each kitchen item may include a short description in parentheses (e.g. "Ice Cubes Gum (chewing gum, not edible ice)"). Use that to avoid misuse: do NOT suggest recipes that treat a product as something it is not (e.g. do not use gum as ice in drinks). Reference items by their exact product name in the ingredients array. Keep titles short. Steps concise.
 
@@ -969,6 +969,12 @@ Meal substantiality rules (IMPORTANT):
 - Simple items like dips, salsas, toppings, and spreads should be categorized as "snacks" if included at all.
 - Each dinner/lunch recipe should have at least 3-4 meaningful ingredients (beyond pantry staples) and involve actual cooking or assembly of a complete dish.
 - Prioritize recipes people actually make at home — classics, weeknight staples, popular cuisines. Avoid contrived combinations just to use up inventory.
+
+Measurement rules (IMPORTANT):
+- EVERY entry in "ingredients" MUST include a realistic quantity/measurement (e.g. "2 cups", "1 lb", "3 cloves", "1/2 tsp", "1 (14 oz) can") placed BEFORE the item name. Never output a bare ingredient with no amount.
+- Keep the kitchen product's EXACT name immediately after the amount so it still matches the user's inventory (kitchen item "Chicken Breasts" -> "1 lb Chicken Breasts", not "1 lb chicken").
+- Scale amounts sensibly for about 2 servings unless the dish implies otherwise, and make the steps reference those amounts naturally (e.g. "Add the 2 cups White Rice ...").
+- "missing_ingredients" stays a plain list of item names to buy (no amount required there).
 Return the JSON object only."""
     user = (
         f"Kitchen grocery products (use exact product name in recipe ingredients; descriptions in parentheses clarify what each item is): {ingredients_str}\n\n"
