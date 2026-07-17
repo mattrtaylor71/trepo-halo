@@ -37,27 +37,9 @@ exports.GroceryItemSchema = zod_1.z.object({
     varietal_or_blend: zod_1.z.string().nullable().optional(),
     abv: zod_1.z.string().nullable().optional(),
     size_text: zod_1.z.string().nullable().optional(),
-    estimated_price: zod_1.z.string().nullable().optional(),
     ingredients: zod_1.z.array(zod_1.z.string()).optional().default([]),
-    nutrition_summary: zod_1.z.string().nullable().optional(),
     upf: zod_1.z.enum(['yes', 'no']).nullable().optional(),
     harmful_ingredients: zod_1.z.array(zod_1.z.string()).optional().default([]),
-    similar_items: zod_1.z
-        .array(zod_1.z.object({
-        name: zod_1.z.string(),
-        brand: zod_1.z.string().nullable().optional(),
-        reason: zod_1.z.string(),
-    }))
-        .optional()
-        .default([]),
-    alternatives: zod_1.z
-        .array(zod_1.z.object({
-        name: zod_1.z.string(),
-        brand: zod_1.z.string().nullable().optional(),
-        reason: zod_1.z.string(),
-    }))
-        .optional()
-        .default([]),
     healthier_alternatives: zod_1.z
         .array(zod_1.z.object({
         name: zod_1.z.string(),
@@ -106,13 +88,9 @@ const groceryItemJsonSchema = {
         "varietal_or_blend",
         "abv",
         "size_text",
-        "estimated_price",
         "ingredients",
-        "nutrition_summary",
         "upf",
         "harmful_ingredients",
-        "similar_items",
-        "alternatives",
         "healthier_alternatives",
         "confidence",
         "explanation",
@@ -135,12 +113,10 @@ const groceryItemJsonSchema = {
         varietal_or_blend: { type: ["string", "null"] },
         abv: { type: ["string", "null"] },
         size_text: { type: ["string", "null"] },
-        estimated_price: { type: ["string", "null"] },
         ingredients: {
             type: "array",
             items: { type: "string" },
         },
-        nutrition_summary: { type: ["string", "null"] },
         upf: {
             type: ["string", "null"],
             enum: ["yes", "no", null],
@@ -148,32 +124,6 @@ const groceryItemJsonSchema = {
         harmful_ingredients: {
             type: "array",
             items: { type: "string" },
-        },
-        similar_items: {
-            type: "array",
-            items: {
-                type: "object",
-                additionalProperties: false,
-                required: ["name", "brand", "reason"],
-                properties: {
-                    name: { type: "string" },
-                    brand: { type: ["string", "null"] },
-                    reason: { type: "string" },
-                },
-            },
-        },
-        alternatives: {
-            type: "array",
-            items: {
-                type: "object",
-                additionalProperties: false,
-                required: ["name", "brand", "reason"],
-                properties: {
-                    name: { type: "string" },
-                    brand: { type: ["string", "null"] },
-                    reason: { type: "string" },
-                },
-            },
         },
         healthier_alternatives: {
             type: "array",
@@ -630,14 +580,61 @@ function isLikelyNonGroceryItem(item) {
     }
     return false;
 }
+// Cost control (2026-07-17): the source image is sent full-res to BOTH vision
+// passes below (label-evidence + identify), ~13k input tokens each. Downscaling to
+// a bounded longest-edge cuts image input ~80% at 1536px with no identification
+// loss (validated on real user scans). Resize ONCE here and reuse for both passes.
+// Env-gated + fully reversible: IDENTIFY_IMAGE_MAX_DIM unset/0 = disabled (full-res,
+// current behavior). Uses jimp (pure-JS, already shipped in quickIdentify) to avoid
+// sharp's native-binary/arch risk. Any failure falls back to the original input.
+async function prepareVisionInput(input) {
+    const maxDim = parseInt(process.env.IDENTIFY_IMAGE_MAX_DIM || "0", 10);
+    if (!maxDim || maxDim <= 0)
+        return input;
+    try {
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const { Jimp } = require("jimp");
+        let buffer = null;
+        if (input.imageBuffer) {
+            buffer = input.imageBuffer;
+        }
+        else if (input.imageUrl) {
+            // eslint-disable-next-line @typescript-eslint/no-var-requires
+            const fetch = require("node-fetch");
+            const resp = await fetch(input.imageUrl, { timeout: 15000 });
+            if (!resp.ok)
+                return input;
+            buffer = await resp.buffer();
+        }
+        if (!buffer)
+            return input;
+        const image = await Jimp.read(buffer);
+        const w = image.bitmap?.width || 0;
+        const h = image.bitmap?.height || 0;
+        const longest = Math.max(w, h);
+        if (!longest)
+            return input;
+        if (longest > maxDim) {
+            image.scale(maxDim / longest);
+        }
+        const resized = await image.getBuffer("image/jpeg");
+        return { imageBuffer: resized };
+    }
+    catch (error) {
+        console.warn("[IdentifyGrocery] image resize failed, using original image:", error);
+        return input;
+    }
+}
 async function identifyGroceryItem(input, options = {}) {
     const openai = (0, client_1.getOpenAIClient)();
     const userHint = options.userHint;
     const leftovers = options.leftovers;
     try {
+        // Resize once (if enabled) and reuse the same buffer for both vision passes.
+        const visionInput = await prepareVisionInput(input);
         let labelEvidence = null;
         try {
-            labelEvidence = await (0, extractLabelEvidence_1.extractLabelEvidence)(input);
+            labelEvidence = await (0, extractLabelEvidence_1.extractLabelEvidence)(visionInput);
         }
         catch (error) {
             console.warn("[IdentifyGrocery] Label evidence extraction failed, falling back to direct identification:", error);
@@ -691,9 +688,9 @@ async function identifyGroceryItem(input, options = {}) {
                             content: [
                                 {
                                     type: "input_text",
-                                    text: `Analyze this grocery or beverage product image and extract the product identity, label details, likely price range, and a few concise product alternatives. Use the image plus the first-pass label evidence below. Do not invent store links or pretend to browse.\n\n${buildEvidencePrompt(labelEvidence)}`,
+                                    text: `Analyze this grocery or beverage product image and extract the product identity and label details. Use the image plus the first-pass label evidence below. Do not invent store links or pretend to browse.\n\n${buildEvidencePrompt(labelEvidence)}`,
                                 },
-                                buildImageContent(input),
+                                buildImageContent(visionInput),
                             ],
                         },
                     ],
