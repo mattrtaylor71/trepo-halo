@@ -52,6 +52,30 @@ FDA_XLSX_URL = os.getenv(
     'https://www.fda.gov/safety/recalls-market-withdrawals-safety-alerts/datatables-data?_format=xlsx')
 CDC_RSS_URL = os.getenv('CDC_RSS_URL', 'https://tools.cdc.gov/api/v2/resources/media/316422.rss')
 
+# --- OUTBREAK sources (name implicated products DURING an active investigation, often
+# BEFORE a formal recall exists). Ingested with source_type='outbreak' so they can be
+# tiered/gated separately from formal recalls downstream. ---
+# FDA CORE outbreak investigation table (HTML; Akamai 403s default UAs -> browser headers,
+# same trick as FSIS). Named-product rows follow their Advisory page for brand/lot/retailer.
+FDA_CORE_URL = os.getenv(
+    'FDA_CORE_URL',
+    'https://www.fda.gov/food/outbreaks-foodborne-illness/investigations-foodborne-illness-outbreaks')
+# CDC "Current Outbreaks" — the visible <table> is JS-rendered (empty server-side); the
+# datatable loads this CSV (Contaminated Food | Germ | Year). www.cdc.gov is Akamai-gated
+# (needs browser headers). Full history; we ingest only recent years as active.
+CDC_OUTBREAK_CSV_URL = os.getenv(
+    'CDC_OUTBREAK_CSV_URL',
+    'https://www.cdc.gov/foodborne-outbreaks/media/files/2024/04/full-outbreak-list.csv')
+# Cap advisory-page follows per refresh (bounds refresh latency; typically <15 active rows).
+CORE_MAX_ADVISORY_FETCHES = int(os.getenv('RECALL_CORE_MAX_ADVISORY', '15'))
+# CDC CSV is the FULL historical outbreak list (back to ~2011) and carries only a Year (no
+# month/status). Ingest current year + this many prior years as active (0 = current calendar
+# year only, the safe default: it keeps resolved multi-year history from being flagged as
+# active, and the richer FDA-CORE table — which has real per-row Active/Closed status + dates
+# — is the authoritative active set that CDC merely supplements). Bump to 1 near year-end if
+# December outbreaks should carry into January.
+CDC_OUTBREAK_YEARS_BACK = int(os.getenv('RECALL_CDC_OUTBREAK_YEARS_BACK', '0'))
+
 FEED_TTL_SECONDS = int(os.getenv('RECALL_FEED_TTL_SECONDS', str(6 * 3600)))
 FEED_FETCH_TIMEOUT = int(os.getenv('RECALL_FEED_FETCH_TIMEOUT', '30'))
 RECALL_LOOKBACK_DAYS = int(os.getenv('RECALL_LOOKBACK_DAYS', '365'))
@@ -195,8 +219,10 @@ def _recall_date(rec):
 def _record(source, source_id, title='', product_description='', reason='',
             classification='', status='', active=True, date='', link='',
             establishment='', brand='', states='', product_type='',
-            recall_number='', raw=None):
-    """Build the common cross-source recall record shape (matcher + table use this)."""
+            recall_number='', source_type='recall', raw=None):
+    """Build the common cross-source recall record shape (matcher + table use this).
+    source_type is 'recall' (formal recall) or 'outbreak' (implicated during an active
+    investigation, possibly pre-recall) so the two can be tiered/gated separately."""
     return {
         'source': source,
         'source_id': str(source_id or '')[:120],
@@ -213,6 +239,7 @@ def _record(source, source_id, title='', product_description='', reason='',
         'establishment': establishment or '',
         'states': states or '',
         'product_type': product_type or '',
+        'source_type': source_type or 'recall',
         'sources': [source],
         'raw': raw if raw is not None else {},
     }
@@ -487,6 +514,184 @@ def fetch_cdc_rss():
 
 
 # ---------------------------------------------------------------------------
+# OUTBREAK sources (source_type='outbreak')
+# ---------------------------------------------------------------------------
+# Investigation rows whose product is not yet pinned down carry no product to match on.
+_OUTBREAK_SKIP_PRODUCT = re.compile(
+    r'^(not yet identified|unknown|under investigation|to be determined|tbd|pending|'
+    r'n/?a|none|multiple|various)\b', re.I)
+# CORE explicitly excludes shellfish + pet/animal food; belt-and-suspenders drop any that
+# slip through the other sources too (users' kitchens are human, non-shellfish food).
+_OUTBREAK_EXCLUDE = re.compile(
+    r'\b(oyster|oysters|clam|clams|mussel|mussels|scallop|scallops|shellfish|'
+    r'pet food|dog food|cat food|animal feed|pet treat)\b', re.I)
+
+
+def _mdy_to_iso(s):
+    m = re.match(r'\s*(\d{1,2})/(\d{1,2})/(\d{4})', s or '')
+    return '%s-%02d-%02d' % (m.group(3), int(m.group(1)), int(m.group(2))) if m else ''
+
+
+def _parse_core_advisory(url):
+    """Follow an FDA advisory page and pull brand / lot / retailer / summary. Best-effort;
+    any failure returns empty enrichment (the outbreak row is still ingested)."""
+    try:
+        doc = _http_get(url).decode('utf-8', 'replace')
+    except Exception as e:
+        print(json.dumps({'evt': 'core_advisory_fetch_failed', 'url': url[:160],
+                          'error': str(e)[:160]}), file=sys.stderr)
+        return {}
+    m = re.search(r'<meta[^>]+name="description"[^>]+content="([^"]+)"', doc)
+    summary = _strip_html(html.unescape(m.group(1))) if m else ''
+    body = _strip_html(doc)
+
+    def grab(pat, flags=0):
+        mm = re.search(pat, body, flags)
+        return mm.group(1).strip() if mm else ''
+    return {
+        'summary': summary[:600],
+        # "frozen GreenWise brand-organic blueberries" -> GreenWise
+        'brand': grab(r'([A-Z][A-Za-z0-9&.\'-]+(?:\s+[A-Z][A-Za-z0-9&.\'-]+){0,2})\s+brand'),
+        'lot': grab(r'lot code[s]?\s+of\s+([A-Za-z0-9\-]+)', re.I),
+        'retailer': grab(r'sold at\s+([A-Z][A-Za-z0-9\' ]+?)(?:\s+were|\s+was|\s+identified|\.|,)'),
+        'size': grab(r'(\d+(?:\.\d+)?[- ]?oz)', re.I),
+    }
+
+
+def fetch_fda_core():
+    """FDA CORE Outbreak Investigation Table. Parses the per-year investigation <table>s,
+    keeps ACTIVE rows with a NAMED product, and (capped) follows each row's Advisory page
+    for brand/lot/retailer. Pure-stdlib HTML parsing."""
+    doc = _http_get(FDA_CORE_URL).decode('utf-8', 'replace')
+    out = []
+    advisory_budget = CORE_MAX_ADVISORY_FETCHES
+    for tm in re.finditer(r'<table[^>]*>(.*?)</table>', doc, re.S):
+        tbl = tm.group(1)
+        if 'Reference' not in tbl[:2500] or 'Pathogen' not in tbl[:2500]:
+            continue  # not an investigation table
+        for rowhtml in re.findall(r'<tr[^>]*>(.*?)</tr>', tbl, re.S):
+            cells = re.findall(r'<t[dh][^>]*>(.*?)</t[dh]>', rowhtml, re.S)
+            if len(cells) < 6:
+                continue
+            vals = [_strip_html(c) for c in cells]
+            date_posted, ref, pathogen, product, cases, status = vals[:6]
+            if not product or vals[0].lower().startswith('date'):
+                continue  # header row / empty
+            if _OUTBREAK_SKIP_PRODUCT.match(product):
+                continue  # no product to match yet
+            if _OUTBREAK_EXCLUDE.search(product + ' ' + pathogen):
+                continue
+            st = status.lower()
+            if 'active' not in st and 'ongoing' not in st:
+                continue  # closed investigations are stale
+            link = ''
+            for href in re.findall(r'href="([^"]+)"', rowhtml):
+                if 'outbreaks-foodborne-illness' in href and \
+                        'investigations-foodborne-illness-outbreaks' not in href:
+                    link = href if href.startswith('http') else 'https://www.fda.gov' + href
+                    break
+            brand = states = ''
+            prod_desc = product
+            reason = ('%s outbreak (FDA CORE investigation, %s; case count %s)'
+                      % (pathogen or 'Pathogen', status or 'Active', cases or 'see advisory'))
+            if link and advisory_budget > 0:
+                advisory_budget -= 1
+                adv = _parse_core_advisory(link)
+                if adv:
+                    brand = adv.get('brand', '')
+                    detail = ', '.join(x for x in (
+                        adv.get('brand') and (adv['brand'] + ' brand'),
+                        adv.get('size'), adv.get('lot') and ('lot ' + adv['lot']),
+                        adv.get('retailer') and ('at ' + adv['retailer'])) if x)
+                    if detail:
+                        prod_desc = '%s (%s)' % (product, detail)
+                    if adv.get('summary'):
+                        reason = adv['summary']
+            out.append(_record(
+                source='FDA-CORE',
+                source_id='CORE-' + (ref or product)[:110],
+                recall_number='',  # CORE reference is NOT a recall number; don't collide
+                title=product,
+                product_description=prod_desc,
+                brand=brand,
+                reason=reason,
+                classification='',
+                establishment='',
+                states=states,
+                status=status or 'Active',
+                active=True,
+                date=_mdy_to_iso(date_posted),
+                link=link or FDA_CORE_URL,
+                product_type='Food',
+                source_type='outbreak',
+                raw={'core_reference': ref, 'pathogen': pathogen, 'cases': cases},
+            ))
+    return out
+
+
+def fetch_cdc_outbreaks():
+    """CDC 'Current Outbreaks' — parses the datatable's backing CSV (Contaminated Food |
+    Germ | Year). The on-page <table> is JS-rendered (empty in HTML), so we read the CSV
+    the datatable loads. Ingest only recent years (the CSV is full history)."""
+    import csv as _csv
+    import io as _io
+    text = _http_get(CDC_OUTBREAK_CSV_URL).decode('utf-8', 'replace')
+    rows = list(_csv.reader(_io.StringIO(text)))
+    if not rows:
+        return []
+    hdr = [h.strip().lower() for h in rows[0]]
+
+    def ci(name):
+        for i, h in enumerate(hdr):
+            if name in h:
+                return i
+        return -1
+    i_food, i_germ, i_year = ci('food'), ci('germ'), ci('year')
+    if min(i_food, i_germ) < 0:
+        print(json.dumps({'evt': 'cdc_outbreak_bad_header', 'hdr': hdr[:6]}),
+              file=sys.stderr)
+        return []
+    cur_year = int(time.strftime('%Y', time.gmtime()))
+    min_year = cur_year - max(0, CDC_OUTBREAK_YEARS_BACK)
+    out = []
+    for r in rows[1:]:
+        if i_food >= len(r):
+            continue
+        try:
+            yr = int(re.sub(r'\D', '', r[i_year])) if 0 <= i_year < len(r) and r[i_year] else 0
+        except ValueError:
+            yr = 0
+        if yr and yr < min_year:
+            continue  # stale historical outbreak
+        food = _strip_html(r[i_food])
+        germ = _strip_html(r[i_germ]) if 0 <= i_germ < len(r) else ''
+        if not food or _OUTBREAK_SKIP_PRODUCT.match(food):
+            continue
+        if _OUTBREAK_EXCLUDE.search(food + ' ' + germ):
+            continue
+        hm = re.search(r'href="([^"]+)"', r[i_food])
+        link = ''
+        if hm:
+            link = hm.group(1)
+            link = link if link.startswith('http') else 'https://www.cdc.gov' + link
+        out.append(_record(
+            source='CDC-outbreak',
+            source_id=('CDCO-' + food + '|' + germ + '|' + str(yr))[:120],
+            title=food,
+            product_description=food,
+            reason='%s outbreak (CDC current investigation, %s)' % (germ or 'Pathogen', yr or ''),
+            status='Active',
+            active=True,
+            date='',  # CSV carries only a year; leave undated (matcher keeps undated rows)
+            link=link or CDC_OUTBREAK_CSV_URL,
+            product_type='Food',
+            source_type='outbreak',
+            raw={'pathogen': germ, 'year': yr},
+        ))
+    return out
+
+
+# ---------------------------------------------------------------------------
 # Non-human-food filter (openFDA food/enforcement includes pet/animal feed; drop it —
 # users' kitchens are human food, and "Ground Beef for Dogs" was matching human meat).
 # ---------------------------------------------------------------------------
@@ -531,6 +736,49 @@ def _company_tokens(r):
 
 def _product_tokens(r):
     return _tokens(r.get('product_description'), r.get('title'))
+
+
+def _title_tokens(r):
+    """Short product identity for outbreak dedupe — title only (avoids the extra
+    brand/lot/retailer tokens an enriched outbreak product_description carries, which
+    would depress a Jaccard against a plainer same-event record)."""
+    return _tokens(r.get('title') or r.get('product_description'))
+
+
+_PATHOGEN_FAMILIES = ('coli', 'salmonella', 'listeria', 'cyclospora', 'botulinum',
+                      'botulism', 'hepatitis', 'norovirus', 'campylobacter', 'shigella',
+                      'vibrio', 'cronobacter')
+
+
+def _pathogen_family(r):
+    """Normalized pathogen family token for an outbreak record (from raw/reason/title)."""
+    blob = (' '.join(str(x) for x in (
+        (r.get('raw') or {}).get('pathogen', ''), r.get('reason'), r.get('title'),
+        r.get('classification'))) or '').lower()
+    fams = {f for f in _PATHOGEN_FAMILIES if f in blob}
+    if 'botulism' in fams:
+        fams.discard('botulism'); fams.add('botulinum')
+    return fams
+
+
+def _is_outbreak(r):
+    return (r.get('source_type') or 'recall') == 'outbreak'
+
+
+def _outbreak_dupe(x, y):
+    """Same event across outbreak sources (CORE vs CDC), or an outbreak vs the later formal
+    recall of the same product. Fires only when at least one side is an OUTBREAK, so it
+    cannot alter recall-vs-recall merging. Keys on product-title overlap + pathogen family
+    (no company/recall-number needed — outbreak rows often carry neither)."""
+    if not (_is_outbreak(x) or _is_outbreak(y)):
+        return False
+    if _jaccard(_title_tokens(x), _title_tokens(y)) < 0.55:
+        return False
+    fx, fy = _pathogen_family(x), _pathogen_family(y)
+    if fx and fy and not (fx & fy):
+        return False  # named but conflicting pathogens -> different events
+    dd = _date_diff_days(x.get('date'), y.get('date'))
+    return dd <= 90 or dd == 9999  # 9999 = at least one undated (CDC year-only) -> allow
 
 
 def _jaccard(a, b):
@@ -610,6 +858,30 @@ def merge_recalls(records):
                 if find(i) != find(j) and _fuzzy_same(records[i], records[j]):
                     union(i, j)
 
+    # Pass 3: OUTBREAK dedupe (product-title + pathogen family), bucketed by a title token.
+    # Only fires on pairs where >=1 side is an outbreak, so recall-vs-recall is untouched.
+    # This dedupes the same event surfaced by both FDA-CORE and CDC, and an outbreak vs the
+    # later formal recall of the same product.
+    obuckets = {}
+    for i, r in enumerate(records):
+        if _is_outbreak(r):
+            for tkn in list(_title_tokens(r))[:5]:
+                obuckets.setdefault(tkn, []).append(i)
+    # An outbreak's title token can also pull in matching RECALL records in the same bucket.
+    for tkn in list(obuckets.keys()):
+        for i, r in enumerate(records):
+            if not _is_outbreak(r) and tkn in _title_tokens(r):
+                obuckets[tkn].append(i)
+    for idxs in obuckets.values():
+        idxs = list(dict.fromkeys(idxs))  # dedupe indices
+        if len(idxs) > 400:
+            continue
+        for a in range(len(idxs)):
+            for b in range(a + 1, len(idxs)):
+                i, j = idxs[a], idxs[b]
+                if find(i) != find(j) and _outbreak_dupe(records[i], records[j]):
+                    union(i, j)
+
     groups = {}
     for i in range(n):
         groups.setdefault(find(i), []).append(i)
@@ -625,6 +897,10 @@ def merge_recalls(records):
                     srcs.append(s)
         base['sources'] = srcs
         base['active'] = any(r['active'] for r in recs)  # active if ANY source active
+        # A formal recall in the group supersedes the outbreak flag (it's no longer just an
+        # investigation); the group is 'outbreak' only if EVERY member is an outbreak.
+        base['source_type'] = ('outbreak' if all(_is_outbreak(r) for r in recs)
+                               else 'recall')
         # Back-fill empty fields from other members; prefer non-empty recall_number/link.
         for k in ('recall_number', 'brand', 'link', 'classification', 'reason',
                   'establishment', 'states', 'product_type', 'date'):
@@ -705,12 +981,38 @@ def _feed_id(r):
     return ('sid:' + r['source'] + ':' + r['source_id'])[:80]
 
 
+def _table_has_column(cur, table, col):
+    cur.execute(
+        "SELECT COUNT(*) AS c FROM information_schema.columns "
+        "WHERE table_schema=DATABASE() AND table_name=%s AND column_name=%s", (table, col))
+    return ((cur.fetchone() or {}).get('c') or 0) > 0
+
+
+def _ensure_source_type_column(cur):
+    """Self-healing: add recall_feed.source_type if absent (small table, one-time DDL, runs
+    inside refresh_feed which already has write privileges). Returns True if the column is
+    present afterward. Guarded — a perms/DDL failure just falls back to writing WITHOUT the
+    column so existing FSIS/openFDA/CDC-RSS ingestion is never broken (purely additive)."""
+    try:
+        if _table_has_column(cur, FEED_TABLE, 'source_type'):
+            return True
+        cur.execute("ALTER TABLE `%s` ADD COLUMN source_type VARCHAR(20) NOT NULL "
+                    "DEFAULT 'recall'" % FEED_TABLE)
+        print(json.dumps({'evt': 'recall_feed_added_source_type_column'}))
+        return True
+    except Exception as e:
+        print(json.dumps({'evt': 'recall_feed_source_type_column_unavailable',
+                          'error': str(e)[:200]}), file=sys.stderr)
+        return False
+
+
 def write_feed_table(merged):
     """Full-replace the recall_feed table transactionally (feed is small)."""
     conn = _connect()
     conn.autocommit(False)
     try:
         with conn.cursor() as cur:
+            has_st = _ensure_source_type_column(cur)
             cur.execute("DELETE FROM `%s`" % FEED_TABLE)
             rows = []
             seen = set()
@@ -720,7 +1022,7 @@ def write_feed_table(merged):
                     continue
                 seen.add(fid)
                 rd = r['date'] if re.match(r'\d{4}-\d{2}-\d{2}', r.get('date') or '') else None
-                rows.append((
+                vals = [
                     fid, ','.join(r['sources'])[:255], r.get('recall_number', '')[:120],
                     (r.get('brand') or '')[:500], r.get('product_description', ''),
                     (r.get('reason') or '')[:1200], (r.get('classification') or '')[:120],
@@ -728,12 +1030,20 @@ def write_feed_table(merged):
                     (r.get('link') or '')[:1200], (r.get('establishment') or '')[:600],
                     (r.get('states') or '')[:600], (r.get('product_type') or '')[:255],
                     json.dumps(r.get('raw') or {})[:60000],
-                ))
+                ]
+                if has_st:
+                    vals.append((r.get('source_type') or 'recall')[:20])
+                rows.append(tuple(vals))
+            cols = ("id, sources, recall_number, brand, product_description, reason,"
+                    " classification, status, active, recall_date, link, establishment,"
+                    " states, product_type, raw")
+            nph = 15
+            if has_st:
+                cols += ', source_type'
+                nph = 16
             cur.executemany(
-                "INSERT INTO `%s` (id, sources, recall_number, brand, product_description,"
-                " reason, classification, status, active, recall_date, link, establishment,"
-                " states, product_type, raw, updated_at) VALUES "
-                "(%s)" % (FEED_TABLE, ','.join(['%s'] * 15) + ',UTC_TIMESTAMP()'), rows)
+                "INSERT INTO `%s` (%s, updated_at) VALUES (%s)"
+                % (FEED_TABLE, cols, ','.join(['%s'] * nph) + ',UTC_TIMESTAMP()'), rows)
             _meta_set(cur, 'last_refresh_ts', str(int(time.time())))
         conn.commit()
         return len(rows)
@@ -779,6 +1089,8 @@ def read_feed_table(active_only=True, recent_days=None):
                     'establishment': row['establishment'] or '',
                     'states': row['states'] or '',
                     'product_type': row['product_type'] or '',
+                    # Drift-tolerant: column may not exist yet on an un-migrated table.
+                    'source_type': row.get('source_type') or 'recall',
                 })
             return out
     finally:
@@ -798,7 +1110,8 @@ def _feed_last_refresh_age():
 
 
 _SOURCE_FETCHERS = [('FSIS', fetch_fsis), ('openFDA', fetch_openfda),
-                    ('FDA-press', fetch_fda_xlsx), ('CDC-RSS', fetch_cdc_rss)]
+                    ('FDA-press', fetch_fda_xlsx), ('CDC-RSS', fetch_cdc_rss),
+                    ('FDA-CORE', fetch_fda_core), ('CDC-outbreak', fetch_cdc_outbreaks)]
 
 
 def refresh_feed(force_openfda=False):
@@ -1243,6 +1556,9 @@ def check_owner(owner, recalls, item_override=None):
             'kitchen_item_name': it.get('product_name'),
             'brand': it.get('brand'),
             'match_level': level,
+            # 'recall' (formal recall) vs 'outbreak' (active investigation, possibly
+            # pre-recall) — lets the UI tier/gate outbreak matches differently.
+            'source_type': r.get('source_type', 'recall'),
             'recall': {
                 'title': r['title'],
                 'product_description': r['product_description'],
@@ -1252,6 +1568,7 @@ def check_owner(owner, recalls, item_override=None):
                 'date': r['date'],
                 'link': r['link'],
                 'establishment': r['establishment'],
+                'source_type': r.get('source_type', 'recall'),
             },
         })
     # likely first, then possible
@@ -1287,6 +1604,14 @@ def _source_counts(recalls):
         for s in (r.get('sources') or [r.get('source')]):
             if s:
                 counts[s] = counts.get(s, 0) + 1
+    return counts
+
+
+def _source_type_counts(recalls):
+    counts = {}
+    for r in recalls:
+        st = r.get('source_type') or 'recall'
+        counts[st] = counts.get(st, 0) + 1
     return counts
 
 
@@ -1332,6 +1657,10 @@ def lambda_handler(event, context):
             'source_counts_all': _source_counts(all_rows),
             'source_counts_active_recent': _source_counts(recalls),
             'multi_source_merged': sum(1 for r in all_rows if len(r.get('sources', [])) > 1),
+            'source_type_counts_all': _source_type_counts(all_rows),
+            'source_type_counts_active_recent': _source_type_counts(recalls),
+            'outbreak_sample': [r for r in recalls
+                                if r.get('source_type') == 'outbreak'][:5],
             'sample': recalls[:3],
         })
 
