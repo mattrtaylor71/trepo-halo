@@ -1543,14 +1543,30 @@ def check_owner(owner, recalls, item_override=None):
         # Branded-only 'possible' gate: a generic/unbranded kitchen item can't be verified
         # against a recall notice, so drop its 'possible' match (keep 'likely' — that tier
         # already required brand alignment). Logged so we can measure what the gate hides.
+        # EXCEPTION — OUTBREAKS bypass this gate: during an active investigation we want to
+        # warn even on a generic/unbranded item (a plain "blueberries"/"lettuce" should still
+        # flag). Only the BRAND requirement is lifted, NOT form/identity discipline — the
+        # shared-product-token check + _validate_match above already ran, so a wrong-form pair
+        # (e.g. ground beef vs a beef-jerky outbreak) was dropped before reaching here. These
+        # surface at 'possible' (a "worth checking" warning): an unbranded item can't be
+        # 'likely' anyway — _validate_match softens likely->possible without brand alignment —
+        # so bypassing the gate never promotes it, it only stops it being suppressed.
         if level == 'possible' and POSSIBLE_BRANDED_ONLY and not str(it.get('brand') or '').strip():
-            print(json.dumps({
-                'evt': 'recall_match_dropped_unbranded',
-                'owner': owner,
-                'item': (it.get('product_name') or '')[:80],
-                'recall_title': (r.get('title') or r.get('product_description') or '')[:80],
-            }), file=sys.stderr)
-            continue
+            if (r.get('source_type') or 'recall') == 'outbreak':
+                print(json.dumps({
+                    'evt': 'outbreak_match_surfaced_unbranded',
+                    'owner': owner,
+                    'item': (it.get('product_name') or '')[:80],
+                    'recall_title': (r.get('title') or r.get('product_description') or '')[:80],
+                }), file=sys.stderr)
+            else:
+                print(json.dumps({
+                    'evt': 'recall_match_dropped_unbranded',
+                    'owner': owner,
+                    'item': (it.get('product_name') or '')[:80],
+                    'recall_title': (r.get('title') or r.get('product_description') or '')[:80],
+                }), file=sys.stderr)
+                continue
         matches.append({
             'kitchen_item_id': iid,
             'kitchen_item_name': it.get('product_name'),
