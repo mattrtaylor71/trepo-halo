@@ -70,6 +70,7 @@ _RECIPE_FROM_CONTENT_PATHS = {'/recipe-from-caption', '/recipe-from-content'}
 _ANALYZE_URL_PATHS = {'/analyze-tiktok', '/analyze-url'}
 _ASYNC_TASK_GENERATE_SAVED_RECIPE_IMAGE = 'generate_saved_recipe_image'
 _ASYNC_TASK_PROCESS_SAVED_RECIPE_BATCH = 'process_saved_recipe_batch'
+_ASYNC_TASK_PROCESS_SAVED_RECIPE_URL = 'process_saved_recipe_url'
 _ASYNC_TASK_REFINE_SAVED_RECIPE_TEXT = 'refine_saved_recipe_text'
 _SAVED_RECIPE_BATCH_JOB_TYPE = 'saved_recipe_batch'
 _JOB_STATUS_PENDING = 'PENDING'
@@ -4788,6 +4789,70 @@ def _enqueue_saved_recipe_batch_job(owner, submission, request_id=None, event=No
         raise RuntimeError(str(exc))
 
 
+def _enqueue_saved_recipe_url_job(owner, url, request_id=None, event=None):
+    """Slow web/social URL saves (yt-dlp/Apify extraction chain) can exceed API
+    Gateway's hard 30s integration cap, killing the connection with a 503 even though
+    the Lambda completes. Run the extraction+save in the background worker and hand the
+    client a job_id to poll — mirrors the image-batch async path and reuses the SAME
+    job document, GET /jobs/{job_id} endpoint, and DynamoDB jobs table."""
+    job_id = uuid.uuid4().hex
+    now = _utc_now_iso()
+    payload_key = _put_saved_recipe_batch_payload(owner, job_id, {'kind': 'url', 'url': url})
+    job = {
+        'job_id': job_id,
+        'type': _SAVED_RECIPE_BATCH_JOB_TYPE,
+        'owner': owner,
+        'status': _JOB_STATUS_PENDING,
+        'image_count': 0,
+        'result_count': 0,
+        'recipe_ids': [],
+        'results': [],
+        'partial_errors': [],
+        'request_id': request_id,
+        'created_at': now,
+        'updated_at': now,
+        'payload_s3_key': payload_key,
+        'source_url': url,
+    }
+    _put_saved_recipe_batch_job(job)
+    function_name = _safe_text(os.getenv('AWS_LAMBDA_FUNCTION_NAME'))
+    if not function_name:
+        raise RuntimeError('AWS_LAMBDA_FUNCTION_NAME is not available')
+    try:
+        boto3.client('lambda').invoke(
+            FunctionName=function_name,
+            InvocationType='Event',
+            Payload=json.dumps({
+                'async_task': _ASYNC_TASK_PROCESS_SAVED_RECIPE_URL,
+                'owner': owner,
+                'job_id': job_id,
+                'request_id': request_id,
+            }).encode('utf-8'),
+        )
+        _log_event(
+            request_id,
+            'saved_recipe_url_job_enqueued',
+            owner=owner,
+            job_id=job_id,
+        )
+        return job
+    except Exception as exc:
+        _update_saved_recipe_batch_job(
+            job_id,
+            status=_JOB_STATUS_FAILED,
+            error=str(exc),
+            completed_at=_utc_now_iso(),
+        )
+        _log_event(
+            request_id,
+            'saved_recipe_url_job_enqueue_failed',
+            owner=owner,
+            job_id=job_id,
+            failure_reason=str(exc),
+        )
+        raise RuntimeError(str(exc))
+
+
 def _fetch_saved_recipe_batch_results(conn, owner, job, request_id=None):
     result_entries = list((job or {}).get('results') or [])
     recipes = []
@@ -4830,6 +4895,31 @@ def _fetch_saved_recipe_batch_results(conn, owner, job, request_id=None):
     return recipes, results, partial_errors
 
 
+def _client_supports_async_url_save(body):
+    """Whether the calling client understands a 202 + {job:{job_id}} for a URL save and
+    will poll GET /jobs/{job_id}. Shipped iOS routes image/text saves through a polling
+    helper but its URL-save path (saveRecipe(url:)) accepts ONLY 200/201 — so async MUST
+    be opt-in, or every un-updated client would break on 202. An updated client signals
+    support via body flag or the X-Trepo-Async-Save header; absent the signal we keep the
+    synchronous path (current behavior). Flip this to always-True once the async-capable
+    iOS build is the floor."""
+    payload = body or {}
+    for key in ('async_save', 'async', 'supports_async'):
+        val = payload.get(key)
+        if val is True:
+            return True
+        if isinstance(val, str) and val.strip().lower() in ('1', 'true', 'yes', 'url'):
+            return True
+    event = payload.get('_event') or {}
+    headers = event.get('headers') or {}
+    header_val = ''
+    for k, v in headers.items():
+        if _safe_text(k).lower() == 'x-trepo-async-save':
+            header_val = _safe_text(v)
+            break
+    return header_val.lower() in ('1', 'true', 'yes', 'url')
+
+
 def _post_saved_recipe(owner, body, request_id=None):
     try:
         submission = _build_saved_recipe_input(body)
@@ -4847,8 +4937,27 @@ def _post_saved_recipe(owner, body, request_id=None):
         _ensure_saved_recipes_table(conn, owner)
         response_result_count = 0
         if submission['kind'] == 'url':
-            # Curated explore recipes short-circuit scrape/Apify/refine entirely.
+            # Curated explore recipes short-circuit scrape/Apify/refine entirely — always
+            # fast, so they stay synchronous (201/200) regardless of client capability.
             extraction = _explore_shortcircuit_extraction(conn, submission['url'], request_id=request_id)
+            if extraction is None and _client_supports_async_url_save(body):
+                # Slow path: real web/social extraction (yt-dlp/Apify) can blow past API
+                # Gateway's 30s cap. Hand an async-capable client a job to poll and return
+                # 202 immediately. Idempotency is preserved downstream: the worker's
+                # _save_saved_recipe_record dedupes on resolved_url_hash (unique index +
+                # 1062 handling), so a client retry can't create a duplicate save.
+                job = _enqueue_saved_recipe_url_job(
+                    owner, submission['url'], request_id=request_id, event=body.get('_event'))
+                _log_event(
+                    request_id,
+                    'saved_recipe_post_complete',
+                    owner=owner,
+                    submission_kind='url',
+                    result_count=0,
+                    latency_ms=int((time.time() - started) * 1000),
+                    async_job=job.get('job_id'),
+                )
+                return _build_saved_recipe_batch_accept_response(owner, job, event=body.get('_event'))
             if extraction is None:
                 extraction = _extract_content(submission['url'], request_id=request_id)
             result, _ = _save_saved_recipe_record(conn, owner, extraction, request_id=request_id)
@@ -5142,6 +5251,120 @@ def _handle_async_saved_recipe_image_task(event, request_id):
         }
     finally:
         pass
+
+
+def _handle_async_saved_recipe_url_task(event, request_id):
+    """Background worker for slow URL saves. Runs the same extraction+save the sync path
+    ran (so image gen, availability, household fan-out all still happen via
+    _save_saved_recipe_record) and records the result on the job so GET /jobs/{job_id}
+    returns the recipe. Reuses the batch job document + status endpoint."""
+    owner = _safe_text((event or {}).get('owner'))
+    job_id = _safe_text((event or {}).get('job_id'))
+    if not owner or not job_id:
+        raise ServiceError('Async url task requires owner and job_id.', status_code=400)
+    job = _get_saved_recipe_batch_job(job_id)
+    if not job or _safe_text(job.get('owner')) != owner:
+        raise ServiceError('Saved recipe url job not found.', status_code=404)
+    _update_saved_recipe_batch_job(job_id, status=_JOB_STATUS_RUNNING, started_at=_utc_now_iso(), error=None)
+    started = time.time()
+    conn = _mysql_conn()
+    try:
+        _ensure_saved_recipes_table(conn, owner)
+        submission = _load_saved_recipe_batch_payload(job)
+        url = _safe_text((submission or {}).get('url'))
+        if not url:
+            raise ServiceError('URL job payload is missing url.', status_code=400)
+        extraction = _explore_shortcircuit_extraction(conn, url, request_id=request_id)
+        if extraction is None:
+            extraction = _extract_content(url, request_id=request_id)
+        result, _ = _save_saved_recipe_record(conn, owner, extraction, request_id=request_id)
+        recipe_id = ((result or {}).get('recipe') or {}).get('id')
+        entry = {'recipe_id': recipe_id, 'deduped': bool((result or {}).get('deduped'))}
+        completed_job = _update_saved_recipe_batch_job(
+            job_id,
+            status=_JOB_STATUS_COMPLETED,
+            result_count=1 if recipe_id else 0,
+            recipe_ids=[recipe_id] if recipe_id else [],
+            results=[entry] if recipe_id else [],
+            partial_errors=[],
+            completed_at=_utc_now_iso(),
+            error=None,
+        )
+        _log_event(
+            request_id,
+            'saved_recipe_url_job_complete',
+            owner=owner,
+            job_id=job_id,
+            deduped=entry['deduped'],
+            latency_ms=int((time.time() - started) * 1000),
+        )
+        return {
+            'ok': True,
+            'owner': owner,
+            'job_id': job_id,
+            'status': completed_job.get('status'),
+            'count': 1 if recipe_id else 0,
+        }
+    except ServiceError as exc:
+        failed_job = _update_saved_recipe_batch_job(
+            job_id,
+            status=_JOB_STATUS_FAILED,
+            result_count=0,
+            recipe_ids=[],
+            results=[],
+            partial_errors=[{'error': str(exc), 'status_code': exc.status_code}],
+            completed_at=_utc_now_iso(),
+            error=str(exc),
+        )
+        _log_event(
+            request_id,
+            'saved_recipe_url_job_failed',
+            owner=owner,
+            job_id=job_id,
+            failure_reason=str(exc),
+            status_code=exc.status_code,
+        )
+        # 4xx (e.g. 422 "not a recipe") is an expected user outcome the client surfaces,
+        # not a backend fault — don't page. Only 5xx pages, matching the sync handler.
+        if exc.status_code >= 500:
+            _report_backend_error('save_recipe_url', owner_id=owner, code='url_job_failed',
+                                  error=exc, job_id=job_id)
+        return {
+            'ok': False,
+            'owner': owner,
+            'job_id': job_id,
+            'status': failed_job.get('status'),
+            'error': str(exc),
+        }
+    except Exception as exc:
+        failed_job = _update_saved_recipe_batch_job(
+            job_id,
+            status=_JOB_STATUS_FAILED,
+            result_count=0,
+            recipe_ids=[],
+            results=[],
+            partial_errors=[],
+            completed_at=_utc_now_iso(),
+            error=str(exc),
+        )
+        _log_event(
+            request_id,
+            'saved_recipe_url_job_failed',
+            owner=owner,
+            job_id=job_id,
+            failure_reason=str(exc),
+        )
+        _report_backend_error('save_recipe_url', owner_id=owner, code='url_job_error',
+                              error=exc, job_id=job_id)
+        import traceback
+        traceback.print_exc()
+        return {
+            'ok': False,
+            'owner': owner,
+            'job_id': job_id,
+            'status': failed_job.get('status'),
+            'error': str(exc),
+        }
 
 
 def _handle_async_saved_recipe_batch_task(event, request_id):
@@ -5496,6 +5719,8 @@ def handler(event, context):
         return _handle_async_saved_recipe_image_task(event, request_id=request_id)
     if (event or {}).get('async_task') == _ASYNC_TASK_PROCESS_SAVED_RECIPE_BATCH:
         return _handle_async_saved_recipe_batch_task(event, request_id=request_id)
+    if (event or {}).get('async_task') == _ASYNC_TASK_PROCESS_SAVED_RECIPE_URL:
+        return _handle_async_saved_recipe_url_task(event, request_id=request_id)
     if (event or {}).get('async_task') == _ASYNC_TASK_REFINE_SAVED_RECIPE_TEXT:
         return _handle_async_saved_recipe_text_task(event, request_id=request_id)
 
