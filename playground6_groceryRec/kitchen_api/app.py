@@ -526,6 +526,34 @@ def _get_column_metadata(cur, table_name):
     return metadata
 
 
+def _compute_days_old(created_value):
+    """Whole UTC days from an item's `_createdDate` to now, floored at 0. Returns None for
+    a missing/unparseable date — deliberately NOT 0, since a missing date must never read
+    as 'added today' (the exact wrong value the iOS days-in-kitchen fallback avoids).
+    Rows arrive from pymysql as naive-UTC datetimes; a serialized ISO string
+    ('2026-07-13T23:02:02') is also tolerated."""
+    if created_value is None:
+        return None
+    created = created_value
+    if isinstance(created, str):
+        text = created.strip()
+        if not text:
+            return None
+        try:
+            created = datetime.fromisoformat(text)
+        except ValueError:
+            try:
+                created = datetime.strptime(text[:19], '%Y-%m-%d %H:%M:%S')
+            except ValueError:
+                return None
+    if not isinstance(created, datetime):
+        return None
+    # DB DATETIMEs are naive UTC; strip any tzinfo so the subtraction stays naive-UTC.
+    if created.tzinfo is not None:
+        created = created.replace(tzinfo=None)
+    return max(0, (datetime.utcnow() - created).days)
+
+
 def _serialize_rows(rows):
     serialized = []
     for item in rows or []:
@@ -536,6 +564,9 @@ def _serialize_rows(rows):
             except Exception as e:
                 print(f"[WARN] Failed to serialize {key}: {type(value)} - {str(e)}")
                 item_dict[key] = str(value) if value is not None else None
+        # Additive: computed whole-days-in-kitchen so the iOS item-detail fallback has a
+        # server-authoritative value (null when the date is missing/unparseable).
+        item_dict['days_old'] = _compute_days_old(item.get('_createdDate'))
         serialized.append(item_dict)
     return serialized
 
