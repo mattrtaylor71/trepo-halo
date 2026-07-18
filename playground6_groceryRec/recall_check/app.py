@@ -765,6 +765,62 @@ def _is_outbreak(r):
     return (r.get('source_type') or 'recall') == 'outbreak'
 
 
+def _has_outbreak_source(r):
+    """Treat a record as outbreak-gated if it IS an outbreak OR any of its (possibly merged)
+    sources is an outbreak feed (FDA-CORE / CDC-outbreak). So even a record whose source_type
+    flipped to 'recall' after merging with a formal recall STILL matches/surfaces generic,
+    unbranded kitchen items during the active investigation."""
+    if _is_outbreak(r):
+        return True
+    return any(s in ('FDA-CORE', 'CDC-outbreak')
+               for s in (r.get('sources') or [r.get('source')]) if s)
+
+
+# Brand/lot/retailer/store/size chaff stripped when reducing an outbreak product to its core
+# implicated FOOD FORM (so a GENERIC item of that form can match during an active outbreak).
+_FOOD_CHAFF_RE = re.compile(
+    r'\(.*?\)'                                                    # "(GreenWise brand, 10-oz...)"
+    r'|\b\d+(?:\.\d+)?\s*-?\s*(?:oz|ounce|ounces|lb|lbs|pound|pounds|g|kg|mg|ml|l|'
+    r'ct|count|pack|pk|piece|pieces)\b'                          # sizes
+    r'|\blot\s*(?:code|number|no|#)?s?\s*[:#]?\s*[A-Za-z0-9\-]+'  # lot codes
+    r'|\bbest\s+(?:by|before|if\s+used\s+by)\b[^,;|]*'           # best-by dates
+    r'|\bupc\b[^,;|]*'                                           # UPCs
+    r'|\b(?:sold|available|distributed|shipped)\s+(?:at|to|in)\b[^,;|]*'  # retail/distribution
+    r'|\bat\s+[A-Z][A-Za-z\'.]+(?:\s+[A-Z][A-Za-z\'.]+)*',       # "at Publix"
+    re.I)
+# Company / recall boilerplate words dropped from a core-food phrase.
+_FOOD_BOILERPLATE_WORD = re.compile(
+    r'^(recall\w*|issue\w*|announce\w*|voluntar\w*|initiat\w*|because|due|inc|llc|corp|'
+    r'company|co|ltd|sa|brand|brands|distribut\w*|manufactur\w*|produc\w*|by|of|the|and|'
+    r'with|for)$', re.I)
+
+
+def _core_food(r):
+    """Reduce an OUTBREAK record to its implicated FOOD FORM/category — brand, lot, retailer,
+    store, and size stripped — so a GENERIC/unbranded kitchen item of that same form can be
+    matched during an active outbreak. Examples:
+        'Frozen Blueberries (GreenWise brand, 10-oz, lot 60401, at Publix)' -> 'frozen blueberries'
+        'Iceberg Lettuce' -> 'iceberg lettuce'
+        'Requeson/Soft Ricotta Cheese' -> 'requeson soft ricotta cheese'
+    Scans the record's title + each product line, and returns the SHORTEST clean food phrase
+    (the most generic core), which resists verbose merged-in recall boilerplate."""
+    brand_words = set(re.findall(r"[a-z']+", (str(r.get('brand') or '') + ' ' +
+                                              str(r.get('establishment') or '')).lower()))
+    cands = []
+    for seg in [r.get('title') or ''] + (r.get('product_description') or '').split('|'):
+        seg = _FOOD_CHAFF_RE.sub(' ', seg)
+        seg = re.sub(r'[/,;]', ' ', seg)
+        words = [w.lower() for w in re.findall(r"[A-Za-z][A-Za-z'\-]*", seg)]
+        words = [w for w in words
+                 if w not in brand_words and not _FOOD_BOILERPLATE_WORD.match(w)]
+        if words:
+            cands.append(words)
+    if not cands:
+        return (r.get('title') or '').strip().lower()[:120]
+    cands.sort(key=lambda ws: (len(ws), len(' '.join(ws))))
+    return ' '.join(cands[0])[:120]
+
+
 def _outbreak_dupe(x, y):
     """Same event across outbreak sources (CORE vs CDC), or an outbreak vs the later formal
     recall of the same product. Fires only when at least one side is an OUTBREAK, so it
@@ -1232,7 +1288,13 @@ def _tokens(*parts):
 
 
 def _recall_tokens(r):
-    return _tokens(r['title'], r['product_description'], r['establishment'], r['reason'])
+    toks = _tokens(r['title'], r['product_description'], r['establishment'], r['reason'])
+    # For outbreaks, also index the core food tokens so a GENERIC item of that food form
+    # reliably survives the deterministic prefilter (the branded product text alone could
+    # otherwise starve a plain "frozen blueberries" of overlap).
+    if _has_outbreak_source(r):
+        toks = toks | _tokens(_core_food(r))
+    return toks
 
 
 def prefilter(items, recalls):
@@ -1328,6 +1390,24 @@ _MATCH_SYSTEM = (
     "  - {name:'Fly By Jing Chili Crisp', brand:'Fly By Jing'} vs a 'Fly By Jing Sesame "
     "Noodles' recall -> possible (same brand, but chili crisp is a DIFFERENT product than "
     "noodles — not likely).\n\n"
+    "ACTIVE-OUTBREAK ENTRIES: some entries have \"outbreak\": true and an \"implicated_food\" "
+    "field. These are ACTIVE OUTBREAK INVESTIGATIONS where the ENTIRE food category is "
+    "implicated, not a single brand. For an outbreak entry, match a kitchen item as "
+    "\"possible\" if the item is the SAME FOOD FORM as \"implicated_food\", REGARDLESS of the "
+    "item's brand — a generic/unbranded item of that food form MUST match (during an outbreak "
+    "we warn broadly). Food-form discipline STILL applies: a DIFFERENT form does NOT match. A "
+    "product MADE WITH the food (a baked good, muffin, yogurt, sauce, juice, ice cream, etc.) "
+    "is a DIFFERENT product and must NOT match; a different cut/preparation must NOT match. "
+    "Fresh vs frozen of the SAME whole food MAY match. Use \"likely\" for an outbreak only "
+    "when the item's brand ALSO matches; otherwise \"possible\".\n"
+    "Outbreak examples (implicated_food = 'frozen blueberries'):\n"
+    "  - {name:'Frozen Blueberries', brand:''} -> possible (same food form, brand irrelevant).\n"
+    "  - {name:'Great Value Frozen Blueberries', brand:'Great Value'} -> possible "
+    "(different brand, same food — the whole category is implicated).\n"
+    "  - {name:'Fresh Blueberries', brand:''} -> possible (same whole fruit).\n"
+    "  - {name:'Blueberry Muffin'} -> none (a baked good, NOT the frozen fruit).\n"
+    "  - {name:'Blueberry Greek Yogurt'} -> none (a dairy product, NOT the frozen fruit).\n"
+    "  - {name:'Strawberries'} -> none (a different fruit).\n\n"
     "Each kitchen item has a small integer \"i\" field — echo that SAME integer in your "
     "verdict (do not invent ids or repeat names). "
     "Return STRICT JSON: {\"verdicts\":[{\"i\":<the item's i>,"
@@ -1366,13 +1446,22 @@ def _match_one_batch(client, item_batch, recalls, recall_toks):
     if not rel:
         return {}
     local_to_global = rel
-    recall_lines = [{
-        'index': li,
-        'product': (recalls[gi]['product_description'] or recalls[gi]['title'])[:220],
-        'brand': (recalls[gi].get('brand') or '')[:100],
-        'establishment': (recalls[gi].get('establishment') or '')[:100],
-        'reason': (recalls[gi].get('reason') or '')[:100],
-    } for li, gi in enumerate(local_to_global)]
+    recall_lines = []
+    for li, gi in enumerate(local_to_global):
+        rr = recalls[gi]
+        line = {
+            'index': li,
+            'product': (rr['product_description'] or rr['title'])[:220],
+            'brand': (rr.get('brand') or '')[:100],
+            'establishment': (rr.get('establishment') or '')[:100],
+            'reason': (rr.get('reason') or '')[:100],
+        }
+        # Outbreak entries: flag them and hand the LLM the CORE implicated food (brand/lot/
+        # store stripped) so it matches ANY item of that food form, generic or not.
+        if _has_outbreak_source(rr):
+            line['outbreak'] = True
+            line['implicated_food'] = _core_food(rr)
+        recall_lines.append(line)
     # Reference items by a small per-batch integer "i" (0..len-1) instead of the 36-char
     # _id UUID. The LLM echoes "i" per verdict; without this ~half the completion tokens
     # (and thus latency — this call is OUTPUT-token-bound) were spent re-emitting UUIDs.
@@ -1478,6 +1567,12 @@ def _validate_match(it, r, level):
     downgraded to 'possible'. Returns the effective level, or None to reject."""
     it_toks = _tokens(it.get('product_name'), it.get('variant'))
     r_prod = _tokens(r.get('product_description'), r.get('title'))
+    # For outbreaks, also credit the CORE FOOD tokens so a generic item whose only overlap is
+    # with the implicated food (e.g. plain 'blueberries' vs a brand-specific outbreak product
+    # string) still validates. Same identity discipline — a generic-prep-only overlap (or a
+    # made-with product like a muffin that shares no whole-food token) is still rejected.
+    if _has_outbreak_source(r):
+        r_prod = r_prod | _tokens(_core_food(r))
     # A shared token that is ONLY a generic prep/packaging word is not product identity.
     shared = it_toks & r_prod
     if not shared or shared <= _GENERIC_PREP_TOKENS:
@@ -1552,7 +1647,7 @@ def check_owner(owner, recalls, item_override=None):
         # 'likely' anyway — _validate_match softens likely->possible without brand alignment —
         # so bypassing the gate never promotes it, it only stops it being suppressed.
         if level == 'possible' and POSSIBLE_BRANDED_ONLY and not str(it.get('brand') or '').strip():
-            if (r.get('source_type') or 'recall') == 'outbreak':
+            if _has_outbreak_source(r):
                 print(json.dumps({
                     'evt': 'outbreak_match_surfaced_unbranded',
                     'owner': owner,
