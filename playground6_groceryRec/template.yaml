@@ -1764,54 +1764,24 @@ Resources:
   # export_date advances). The GET path is STRICTLY READ-ONLY — it never fetches feeds
   # inline; if the table is stale >26h it serves the stale table and fires an async
   # self-invoke {action:"refresh_feed"} (hence the self-invoke policy below).
-  # NOTE: initially provisioned standalone via `aws lambda create-function`
-  # (FunctionName pinned below so a future clean `sam deploy` reconciles to the same
-  # name/route/schedule). Requires internet egress (FSIS/FDA/CDC feeds + OpenAI), so it
-  # stays OUT of the VPC (RDS reached over its public endpoint, same as the other fns).
-  # DB tables `recall_feed` + `recall_feed_meta` are created out-of-band (see
-  # recall_check/README not tracked; DDL in the deploy notes).
-  RecallCheckFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      FunctionName: trepo-recall-check
-      CodeUri: recall_check/
-      Handler: app.lambda_handler
-      Runtime: python3.9
-      Timeout: 120
-      MemorySize: 512
-      ReservedConcurrentExecutions: !Ref LightApiReservedConcurrency
-      Environment:
-        Variables:
-          DB_HOST:  !Ref DBHost
-          DB_PORT:  !Ref DBPort
-          DB_USER:  !Ref DBUser
-          DB_PASS:  !Ref DBPass
-          DB_NAME:  !Ref DBName
-          OPENAI_API_KEY: !Ref OpenAIApiKey
-          RECALL_MATCH_MODEL: gpt-4.1-mini
-          RECALL_LOOKBACK_DAYS: '365'
-          RECALL_FEED_INGEST_DAYS: '550'
-          RECALL_FEED_STALE_SECONDS: '93600'
-          # OPENFDA_API_KEY: ''   # optional; keyless works (240 req/min, 120k/day)
-      Policies:
-        # Async self-invoke for the stale-feed background refresh (GET stays non-blocking).
-        - Statement:
-            Effect: Allow
-            Action: lambda:InvokeFunction
-            Resource: !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:trepo-recall-check"
-      Events:
-        RecallCheckRoute:
-          Type: HttpApi
-          Properties:
-            ApiId: !Ref Api
-            Path: /recall-check/{owner}
-            Method: GET
-        DailyFeedRefresh:
-          Type: Schedule
-          Properties:
-            Schedule: rate(1 day)
-            Description: Daily rebuild of the merged food-recall feed
-            Input: '{"action":"refresh_feed"}'
+  # RECONCILED 2026-07-18 (deploy-debt fix): trepo-recall-check is managed ENTIRELY
+  # STANDALONE and is intentionally NOT a resource in this stack. Confirmed not CF-managed:
+  #   aws cloudformation describe-stack-resources --physical-resource-id trepo-recall-check
+  #   => "Stack for trepo-recall-check does not exist"
+  # The earlier note here claimed a pinned FunctionName would let a clean `sam deploy`
+  # "reconcile" to the same name — that was WRONG: CloudFormation does not adopt an existing
+  # resource by name; it would try to CREATE trepo-recall-check, hit AlreadyExists, and FAIL
+  # THE ENTIRE STACK DEPLOY. So the create-time resource is removed from this template.
+  # How recall-check is actually managed (all standalone / out-of-band):
+  #   - code: surgical live-bundle overlay (download live zip -> overlay recall_check/app.py
+  #     -> aws lambda update-function-code). Live config: python3.9, 90s timeout, 1769MB
+  #     (bumped to un-throttle the 8 concurrent LLM match threads), env RECALL_* + OPENAI_API_KEY.
+  #   - HTTP route GET /recall-check/{owner} on the shared HTTP API: added standalone.
+  #   - daily refresh: EventBridge rule `trepo-recall-feed-daily` rate(1 day)
+  #     Input {"action":"refresh_feed"}, added standalone.
+  #   - DB tables recall_feed + recall_feed_meta: created out-of-band.
+  # If this ever needs to become CF-managed, use `aws cloudformation` resource IMPORT — do
+  # NOT re-add a create-time resource with the pinned name (that reintroduces the collision).
 
   RecipesGeneratorFunction:
     Type: AWS::Serverless::Function
