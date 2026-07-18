@@ -1550,6 +1550,48 @@ def _guess_image_extension(content_type, source_url):
     return 'jpg'
 
 
+_HERO_IMAGE_MAX_ASPECT = 1.2
+
+
+def _normalize_hero_image_bytes(image_bytes, content_type=None):
+    """Web-scraped recipe hero images are usually landscape Open-Graph cards (e.g.
+    1200x630, aspect ~1.90). A wide hero inflates the recipe-detail layout past screen
+    width on older iOS builds (renders zoomed/clipped). If aspect (w/h) exceeds 1.2 we
+    center-crop to a 1:1 square before storing — square is the safest bound: it can never
+    exceed the screen width regardless of layout. Aspect <= 1.2 (already near-square or
+    portrait) is stored byte-for-byte unchanged. Fully error-safe: any decode/encode
+    failure returns the ORIGINAL bytes so a save never crashes on an odd image."""
+    if not image_bytes:
+        return image_bytes, content_type
+    try:
+        from PIL import Image, ImageOps
+        try:
+            import pillow_heif
+            pillow_heif.register_heif_opener()
+        except Exception:
+            pass
+        with Image.open(BytesIO(image_bytes)) as image:
+            oriented = ImageOps.exif_transpose(image)
+            width, height = oriented.size
+            if not width or not height:
+                return image_bytes, content_type
+            if (width / height) <= _HERO_IMAGE_MAX_ASPECT:
+                return image_bytes, content_type
+            # Landscape hero: center-crop to a square on the shorter side.
+            side = min(width, height)
+            left = (width - side) // 2
+            top = (height - side) // 2
+            square = oriented.crop((left, top, left + side, top + side))
+            if square.mode != 'RGB':
+                square = square.convert('RGB')
+            output = BytesIO()
+            square.save(output, format='JPEG', quality=92)
+            return output.getvalue(), 'image/jpeg'
+    except Exception:
+        # Never let hero normalization break a save — fall back to the original bytes.
+        return image_bytes, content_type
+
+
 def _mirror_recipe_image(owner, recipe_id, source_image_url, request_id=None):
     bucket = _owned_images_bucket()
     source_url = _safe_text(source_image_url)
@@ -1576,6 +1618,10 @@ def _mirror_recipe_image(owner, recipe_id, source_image_url, request_id=None):
         image_bytes = response.content
         if not image_bytes:
             raise RuntimeError('Downloaded image was empty.')
+        # Normalize wide landscape heroes to a square before storing so they can't blow out
+        # the recipe-detail layout on older iOS builds. No-op for near-square/portrait; on
+        # any decode error the original bytes pass through unchanged.
+        image_bytes, content_type = _normalize_hero_image_bytes(image_bytes, content_type)
         ext = _guess_image_extension(content_type, response.url or source_url)
         key = f"recipe-images/{safe_owner}/saved-recipes/{recipe_id}-{digest}.{ext}"
         boto3.client('s3').put_object(
