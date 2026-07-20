@@ -1374,17 +1374,27 @@ _MATCH_SYSTEM = (
     "brand AND it is the same product form. Strong, specific match. A shared BRAND alone "
     "is NOT enough: the SAME brand's DIFFERENT product is only 'possible' (e.g. a brand's "
     "chili crisp vs that same brand's recalled sesame noodles -> possible, not likely).\n"
-    "  \"possible\" = the item is a GENERIC/unbranded (or different-brand) version of the "
-    "SAME product form as a recalled product. Only use this when the form genuinely "
-    "matches (e.g. unbranded 'beef jerky' vs a beef-jerky recall; unbranded 'ground "
-    "beef' vs a ground-beef recall). 'Worth double-checking'.\n"
+    "  \"possible\" = the item is a GENERIC/unbranded version of the SAME product form as a "
+    "recalled product (item brand unknown), OR the recall itself is GENERIC/category-level "
+    "(names no specific consumer brand). Only use this when the form genuinely matches (e.g. "
+    "unbranded 'beef jerky' vs a beef-jerky recall; unbranded 'ground beef' vs a ground-beef "
+    "recall). 'Worth double-checking'.\n"
     "  \"none\"     = anything else: a different product form, a different food, a "
-    "seasoning/marinade/packaging/non-food item, or only an incidental shared word.\n\n"
+    "seasoning/marinade/packaging/non-food item, only an incidental shared word, OR a "
+    "brand conflict (see the BRAND-CONFLICT RULE below).\n\n"
+    "BRAND-CONFLICT RULE: if the RECALL names a specific consumer brand/firm AND the kitchen "
+    "item names a specific brand AND they are clearly DIFFERENT brands, answer \"none\" — a "
+    "recall of one brand does NOT implicate a different brand's version of the same product. "
+    "Example: item {name:'Traditional Medicinals Tea', brand:'Traditional Medicinals'} vs a "
+    "recall of 'Zen Cleanse Herbal Tea' -> none (same form 'tea', but clearly DIFFERENT "
+    "brands). EXCEPTION: this rule does NOT apply to outbreak entries (\"outbreak\": true) or "
+    "to GENERIC/category recalls that name no specific consumer brand — for those, match on "
+    "food form regardless of brand (as described above and in the outbreak section).\n\n"
     "Worked examples (recall = 'STREET\\'S BEEF Jerky Teriyaki', a beef JERKY product):\n"
     "  - {name:'Teriyaki Beef Jerky', brand:'Street\\'s Beef'} -> likely (brand + jerky).\n"
     "  - {name:'Beef Jerky', brand:''} -> possible (same form: jerky, brand unknown).\n"
-    "  - {name:'Jack Link\\'s Beef Jerky', brand:'Jack Link\\'s'} -> possible "
-    "(jerky, but a different brand than the recall).\n"
+    "  - {name:'Jack Link\\'s Beef Jerky', brand:'Jack Link\\'s'} -> none "
+    "(a DIFFERENT specific brand than this brand-specific recall — brand conflict).\n"
     "  - {name:'Ground Beef'} -> none (ground beef is NOT jerky).\n"
     "  - {name:'Beef Tenderloin Steak'} -> none (steak is NOT jerky).\n"
     "  - {name:'Beef Smoked Sausage'} -> none (sausage is NOT jerky).\n"
@@ -1588,6 +1598,30 @@ def _validate_match(it, r, level):
     return level
 
 
+def _brand_conflict(it, r):
+    """Deterministic brand-conflict guard (belt-and-suspenders to the LLM's BRAND-CONFLICT
+    RULE). True when the match should be REJECTED because the recall is brand-specific, the
+    item is brand-specific, and the two brands clearly differ. Real false positive this kills:
+    item 'Traditional Medicinals Tea' vs a 'Zen Cleanse Herbal Tea' recall.
+
+    Never conflicts for OUTBREAK/GENERIC recalls or unbranded items — those keep form-based
+    matching (Matt wants generic + outbreak recalls to surface even on branded items)."""
+    if _has_outbreak_source(r):
+        return False                        # outbreaks are brand-agnostic
+    it_brand = _tokens(it.get('brand'))
+    if not it_brand:
+        return False                        # unbranded item -> nothing to conflict with
+    r_brand = _tokens(r.get('brand'), r.get('establishment'))
+    if not r_brand:
+        return False                        # generic/category recall (no specific brand)
+    # Compatible if the item's brand appears anywhere in the recall's brand/firm OR its
+    # product identity text (guards store-brand-named-in-product and manufacturer==brand).
+    r_identity = r_brand | _tokens(r.get('title'), r.get('product_description'))
+    if it_brand & r_identity:
+        return False                        # same / brand-compatible
+    return True                             # both branded, clearly different -> conflict
+
+
 def _item_is_vague(it):
     """INFORMATIONAL tag for the iOS 'might not match' section: True when the matched KITCHEN
     ITEM is a low-confidence text/voice add.
@@ -1721,6 +1755,20 @@ def check_owner(owner, recalls, item_override=None):
                 'recall_title': (r.get('title') or r.get('product_description') or '')[:80],
             }), file=sys.stderr)
             continue  # item and chosen recall don't share a real product token
+        # BRAND-CONFLICT guard (belt-and-suspenders to the LLM rule): reject a branded item
+        # matched to a DIFFERENT brand-specific recall (e.g. Traditional Medicinals Tea vs a
+        # Zen Cleanse Herbal Tea recall). Skips outbreak/generic recalls + unbranded items, so
+        # generic + outbreak recalls still surface on branded items.
+        if _brand_conflict(it, r):
+            print(json.dumps({
+                'evt': 'recall_match_dropped_brand_conflict',
+                'owner': owner,
+                'item': (it.get('product_name') or '')[:80],
+                'item_brand': (it.get('brand') or '')[:60],
+                'recall_title': (r.get('title') or r.get('product_description') or '')[:80],
+                'recall_brand': (r.get('brand') or r.get('establishment') or '')[:60],
+            }), file=sys.stderr)
+            continue
         # Tier precision: 'likely' means SAME brand AND same product. If the brand
         # aligns but the only shared tokens ARE the brand (same brand, different
         # product — e.g. Fly By Jing Chili Crisp vs a Fly By Jing Sesame Noodles
