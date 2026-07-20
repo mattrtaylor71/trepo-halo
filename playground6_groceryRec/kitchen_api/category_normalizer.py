@@ -93,33 +93,6 @@ def normalize_kitchen_category(raw_category, storage_location=None, product_name
             and re.search(r'\b(steaks?|ribeye|rib eye|sirloin|porterhouse|t-?bone|brisket|filet mignon|veal|lamb chop)\b', pname)
             and not re.search(r'\b(sauce|seasoning|marinade|rub|broth|stock|bouillon|jerky|flavor|flavored|chips?|crisps?)\b', pname)):
         return 'meat_seafood'
-    # Hard override: an unambiguous spice / seasoning / spice-blend / culinary-salt in
-    # the product NAME is 'spices', even when the AI category guess is a confidently
-    # wrong VALID enum ('prepared_other'/'pantry') that would otherwise pass straight
-    # through below (owner d303a754). PRECISION-FIRST (this drives a mass data sweep, so
-    # false positives are unacceptable; missing a few is fine): spice/salt/pepper words
-    # are routinely FLAVOR DESCRIPTORS or minor ingredients on prepared foods. So we
-    # (a) treat salt as a spice ONLY when it is the trailing HEAD noun ("Morton Salt"),
-    #     never a mid-name descriptor ("Hummus … Sea Salt", "Pumpkin Seeds Sea Salt");
-    # (b) VETO on salt anti-signals ("no salt"/"no added salt"/"unsalted"/"low sodium"…);
-    # (c) VETO whenever a stronger FOOD noun is present (beans/tuna/rice/hummus/corn/
-    #     carrots/peas/seeds/couscous/broth/vinegar/garlic cloves/… + the salted-snack/
-    #     sweet/dairy/fresh-chile/sauce set) — a named spice that is only a modifier on a
-    #     food noun ("Yellow Rice Saffron", "Garlic Cloves") must NOT win;
-    # (d) VETO ready-meal masalas ("Tikka/Channa Masala", "Masala Chai", "Paneer …",
-    #     "Butter Chicken") UNLESS a spice-form word (seasoning/blend/spice/powder/rub/
-    #     grinder) re-qualifies it — so "Tikka Masala Seasoning" stays spices but a
-    #     "Tikka Masala" ready meal does not. Bare garam/chaat masala stay spices.
-    # Runs AFTER the meat override so "peppercorn-crusted steak" stays meat; leftovers
-    # still win. Keep byte-equivalent with the JS map in data-access.mjs.
-    if (raw != 'leftovers'
-            and (re.search(r'\b(?:masala|curry powder|spice blends?|seasoning blends?|spice rubs?|allspice|turmeric|cumin|paprika|cardamom|nutmeg|cloves?|saffron|fenugreek|coriander seeds?|ground coriander|coriander powder|peppercorns?|(?:sichuan|szechuan|szechwan|schezwan) peppers?|chill?i powder|chile powder|cayenne|(?:black|white|lemon|ground|cracked) pepper|red pepper flakes?|crushed red pepper)\b', pname)
-                 or re.search(r'\bsalt\b[^a-z0-9]*$', pname))
-            and not re.search(r'\b(?:no salt|salt added|no added salt|added salt|salt[- ]free|unsalted|low sodium|reduced sodium|lightly salted|salted|sodium)\b', pname)
-            and not re.search(r'\b(?:beans?|lentils?|chickpeas?|chick ?peas?|garbanzo|edamame|tuna|salmon|fish|sardines?|anchov(?:y|ies)|hummus|corn|rice|soup|oatmeal|oats|granola|bars?|yogurt|yoghurt|olives?|pickles?|vegetables?|veggie|garlic cloves?|fries|fry|carrots?|peas?|pumpkin seeds?|sunflower seeds?|pepitas?|chia seeds?|flax ?seeds?|hemp seeds?|seaweed|ghee|thins|couscous|noodles?|roti|naan|syrup|paste|spread|broth|stock|vinegar|alfredo|parmesan|butter|caramel|chocolate|candy|taffy|cookies?|brownies?|cakes?|muffins?|pastry|pastries|bread|bagels?|crackers?|chips?|crisps?|pretzels?|popcorn|nuts?|almonds?|cashews?|peanuts?|ice cream|gelato|cheese|jack|pepperoni|peppermint|bell pepper|banana pepper|jalapen?o|poblano|serrano|habanero|chili pepper|chile pepper|hot sauce|pepper sauce|sauce|salt water|tea|latte|coffee|smoothie|juice|soda|chicken|wings?|jerky)\b', pname)
-            and not (re.search(r'\b(?:tikka masala|channa masala|chana masala|paneer|masala chai|masala roti|masala noodles?|butter chicken|simmer sauce)\b', pname)
-                     and not re.search(r'\b(?:seasoning|blend|spice|powder|rub|grinder)\b', pname))):
-        return 'spices'
     if raw in KITCHEN_CATEGORY_ENUM:
         return raw
     return (
