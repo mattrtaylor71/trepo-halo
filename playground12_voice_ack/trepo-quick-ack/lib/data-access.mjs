@@ -16,6 +16,15 @@ import {
 } from "./mysql.mjs";
 import { analyzeDishFromText } from "../../../shared/voice-assistant/text-dish-analyzer.mjs";
 import { dispatchDishEnrichmentJob, shouldUseAsyncDishEnrichment } from "./dish-enrichment-dispatcher.mjs";
+import {
+  isDishReuseEnabled,
+  getDishReuseWindowDays,
+  getDishReuseScanLimit,
+  lookupRecentDishNutrition,
+  decideDishReuse,
+  buildReusedAnalysisResult,
+  rowHasNutrition,
+} from "./dishNutritionMemory.mjs";
 
 const WRITE_SHARED_ONLY = (process.env.WRITE_SHARED_ONLY || 'false').toLowerCase() === 'true';
 
@@ -1681,8 +1690,49 @@ function mergeDishAnalysisResult(analysisRequest, analysisResult, updates = {}, 
 }
 
 async function analyzeDishPayload(existingRow, updates = {}, options = {}) {
+  const env = options?.env || process.env;
   const analysisRequest = buildDishAnalysisRequest(existingRow, updates);
-  const analysisResult = await analyzeDishFromText(analysisRequest, options?.env || process.env);
+
+  // Bug F-006: per-user dish nutrition memory (SYNC path). On a FRESH log (no
+  // existing nutrition), snap a repeat log of the SAME item to the previously
+  // resolved portion/macros so calories stop drifting (150 vs 210) between
+  // identical logs. Only re-estimate when the user signals a different portion.
+  // Needs a DB connection (threaded via options.connection from the create
+  // path); if absent we simply fall through to a fresh estimate. Gated by
+  // DISH_NUTRITION_REUSE (default on).
+  let analysisResult = null;
+  let reusedPrior = false;
+  const connection = options?.connection || null;
+  const ownerId = String(options?.context?.tableOwnerId || options?.context?.userId || options?.context?.ownerId || "").trim();
+  if (
+    isDishReuseEnabled(env) &&
+    connection &&
+    ownerId &&
+    analysisRequest.dish_name &&
+    !rowHasNutrition(existingRow)
+  ) {
+    try {
+      const prior = await lookupRecentDishNutrition(connection, dishTableName(ownerId), analysisRequest.dish_name, {
+        excludeId: existingRow?._id || null,
+        windowDays: getDishReuseWindowDays(env),
+        scanLimit: getDishReuseScanLimit(env),
+      });
+      const decision = decideDishReuse({ existingRow, updates, prior });
+      if (decision.reuse && prior) {
+        analysisResult = buildReusedAnalysisResult(prior, analysisRequest);
+        reusedPrior = true;
+        console.log("[dishNutritionMemory] reused prior nutrition for", JSON.stringify(analysisRequest.dish_name), "->", prior.calories, "cal (skipped LLM); reason:", decision.reason);
+      } else if (prior) {
+        console.log("[dishNutritionMemory] prior found but re-estimating for", JSON.stringify(analysisRequest.dish_name), "reason:", decision.reason);
+      }
+    } catch (memoryError) {
+      console.warn("[dishNutritionMemory] reuse check failed (non-fatal):", memoryError && memoryError.message ? memoryError.message : memoryError);
+    }
+  }
+
+  if (!analysisResult) {
+    analysisResult = await analyzeDishFromText(analysisRequest, env);
+  }
   const merged = mergeDishAnalysisResult(analysisRequest, analysisResult, updates, existingRow);
 
   console.log("[DEBUG] dish analysis result:", JSON.stringify({
@@ -1693,6 +1743,7 @@ async function analyzeDishPayload(existingRow, updates = {}, options = {}) {
     ingredient_count: merged.ingredients.length,
     confidence: merged.confidence,
     source_type: analysisResult?.source_type || null,
+    reused_prior_nutrition: reusedPrior,
     evidence_count: Array.isArray(analysisResult?.evidence_urls) ? analysisResult.evidence_urls.length : 0
   }));
 
@@ -1808,7 +1859,7 @@ async function queueAsyncDishEnrichment(context, rowId, payload, options = {}) {
 }
 
 async function fallbackToSynchronousDishEnrichment(connection, context, rowId, existingRow, updates, options = {}) {
-  const finalFields = await buildDishUpdateFieldsFromArgs(existingRow, updates, { ...options, context });
+  const finalFields = await buildDishUpdateFieldsFromArgs(existingRow, updates, { ...options, context, connection });
   await updateDishRowAcrossHousehold(connection, context, rowId, finalFields);
   return {
     pending: false,
@@ -4667,7 +4718,7 @@ export async function logDishFromVoice(context, payload, options = {}) {
       };
     }
 
-    const analyzedPayload = await analyzeDishPayload(null, payload, { ...options, context });
+    const analyzedPayload = await analyzeDishPayload(null, payload, { ...options, context, connection });
     const rowId = await insertDishRowAcrossHousehold(connection, context, analyzedPayload);
     const insertedRow = await findDishRowById(connection, context, rowId);
     const dish = insertedRow ? mapDishRow(insertedRow) : { id: rowId, dish_name: analyzedPayload.dish_name || "Voice meal", action: "IN" };
