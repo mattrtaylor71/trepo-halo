@@ -995,8 +995,10 @@ def _connect():
 
 
 def read_live_kitchen(owner):
-    """Live rows follow the kitchen_api convention: action = 'IN'."""
-    sql = ("SELECT _id, product_name, brand, variant, category "
+    """Live rows follow the kitchen_api convention: action = 'IN'.
+    product_image_url is selected too — it's the 'vague text/voice add' signal used by
+    _item_is_vague (a real S3 photo vs an 'emoji:' placeholder / null)."""
+    sql = ("SELECT _id, product_name, brand, variant, category, product_image_url "
            "FROM `%s` WHERE owner_id=%%s AND `action`='IN' "
            "ORDER BY `_createdDate` DESC" % KITCHEN_TABLE)
     conn = _connect()
@@ -1585,6 +1587,27 @@ def _validate_match(it, r, level):
     return level
 
 
+def _item_is_vague(it):
+    """INFORMATIONAL tag for the iOS 'might not match' section: True when the matched KITCHEN
+    ITEM is a low-confidence text/voice add.
+
+    Heuristic (the lead's candidate #1): NO brand AND NO real product photo. Rationale —
+    photo/barcode adds attach an S3 product image (and usually a brand from vision/lookup),
+    whereas text/voice adds carry an 'emoji:' placeholder (e.g. 'emoji:🫐') or nothing. This
+    'emoji:'/empty image convention is app-wide (home_suggestions_api / kitchen_insights_api
+    read it the same way). A branded item (even text-typed) has real product identity, and a
+    photographed item is confidently identified, so neither is 'vague'. Only the no-brand +
+    no-photo case — a bare 'blueberries'/'chicken' text add — is genuinely vague.
+
+    Does NOT affect whether a match surfaces or its tier; purely a grouping/caveat flag."""
+    if str(it.get('brand') or '').strip():
+        return False  # a brand gives real product identity
+    img = str(it.get('product_image_url') or '').strip()
+    if img and not img.lower().startswith('emoji:'):
+        return False  # a real product photo (S3 url) -> confidently identified, not vague
+    return True
+
+
 def check_owner(owner, recalls, item_override=None):
     """Core check for one owner. Returns (matches, stats). Read-only."""
     items = item_override if item_override is not None else read_live_kitchen(owner)
@@ -1667,6 +1690,10 @@ def check_owner(owner, recalls, item_override=None):
             'kitchen_item_name': it.get('product_name'),
             'brand': it.get('brand'),
             'match_level': level,
+            # INFORMATIONAL: the matched kitchen item is a low-confidence text/voice add (no
+            # brand + no real product photo) -> iOS groups these under "might not match".
+            # Does not change surfacing or tier.
+            'item_vague': _item_is_vague(it),
             # 'recall' (formal recall) vs 'outbreak' (active investigation, possibly
             # pre-recall) — lets the UI tier/gate outbreak matches differently.
             'source_type': r.get('source_type', 'recall'),
@@ -1732,6 +1759,13 @@ def lambda_handler(event, context):
     params = event.get('pathParameters') or {}
     qs = event.get('queryStringParameters') or {}
     owner = params.get('owner')
+
+    # --- KEEP-WARM PING (must be the FIRST branch): return instantly with NO DB connect, NO
+    # feed fetch, NO OpenAI. An EventBridge rule pings {"action":"ping"} (or a client sends
+    # ?warm=1) to hold one container warm and kill the ~20s cold-start on the first user tap. ---
+    _action = event.get('action') or (event.get('detail') or {}).get('action')
+    if _action == 'ping' or str(qs.get('warm', '')).lower() in ('1', 'true', 'yes'):
+        return {'ok': True, 'pong': True}
 
     # --- Feed refresh (EventBridge cron or manual). Not an HTTP route. ---
     action = event.get('action') or (event.get('detail') or {}).get('action')
