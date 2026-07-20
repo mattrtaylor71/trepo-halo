@@ -320,12 +320,87 @@ test("normalizeKitchenCategory infers from product NAME when category is null", 
   assert.equal(da.normalizeKitchenCategory(null, null, "Tortilla Chips"), "snacks_sweets");
   assert.equal(da.normalizeKitchenCategory(null, null, "Ground Turkey"), "meat_seafood");
 });
-test("normalizeKitchenCategory: seasonings/sauces are pantry, not meat (order)", () => {
-  assert.equal(da.normalizeKitchenCategory("Seasoning", "pantry", "Cajun Seasoning"), "pantry");
-  assert.equal(da.normalizeKitchenCategory("seasoning", null, "Lemon Pepper Seasoning"), "pantry");
-  assert.equal(da.normalizeKitchenCategory(null, null, "Kinder's Steak Blend Seasoning"), "pantry");
+test("normalizeKitchenCategory: seasonings are spices (not meat/pantry); sauces stay pantry (order)", () => {
+  // Seasonings/spice-blends route to the `spices` enum (scanned before pantry). The
+  // point is they must never be meat; and sauces/bouillon stay pantry.
+  assert.equal(da.normalizeKitchenCategory("Seasoning", "pantry", "Cajun Seasoning"), "spices");
+  assert.equal(da.normalizeKitchenCategory("seasoning", null, "Lemon Pepper Seasoning"), "spices");
+  assert.equal(da.normalizeKitchenCategory(null, null, "Kinder's Steak Blend Seasoning"), "spices");
   assert.equal(da.normalizeKitchenCategory(null, null, "Fish Sauce"), "pantry");
   assert.equal(da.normalizeKitchenCategory(null, null, "Chicken Bouillon"), "pantry");
+});
+test("normalizeKitchenCategory: SPICE hard-override rescues spices mislabeled with a VALID enum", () => {
+  // THE live bug (owner d303a754): the model confidently labels a spice with a VALID
+  // enum ('prepared_other'/'pantry'), so it passed straight through the enum check and
+  // the product-name scan never ran. The spice hard-override fires BEFORE that check.
+  // PRECISION-FIRST (drives a mass data sweep): spice/salt/pepper words are routinely
+  // flavor DESCRIPTORS on prepared foods, so false positives must be ~zero.
+  // MUST-PASS positives (each with a VALID passthrough enum the model actually emitted):
+  const POSITIVE = [
+    "Black Salt", "Garam Masala", "Chaat Masala", "Coarse Salt", "White Pepper",
+    "Black Pepper", "Sichuan Peppers", "Morton Salt", "Kosher Salt", "Himalayan Salt",
+    "Diamond Crystal Iodized Salt", "Good & Gather Ground Cumin", "Turmeric",
+    "Smoked Paprika", "Badia Cayenne Pepper", "Stonemill Black Pepper", "Nutmeg",
+    "Chili Powder", "Kinder's Seasoning Blend",
+  ];
+  for (const name of POSITIVE) {
+    assert.equal(da.normalizeKitchenCategory("prepared_other", null, name), "spices", `${name} (prepared_other) -> spices`);
+    assert.equal(da.normalizeKitchenCategory("pantry", null, name), "spices", `${name} (pantry) -> spices`);
+  }
+  // MUST-PASS negatives — the 10 real fleet false positives (spice/salt/pepper as a
+  // descriptor on a food). The override must DECLINE, leaving the stored enum intact.
+  const NEGATIVE = [
+    "Great Value Black Beans No Salt Added",
+    "Ithaca Hummus Olive Oil Sea Salt",
+    "Bumble Bee Wild Caught Tuna Lemon Pepper",
+    "Trader Joe's Organic Garbanzo Beans No Salt",
+    "Whole Kernel Golden Corn No Salt Added",
+    "Del Monte Sweet Corn Cream Style No Salt Added",
+    "365 Organic Cannellini Beans No Salt",
+    "Vigo Yellow Rice Saffron",
+    "Aldi Greek Chickpeas With Parsley & Cumin",
+    "Kinder's Crispy Fried Onions",
+  ];
+  for (const name of NEGATIVE) {
+    assert.equal(da.normalizeKitchenCategory("prepared_other", null, name), "prepared_other", `${name} must NOT become spices`);
+  }
+  // Prior negatives (share a token with a spice/salt but are not spices):
+  assert.equal(da.normalizeKitchenCategory("dairy_eggs", null, "Salted Butter"), "dairy_eggs");
+  assert.equal(da.normalizeKitchenCategory("snacks_sweets", null, "Salted Caramel"), "snacks_sweets");
+  assert.equal(da.normalizeKitchenCategory("produce", null, "Bell Pepper"), "produce");
+  assert.equal(da.normalizeKitchenCategory("produce", null, "Jalapeno"), "produce");
+  assert.equal(da.normalizeKitchenCategory("meat_seafood", null, "Pepperoni"), "meat_seafood");
+  assert.equal(da.normalizeKitchenCategory("beverages", null, "Peppermint Tea"), "beverages");
+  assert.equal(da.normalizeKitchenCategory("dairy_eggs", null, "Pepper Jack Cheese"), "dairy_eggs");
+  assert.equal(da.normalizeKitchenCategory("pantry", null, "Hot Sauce"), "pantry");
+  assert.equal(da.normalizeKitchenCategory("snacks_sweets", null, "Sea Salt Crackers"), "snacks_sweets");
+  // Order/leftovers guards: leftovers win; meat override (peppercorn-crusted steak) runs first.
+  assert.equal(da.normalizeKitchenCategory("leftovers", null, "Leftover Garam Masala Chicken"), "leftovers");
+  assert.equal(da.normalizeKitchenCategory("prepared_other", null, "Peppercorn Crusted Ribeye Steak"), "meat_seafood");
+});
+test("normalizeKitchenCategory: round-3 precision — garlic cloves, ready-meal masalas, food-descriptor FPs", () => {
+  // The ~5% real-fleet FP tail — each must DECLINE (stay prepared_other), never spices.
+  const R3_NEG = [
+    "Garlic Cloves", "Garlic clove", "Pickled Garlic Cloves", "Frozen garlic cloves",
+    "Trader Joe's Paneer Tikka Masala", "Maya Kaimal Tikka Masala",
+    "Trader Joe's Vegan Tikka Masala", "Tasty Bite Organic Channa Masala",
+    "Trader Joe's Channa Masala", "Masala Noodles", "Masala Roti", "Masala Chai",
+    "Sweet Potato Fries Sea Salt", "Sliced Carrots with Sea Salt",
+    "Green Peas No added salt", "Pumpkin Seeds Sea Salt", "Pepitas with Sea Salt",
+    "Seaweed Snacks Sea Salt", "Ghee Himalayan Pink Salt", "Good Thins Simply Salt",
+    "Turmeric Pearl Couscous", "Maple Syrup Cardamom", "Alfredo Sauce Paprika",
+    "Orange & Cloves Spread", "Bone Broth with Turmeric",
+    "Apple Cider Vinegar with Turmeric", "Sliced Carrots No Added Salt",
+    "Goya Chick Peas with Sea Salt",
+  ];
+  for (const name of R3_NEG) {
+    assert.equal(da.normalizeKitchenCategory("prepared_other", null, name), "prepared_other", `${name} must NOT become spices`);
+  }
+  // Real spices that MUST survive the new vetoes (veto must not over-reach):
+  for (const name of ["Ground Cloves", "Whole Cloves", "Cloves", "Tandoori Masala",
+    "Tikka Masala Seasoning", "Tikka Masala Spice Blend", "Chai Spice Blend"]) {
+    assert.equal(da.normalizeKitchenCategory("prepared_other", null, name), "spices", `${name} should still be spices`);
+  }
 });
 test("normalizeKitchenCategory: explicit enum/category guess wins over name", () => {
   assert.equal(da.normalizeKitchenCategory("produce", null, "Chicken Breast"), "produce");
@@ -335,6 +410,14 @@ test("updateKitchenItemDetails clamps a free-text category onto the enum", async
   CONN = makeConn({ selectRows: [targetRow({ product_name: "Cajun Seasoning" })] });
   await da.updateKitchenItemDetails(householdCtx(), "row-1", { category: "Seasoning" }, { skipKitchenDependentGeneration: true });
   const up = mutateParamsFor(CONN, "UPDATE", "shared_kitchen");
-  assert.ok(up && up.includes("pantry"), "category should normalize to 'pantry' in the UPDATE");
+  assert.ok(up && up.includes("spices"), "a seasoning should normalize to 'spices' in the UPDATE");
   assert.ok(!up.includes("Seasoning"), "raw free-text 'Seasoning' must not be persisted");
+});
+test("updateKitchenItemDetails: spice mislabeled prepared_other is rescued to 'spices'", async () => {
+  // The user-facing fix path: even when the stored/guessed category is a VALID enum
+  // like 'prepared_other', the UPDATE clamp routes an unambiguous spice to 'spices'.
+  CONN = makeConn({ selectRows: [targetRow({ product_name: "Garam Masala" })] });
+  await da.updateKitchenItemDetails(householdCtx(), "row-1", { category: "prepared_other" }, { skipKitchenDependentGeneration: true });
+  const up = mutateParamsFor(CONN, "UPDATE", "shared_kitchen");
+  assert.ok(up && up.includes("spices"), "Garam Masala should be rescued to 'spices' even from a prepared_other guess");
 });
