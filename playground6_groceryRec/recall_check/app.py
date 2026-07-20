@@ -32,6 +32,7 @@ import time
 import html
 import urllib.request
 import urllib.error
+import urllib.parse
 
 try:
     import pymysql
@@ -1608,6 +1609,82 @@ def _item_is_vague(it):
     return True
 
 
+# Generic index / landing pages that identify NO specific recall — treated as "no link" so
+# we fall back to a targeted Google search instead of dumping the user on a source homepage.
+def _norm_url(u):
+    u = (u or '').strip().lower()
+    u = re.sub(r'[#?].*$', '', u)          # drop query + fragment
+    return u.rstrip('/')
+
+
+_GENERIC_INDEX_URLS = {_norm_url(u) for u in (
+    FDA_CORE_URL, CDC_OUTBREAK_CSV_URL,
+    'https://www.fda.gov/safety/recalls-market-withdrawals-safety-alerts',
+    'https://www.fsis.usda.gov/recalls',
+    'https://www.fsis.usda.gov/recalls-alerts',
+    'https://www.cdc.gov/foodborne-outbreaks/outbreaks/index.html',
+    'https://www.cdc.gov/foodborne-outbreaks',
+)}
+
+
+def _is_generic_index_url(url):
+    """True if url is a source's generic landing/index page (no specific recall) — or a bare
+    domain root — so it should NOT be used as the 'read the notice' link."""
+    n = _norm_url(url)
+    if not n:
+        return True
+    if n in _GENERIC_INDEX_URLS:
+        return True
+    # bare domain root (e.g. 'https://www.fda.gov') carries no specific recall.
+    return bool(re.match(r'^https?://[^/]+$', n))
+
+
+_QUERY_CHAFF_RE = re.compile(
+    r'\(.*?\)'                                                    # "(GreenWise brand, 10-oz...)"
+    r'|\b\d+(?:\.\d+)?\s*-?\s*(?:oz|ounce|ounces|lb|lbs|g|kg|mg|ml|l|ct|count|pack|pk)\b'
+    r'|\blot\s*(?:code|number|no|#)?s?\s*[:#]?\s*[A-Za-z0-9\-]+'
+    r'|\bbest\s+(?:by|before)\b[^,;|]*|\bupc\b[^,;|]*', re.I)
+
+
+def _recall_search_query(r):
+    """Build a TIGHT, specific search query that surfaces THIS recall (never a generic term).
+    Prefer the recall title (usually firm + product); if thin, combine firm/brand + product.
+    For outbreaks, the implicated core food + 'outbreak' is the most findable identity."""
+    def tidy(s):
+        s = _QUERY_CHAFF_RE.sub(' ', (s or '').split('|')[0])  # first product line, chaff off
+        s = re.sub(r"['’]", '', s)                        # keep contractions whole (That's -> Thats)
+        s = re.sub(r'[^0-9A-Za-z ]+', ' ', s)                  # drop stray punctuation/artifacts (;, ., /, #)
+        return re.sub(r'\s+', ' ', s).strip()
+    if _has_outbreak_source(r):
+        base = tidy(_core_food(r)) or tidy(r.get('title')) or tidy(r.get('product_description'))
+        kw = 'outbreak'
+    else:
+        title = tidy(r.get('title'))
+        if len(title.split()) >= 3:      # title already carries firm + product
+            base = title
+        else:                            # thin title -> firm/brand + product
+            firm = tidy(r.get('brand') or r.get('establishment'))
+            prod = tidy(r.get('product_description')) or title
+            base = ' '.join(x for x in (firm, prod) if x) or title
+        kw = 'recall'
+    words = base.split()[:10]            # keep it tight (no reason paragraph)
+    q = ' '.join(words)
+    if kw not in q.lower():
+        q = (q + ' ' + kw).strip()
+    return q[:120] or kw
+
+
+def _match_link(r):
+    """Guarantee a tappable link for a recall/outbreak. Returns (url, link_type):
+      - ('<real source url>', 'official')  when we have a specific recall/press-release page,
+      - ('https://www.google.com/search?q=...', 'search')  otherwise (targeted at THIS recall)."""
+    link = (r.get('link') or '').strip()
+    if link and not _is_generic_index_url(link):
+        return link, 'official'
+    q = _recall_search_query(r)
+    return 'https://www.google.com/search?q=' + urllib.parse.quote_plus(q), 'search'
+
+
 def check_owner(owner, recalls, item_override=None):
     """Core check for one owner. Returns (matches, stats). Read-only."""
     items = item_override if item_override is not None else read_live_kitchen(owner)
@@ -1685,6 +1762,7 @@ def check_owner(owner, recalls, item_override=None):
                     'recall_title': (r.get('title') or r.get('product_description') or '')[:80],
                 }), file=sys.stderr)
                 continue
+        match_link, link_type = _match_link(r)
         matches.append({
             'kitchen_item_id': iid,
             'kitchen_item_name': it.get('product_name'),
@@ -1697,6 +1775,11 @@ def check_owner(owner, recalls, item_override=None):
             # 'recall' (formal recall) vs 'outbreak' (active investigation, possibly
             # pre-recall) — lets the UI tier/gate outbreak matches differently.
             'source_type': r.get('source_type', 'recall'),
+            # ALWAYS-present tappable link: the real recall/press-release URL when we have a
+            # specific one ('official'), else a Google search targeted at THIS recall
+            # ('search'). Never empty, never a generic source landing page.
+            'link': match_link,
+            'link_type': link_type,
             'recall': {
                 'title': r['title'],
                 'product_description': r['product_description'],
@@ -1704,7 +1787,8 @@ def check_owner(owner, recalls, item_override=None):
                 'classification': r['classification'],
                 'status': r['status'],
                 'date': r['date'],
-                'link': r['link'],
+                'link': match_link,          # guaranteed non-empty (mirrors top-level)
+                'link_type': link_type,
                 'establishment': r['establishment'],
                 'source_type': r.get('source_type', 'recall'),
             },
@@ -1811,6 +1895,10 @@ def lambda_handler(event, context):
 
     # Fleet-scan helper: compact ACTIVE recall list (no owner needed).
     if owner in (None, '_feed'):
+        # Normalize link/link_type on every feed item too, so consumers get a guaranteed
+        # tappable link consistently (same rule as matches).
+        for _r in recalls:
+            _r['link'], _r['link_type'] = _match_link(_r)
         return _resp(200, {'recall_feed_date': feed_date,
                            'active_recalls': len(recalls),
                            'source_counts': _source_counts(recalls),
