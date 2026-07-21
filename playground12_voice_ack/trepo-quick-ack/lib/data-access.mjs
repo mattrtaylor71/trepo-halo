@@ -5025,6 +5025,100 @@ async function dualWriteAcrossHousehold(connection, { memberIds, tableFn, ensure
   }
 }
 
+async function ensureMasterFeedTable(connection, tableName) {
+  // Schema matches the Python master_feed writer (kitchen/dishes/discards APIs)
+  // so voice-side history lands in the SAME {owner}_master_feed table.
+  await connection.execute(`
+    CREATE TABLE IF NOT EXISTS \`${tableName}\` (
+      \`_id\` VARCHAR(36) PRIMARY KEY,
+      \`_owner\` VARCHAR(36) NOT NULL,
+      \`_device\` VARCHAR(255) DEFAULT NULL,
+      \`_createdDate\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      \`event_type\` VARCHAR(64) NOT NULL,
+      \`entity_type\` VARCHAR(32) NOT NULL,
+      \`action\` VARCHAR(16) DEFAULT NULL,
+      \`title\` VARCHAR(500) DEFAULT NULL,
+      \`brand\` VARCHAR(255) DEFAULT NULL,
+      \`item_id\` VARCHAR(128) DEFAULT NULL,
+      \`job_id\` VARCHAR(100) DEFAULT NULL,
+      \`user_id\` VARCHAR(255) DEFAULT NULL,
+      \`source_table\` VARCHAR(255) DEFAULT NULL,
+      \`source_path\` VARCHAR(255) DEFAULT NULL,
+      \`source_system\` VARCHAR(64) DEFAULT NULL,
+      \`primary_image_url\` VARCHAR(1000) DEFAULT NULL,
+      \`secondary_image_url\` VARCHAR(1000) DEFAULT NULL,
+      \`metadata\` JSON DEFAULT NULL,
+      INDEX \`idx_owner\` (\`_owner\`),
+      INDEX \`idx_created\` (\`_createdDate\`),
+      INDEX \`idx_event_type\` (\`event_type\`),
+      INDEX \`idx_entity_type\` (\`entity_type\`),
+      INDEX \`idx_item_id\` (\`item_id\`),
+      INDEX \`idx_job_id\` (\`job_id\`)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
+}
+
+// Append-only history snapshot into {member}_master_feed, fanned across the
+// household. BEST-EFFORT: never throws — a feed-write miss must not block (or
+// roll back) the delete it is meant to protect. The full pre-delete row(s) are
+// carried in each record's `metadata` so nothing removed is permanently lost.
+async function writeMasterFeedSnapshots(connection, memberIds, records) {
+  const members = normalizeHouseholdMemberIds(memberIds || []);
+  if (!members.length || !Array.isArray(records) || !records.length) {
+    return { written: 0 };
+  }
+  let written = 0;
+  for (const rawMember of members) {
+    let memberId;
+    try {
+      memberId = sanitizeIdentifier(rawMember, "owner");
+    } catch {
+      continue;
+    }
+    const tableName = `${memberId}_master_feed`;
+    try {
+      await ensureMasterFeedTable(connection, tableName);
+      for (const rec of records) {
+        const metadataJson = rec.metadata != null ? JSON.stringify(rec.metadata) : null;
+        const [result] = await connection.execute(
+          `INSERT IGNORE INTO \`${tableName}\`
+            (_id, _owner, _device, _createdDate, event_type, entity_type, action, title, brand,
+             item_id, job_id, user_id, source_table, source_path, source_system,
+             primary_image_url, secondary_image_url, metadata)
+           VALUES (?, ?, ?, NOW(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            rec._id || crypto.randomUUID(),
+            memberId,
+            rec.device_id ?? "voice-assistant",
+            rec.event_type || "unknown_event",
+            rec.entity_type || "unknown",
+            rec.action ?? null,
+            rec.title ?? null,
+            rec.brand ?? null,
+            rec.item_id ?? null,
+            rec.job_id ?? null,
+            rec.user_id ?? null,
+            rec.source_table ?? null,
+            rec.source_path ?? null,
+            rec.source_system ?? null,
+            rec.primary_image_url ?? null,
+            rec.secondary_image_url ?? null,
+            metadataJson,
+          ]
+        );
+        written += result?.affectedRows ?? 0;
+      }
+    } catch (err) {
+      console.warn(JSON.stringify({
+        evt: "master_feed_write_miss",
+        table: tableName,
+        error: String(err?.message || err).slice(0, 300),
+      }));
+    }
+  }
+  return { written };
+}
+
 export async function addShoppingItem(context, itemName, requestedStore = null, quantity = null, options = {}) {
   return withDbConnection(async (connection) => {
     const householdItemUuid = crypto.randomUUID();
@@ -5208,6 +5302,30 @@ export async function removeShoppingItem(context, itemName, options = {}) {
       throw createShoppingNotFoundError(itemName);
     }
 
+    // History-first: snapshot the full row into {member}_master_feed BEFORE any
+    // delete so a voice "remove X" never permanently loses the item. Best-effort.
+    const removedRawRow = (shoppingRows || []).find((row) =>
+      (target.shopping_id && String(row._id) === String(target.shopping_id)) ||
+      (target.household_item_uuid && row.household_item_uuid === target.household_item_uuid)
+    ) || null;
+    await writeMasterFeedSnapshots(connection, getShoppingHouseholdMemberIds(context), [{
+      event_type: "shopping_remove",
+      entity_type: "shopping_item",
+      action: "OUT",
+      title: (removedRawRow && removedRawRow.product_name) || target.item_name || null,
+      brand: (removedRawRow && removedRawRow.product_brand) || target.brand || null,
+      item_id: target.shopping_id != null ? String(target.shopping_id) : (target.household_item_uuid || null),
+      user_id: context?.userId || null,
+      source_table: SHARED_SHOPPING_TABLE,
+      source_path: "removeShoppingItem",
+      source_system: "quick_ack_voice",
+      metadata: {
+        removed: true,
+        household_item_uuid: target.household_item_uuid || null,
+        snapshot: removedRawRow || target,
+      },
+    }]);
+
     if (WRITE_SHARED_ONLY) {
       if (target.household_item_uuid) {
         await connection.execute(
@@ -5287,6 +5405,28 @@ export async function clearShoppingList(context, options = {}) {
   return withDbConnection(async (connection) => {
     const shoppingRows = await getShoppingRows(connection, context);
     const items = await hydrateShoppingRows(connection, context, shoppingRows);
+
+    // History-first: snapshot EVERY row about to be wiped into
+    // {member}_master_feed BEFORE the clear-all (which includes an unscoped
+    // `DELETE FROM {member}_new_list`). One 'shopping_clear' event per member
+    // carries the full list in metadata so a voice "clear my list" loses nothing.
+    if (Array.isArray(shoppingRows) && shoppingRows.length) {
+      await writeMasterFeedSnapshots(connection, getShoppingHouseholdMemberIds(context), [{
+        event_type: "shopping_clear",
+        entity_type: "shopping_item",
+        action: "OUT",
+        title: `Cleared ${shoppingRows.length} shopping item(s)`,
+        user_id: context?.userId || null,
+        source_table: SHARED_SHOPPING_TABLE,
+        source_path: "clearShoppingList",
+        source_system: "quick_ack_voice",
+        metadata: {
+          cleared: true,
+          count: shoppingRows.length,
+          items: shoppingRows,
+        },
+      }]);
+    }
 
     if (WRITE_SHARED_ONLY) {
       const ownerId = resolveShoppingOwnerId(context);

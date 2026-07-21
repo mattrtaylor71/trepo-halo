@@ -248,17 +248,21 @@ def _shared_kitchen_update(conn, item_id, updates_dict):
         raise
 
 
-def _shared_kitchen_delete(conn, owner, item_id):
+def _shared_kitchen_delete(conn, owner, item_id, archived_reason='deleted'):
     """Archive and delete from shared tables. Emits backend_error on failure so a
-    delete that silently doesn't land pages (KitchenBackendError alarm)."""
+    delete that silently doesn't land pages (KitchenBackendError alarm).
+
+    archived_reason is stamped onto the archived snapshot so an "I made this"
+    removal (reason='consumed_recipe') is distinguishable from a generic delete.
+    Full-row history is always preserved in shared_archive_kitchen regardless."""
     try:
         with conn.cursor() as cur:
-            # Copy to shared_archive_kitchen
+            # Copy to shared_archive_kitchen (full-row snapshot BEFORE the delete)
             cur.execute(
                 "INSERT IGNORE INTO `shared_archive_kitchen` "
-                "SELECT *, NOW() as archived_at, 'deleted' as archived_reason, 'shared_kitchen' as archived_from_table "
+                "SELECT *, NOW() as archived_at, %s as archived_reason, 'shared_kitchen' as archived_from_table "
                 "FROM `shared_kitchen` WHERE `_id` = %s",
-                [item_id]
+                [str(archived_reason or 'deleted'), item_id]
             )
             # Delete from shared_kitchen
             cur.execute("DELETE FROM `shared_kitchen` WHERE `_id` = %s", [item_id])
@@ -427,6 +431,15 @@ def _query_param_truthy(event, name):
     if value is None:
         return False
     return str(value).strip().lower() in {'1', 'true', 'yes', 'on'}
+
+
+def _query_param_value(event, name):
+    """Return a trimmed string query-param value, or None if absent/blank."""
+    value = (event.get('queryStringParameters') or {}).get(name)
+    if value is None:
+        return None
+    value = str(value).strip()
+    return value or None
 
 
 def _table_exists(cur, table_name):
@@ -2228,32 +2241,79 @@ def _update_kitchen_item(owner, item_id, body):
         return _error_response(500, f'Failed to update item: {str(e)}')
 
 
-def _delete_archived_kitchen_item(owner, item_id):
-    """Delete an already-archived kitchen item from archive history/feed."""
+def _delete_archived_kitchen_item(owner, item_id, event=None):
+    """Remove an already-archived kitchen item from the archive history/feed.
+
+    This endpoint (DELETE ...?archived=true) is the user's "remove from my
+    history feed" action — the iOS app relies on it (see
+    ARCHIVE_KITCHEN_FEED_INTEGRATION.md), so we keep the row out of the feed.
+    BUT the archive table is our last-resort history store, so we now SNAPSHOT
+    the full row into `{owner}_master_feed` (event 'kitchen_archive_purge',
+    full row in metadata) BEFORE the purge. Nothing is permanently lost."""
     try:
         conn = _mysql_conn()
+        member_ids = _get_household_member_ids(conn, owner)
+        # Household-scope the archive delete: without an owner_id filter this is a
+        # cross-tenant IDOR (any item_id would delete another household's archived
+        # row). Route through the resolver so the WHERE matches every sibling path.
+        arch_table, arch_where, arch_params = _resolve_kitchen_table(owner, '_archive_kitchen', conn)
+        verify_where = "`_id` = %s"
+        if arch_where:
+            verify_where = f"{arch_where} AND {verify_where}"
+
+        # Read the FULL row first so we can preserve it before purging.
         with conn.cursor() as cur:
-            # Household-scope the archive delete: without an owner_id filter this is a
-            # cross-tenant IDOR (any item_id would delete another household's archived
-            # row). Route through the resolver so the WHERE matches every sibling path.
-            arch_table, arch_where, arch_params = _resolve_kitchen_table(owner, '_archive_kitchen', conn)
-            verify_where = "`_id` = %s"
-            if arch_where:
-                verify_where = f"{arch_where} AND {verify_where}"
-            cur.execute(f"SELECT `_id` FROM `{arch_table}` WHERE {verify_where}", arch_params + [item_id])
-            if not cur.fetchone():
-                return _error_response(404, f'Archived item with id {item_id} not found')
+            cur.execute(f"SELECT * FROM `{arch_table}` WHERE {verify_where} LIMIT 1", arch_params + [item_id])
+            existing_row = cur.fetchone()
+        if not existing_row:
+            return _error_response(404, f'Archived item with id {item_id} not found')
+        existing_serialized = _serialize_rows([existing_row])[0]
+
+        # HISTORY-FIRST: snapshot the full row into the append-only master_feed
+        # BEFORE the purge, so the item survives even after it leaves the feed.
+        _record_master_feed_event(
+            conn,
+            owner,
+            member_ids,
+            {
+                'event_key': f'kitchen-archive-purge:{item_id}',
+                'device_id': existing_serialized.get('_device'),
+                'event_type': 'kitchen_archive_purge',
+                'entity_type': 'kitchen_item',
+                'action': 'OUT',
+                'title': existing_serialized.get('product_name'),
+                'brand': existing_serialized.get('brand'),
+                'item_id': item_id,
+                'job_id': existing_serialized.get('job_id'),
+                'user_id': existing_serialized.get('user_id'),
+                'source_table': arch_table,
+                'source_path': '/kitchen/{owner}/{item_id}?archived=true',
+                'source_system': 'kitchen_api',
+                'primary_image_url': existing_serialized.get('product_image_url') or existing_serialized.get('images'),
+                'secondary_image_url': existing_serialized.get('images') or existing_serialized.get('resized_image_url'),
+                'metadata': {
+                    'archived': True,
+                    'archived_reason': existing_serialized.get('archived_reason') or 'archive_feed_purge',
+                    'removed_from_table': arch_table,
+                    'snapshot': existing_serialized,
+                },
+            },
+        )
+
+        # Now remove it from the archive feed (the user's requested action).
+        with conn.cursor() as cur:
             cur.execute(f"DELETE FROM `{arch_table}` WHERE {verify_where}", arch_params + [item_id])
             deleted_count = int(cur.rowcount or 0)
             conn.commit()
 
-            return _success_response({
-                'message': 'Archived item deleted successfully',
-                'item_id': item_id,
-                'archived': True,
-                'deleted_from_archive': True,
-                'deleted_count': deleted_count,
-            })
+        return _success_response({
+            'message': 'Archived item deleted successfully',
+            'item_id': item_id,
+            'archived': True,
+            'deleted_from_archive': True,
+            'deleted_count': deleted_count,
+            'history_preserved': True,
+        })
 
     except Exception as e:
         print(f"[ERROR] Failed to delete archived kitchen item: {str(e)}")
@@ -2263,10 +2323,13 @@ def _delete_archived_kitchen_item(owner, item_id):
 
 
 def _delete_kitchen_item(owner, item_id, event=None):
-    """Delete a kitchen item (mark as used/consumed)"""
+    """Delete a kitchen item (mark as used/consumed). Optional ?reason=... is
+    stamped onto the archived snapshot + master_feed event so an "I made this"
+    removal can be recorded as reason='consumed_recipe' vs a generic 'deleted'."""
     try:
         if _query_param_truthy(event or {}, 'archived'):
-            return _delete_archived_kitchen_item(owner, item_id)
+            return _delete_archived_kitchen_item(owner, item_id, event)
+        reason = _query_param_value(event or {}, 'reason') or 'deleted'
 
         table_name = f"{owner}_prod_kitchen"
 
@@ -2288,8 +2351,9 @@ def _delete_kitchen_item(owner, item_id, event=None):
                 return _error_response(404, f'Item with id {item_id} not found')
             existing_serialized = _serialize_rows([existing_item])[0]
                 
-            # Delete from shared table (primary path)
-            _shared_kitchen_delete(conn, owner, item_id)
+            # Delete from shared table (primary path). Full-row snapshot is
+            # archived first with `reason` (default 'deleted').
+            _shared_kitchen_delete(conn, owner, item_id, archived_reason=reason)
 
             _mark_recipe_refresh_needed_for_owners(conn, member_ids)
 
@@ -2320,7 +2384,7 @@ def _delete_kitchen_item(owner, item_id, event=None):
                 'secondary_image_url': existing_serialized.get('images') or existing_serialized.get('resized_image_url'),
                 'metadata': {
                     'archived': True,
-                    'archived_reason': 'manual_delete',
+                    'archived_reason': reason,
                     'removed_from_table': table_name,
                 },
             },
