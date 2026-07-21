@@ -812,7 +812,17 @@ const HOWTO_INTENT_REGEX = /\b(?:how\s+(?:do|can|would|should|to)|how\s+d(?:o|oe
 
 function detectWriteIntent(transcript) {
   if (HOWTO_INTENT_REGEX.test(String(transcript || ""))) return "auto";
+  // Consumption + an explicit REMOVAL ("I just had strawberries, can you remove them",
+  // "finished the milk, take it out") is a KITCHEN discard, not a dish log. The
+  // had/ate → log_dish pattern below would otherwise HARD-force log_dish and the
+  // removal never happens (the strawberries bug). Do NOT force a tool here — hand the
+  // choice to the model + the system prompt's discard rule (LLM-first). Shopping-list
+  // and calendar removals have their own patterns above, so exclude those surfaces.
+  const wantsRemoval = /\b(remove|removing|get(?:ting)?\s+rid\s+of|take\s+(?:it|them|those|these|that)\s+out|took\s+(?:it|them|those|these|that)\s+out|toss\s+(?:it|them|those|these|that)|throw\s+(?:it|them|those|these|that)\s+(?:out|away)|discard)\b/i.test(String(transcript || ""))
+    && !/\b(list|shopping|cart|grocer|calendar|meal[-\s]?plan)\b/i.test(String(transcript || ""));
   for (const { pattern, tool } of WRITE_INTENT_PATTERNS) {
+    // Don't let "had/ate" hard-force a dish log when they're clearly asking to remove it.
+    if (tool === "log_dish_from_voice" && wantsRemoval) continue;
     if (pattern.test(transcript)) {
       return { type: "function", function: { name: tool } };
     }

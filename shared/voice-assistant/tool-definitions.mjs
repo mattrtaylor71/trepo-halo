@@ -331,7 +331,7 @@ const TOOL_DEFINITIONS = [
   {
     type: "function",
     name: "discard_item",
-    description: "Discard or fully remove an item from the kitchen and log the discard reason if provided.",
+    description: "Discard or fully remove an item from the kitchen inventory (and log the discard reason if provided). This is the tool to use whenever the user finished / ate / used up / ran out of a kitchen item, or asks to remove / get rid of / take out / toss an item they have — including with a pronoun ('I just had strawberries, remove them'). Use reason 'finished' when they consumed it. If the item isn't in their kitchen it returns not-found — report that honestly.",
     parameters: {
       type: "object",
       properties: {
