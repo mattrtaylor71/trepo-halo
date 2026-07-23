@@ -4,7 +4,7 @@
 // (Q&A, "logged out", and App-Guide instructional text).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { detectActionClaim, scrubGuardLeakFromNarration } from "../lib/device-assistant.mjs";
+import { detectActionClaim, scrubGuardLeakFromNarration, detectWriteIntent } from "../lib/device-assistant.mjs";
 
 const domainOf = (s) => (detectActionClaim(s) || {}).domain || null;
 
@@ -53,4 +53,43 @@ test("F-106: 'add frozen salmon and an onion to my kitchen' leak → clean confi
   assert.match(out, /Onion/);
   assert.doesNotMatch(out, /log_dish_ingredients|check_in_many_items|check_in_item/);
   assert.doesNotMatch(out, /honestly/i);
+});
+
+// ── P3 (audit #2): voice shorthand routing ───────────────────────────────
+// "Avocado to the list." was force-routed to a DISH log. Bare "<item> to the
+// list" must bias to the shopping-list add tool; a compound "throw away X and
+// add to the list" must NOT force a single tool (both actions must run), so it
+// returns "auto" and the prompt's two-action rule drives both calls. Genuinely
+// ambiguous bare "<item>" with no action verb stays "auto" (keeps the clarify).
+const forcedTool = (s) => {
+  const c = detectWriteIntent(s);
+  return c === "auto" ? "auto" : c?.function?.name || null;
+};
+
+test("P3: bare '<item> to the list' routes to shopping-list add, NOT a dish log", () => {
+  for (const s of [
+    "Avocado to the list.",
+    "avocado to the list",
+    "add avocado to the list",
+    "put avocado on the list",
+    "milk to my shopping list",
+  ]) {
+    assert.equal(forcedTool(s), "add_to_shopping_list", `should route to shopping add: ${s}`);
+  }
+});
+
+test("P3: compound 'throw away X and add to the list' does NOT force a single tool (auto → both run)", () => {
+  // Must NOT force discard_item alone (which dropped the list-add) and must NOT
+  // force a dish log. Auto lets the model issue BOTH per the system-prompt rule.
+  const c = forcedTool("Throw away all of the avocados and add to the list.");
+  assert.equal(c, "auto", "compound discard+list must hand off to the model, not force one tool");
+});
+
+test("P3: a plain discard (no list) still force-routes to discard_item", () => {
+  assert.equal(forcedTool("throw away the avocados"), "discard_item");
+});
+
+test("P3: genuinely ambiguous bare '<item>' with no action verb stays auto (clarify preserved)", () => {
+  assert.equal(forcedTool("one yogurt and one raspberry"), "auto");
+  assert.equal(forcedTool("avocado"), "auto");
 });

@@ -2318,10 +2318,96 @@ function createKitchenAmbiguityError(itemName, rows) {
   return error;
 }
 
-function createKitchenNotFoundError(itemName) {
+function createKitchenNotFoundError(itemName, candidates = null) {
   const error = new Error(`Couldn't find ${itemName} in the kitchen.`);
   error.statusCode = 404;
+  // Attach the closest in-kitchen items so Thyme can offer "did you mean X?"
+  // instead of a flat "couldn't find it" (surfaced to the model via error.details
+  // in the shared tool-executor catch block).
+  const list = Array.isArray(candidates) ? candidates.filter(Boolean) : [];
+  if (list.length > 0) {
+    error.details = {
+      type: "kitchen_item_not_found",
+      requested_item_name: itemName,
+      candidates: list.slice(0, 5)
+    };
+  }
   return error;
+}
+
+// Fuzzy score a kitchen row's product_name against the requested name. Reuses the
+// SAME scorer the shopping-list path uses (scoreShoppingItemMatch, F-040), which
+// already handles singular/plural + token-subset + edit-distance, so the kitchen
+// path gets identical behavior for "raspberries"->"Raspberry", "broccoli", etc.
+function scoreKitchenRowMatch(requestedName, row) {
+  return scoreShoppingItemMatch(requestedName, row?.product_name || "");
+}
+
+function rankKitchenRowMatches(rows, itemName) {
+  return (rows || [])
+    .map((row) => ({ row, score: scoreKitchenRowMatch(itemName, row) }))
+    .filter((match) => match.score > 0)
+    .sort((left, right) => right.score - left.score);
+}
+
+// Fuzzy fallback for kitchen name resolution: when exact + LIKE both miss, rank the
+// whole active kitchen and return rows at/above the threshold. Conservative on
+// purpose: a wrong discard is worse than a not-found, so a lone weak match is
+// dropped and only clearly-strong hits (>= threshold) are returned. Reuses the
+// shopping ambiguity delta so near-ties still surface as multiple candidates.
+const KITCHEN_FUZZY_THRESHOLD = 0.82;
+const KITCHEN_FUZZY_AMBIGUITY_DELTA = 0.05;
+
+async function findKitchenRowsByFuzzyName(connection, ownerId, itemName, limit = 5) {
+  const allRows = await getKitchenRowsFull(connection, ownerId);
+  const ranked = rankKitchenRowMatches(allRows, itemName);
+  if (ranked.length === 0) {
+    return [];
+  }
+
+  const best = ranked[0];
+  if (best.score < KITCHEN_FUZZY_THRESHOLD) {
+    return [];
+  }
+
+  // Return the best match plus any near-ties (within the ambiguity delta) so a
+  // genuinely ambiguous fuzzy hit ("beans" -> two bean rows) resolves the same way
+  // an exact multi-match does (Halo acts on all / edits pick newest; app clarifies).
+  const accepted = ranked.filter(
+    (match) => match.score >= KITCHEN_FUZZY_THRESHOLD
+      && (best.score - match.score) < KITCHEN_FUZZY_AMBIGUITY_DELTA
+  );
+  return accepted.slice(0, limit).map((match) => match.row);
+}
+
+// Top-N closest kitchen items for a missed reference, as compact candidate
+// summaries for a "did you mean?"; includes near-misses BELOW the resolve
+// threshold (that's the whole point of offering them). Never throws.
+async function findKitchenCandidateSummaries(connection, ownerId, itemName, limit = 5) {
+  if (!itemName) {
+    return [];
+  }
+  try {
+    const allRows = await getKitchenRowsFull(connection, ownerId);
+    return rankKitchenRowMatches(allRows, itemName)
+      .slice(0, limit)
+      .map((match) => summarizeKitchenRowForDisambiguation(match.row));
+  } catch (error) {
+    console.warn("[WARN] kitchen candidate lookup failed:", error?.message || error);
+    return [];
+  }
+}
+
+// Build a not-found error already carrying the closest in-kitchen items as
+// "did you mean?" candidates. Used at every kitchen action throw site so a miss
+// steers a retry instead of a dead end. Best-effort, never throws itself.
+async function buildKitchenNotFoundError(connection, context, itemName) {
+  const candidates = await findKitchenCandidateSummaries(
+    connection,
+    resolveTableOwnerId(context),
+    itemName
+  );
+  return createKitchenNotFoundError(itemName, candidates);
 }
 
 async function findKitchenRowsByName(connection, ownerId, itemName, limit = 5) {
@@ -2338,7 +2424,13 @@ async function findKitchenRowsByName(connection, ownerId, itemName, limit = 5) {
       `SELECT * FROM \`${SHARED_KITCHEN_TABLE}\` WHERE \`owner_id\` = ? AND action = 'IN' AND LOWER(product_name) LIKE ? ORDER BY COALESCE(_updatedDate, _createdDate) DESC LIMIT ${limit}`,
       [ownerId, buildLikePattern(itemName)]
     );
-    return likeRows || [];
+    if (likeRows?.length > 0) {
+      return likeRows;
+    }
+    // Exact + LIKE both missed: fall back to the F-040 fuzzy scorer so plurals /
+    // variants ("raspberries" -> "Raspberry", "broccoli", "second ground beef")
+    // still resolve. Conservative threshold: a wrong discard is worse than a miss.
+    return await findKitchenRowsByFuzzyName(connection, ownerId, itemName, limit);
   }
 
   const tableName = kitchenTableName(ownerId);
@@ -2372,7 +2464,12 @@ async function findKitchenRowsByName(connection, ownerId, itemName, limit = 5) {
     [buildLikePattern(itemName)]
   );
 
-  return likeRows || [];
+  if (likeRows?.length > 0) {
+    return likeRows;
+  }
+  // Exact + LIKE both missed: fall back to the F-040 fuzzy scorer (singular/plural
+  // + token-subset + edit-distance) so plurals/variants resolve. Conservative.
+  return await findKitchenRowsByFuzzyName(connection, ownerId, itemName, limit);
 }
 
 async function findKitchenRowById(connection, ownerId, rowId) {
@@ -3611,15 +3708,22 @@ export async function searchKitchenItem(context, itemReference, options = {}) {
   return withDbConnection(async (connection) => {
     const row = await resolveKitchenRowByReference(connection, context, itemReference);
     const item = row ? mapKitchenRow(row) : null;
+    const requestedName = normalizeKitchenReference(itemReference).item_name;
+    // On a miss, offer the closest in-kitchen items so Thyme can say "did you mean X?"
+    const candidates = item
+      ? []
+      : await findKitchenCandidateSummaries(connection, resolveTableOwnerId(context), requestedName);
     console.log("[DEBUG] kitchen item searched:", JSON.stringify({
       ownerId: context?.ownerId || null,
       userId: context?.userId || null,
-      item_name: normalizeKitchenReference(itemReference).item_name,
-      found: Boolean(item)
+      item_name: requestedName,
+      found: Boolean(item),
+      candidate_count: candidates.length
     }));
     return {
       found: Boolean(item),
-      item
+      item,
+      ...(candidates.length > 0 ? { candidates } : {})
     };
   }, options);
 }
@@ -3724,7 +3828,7 @@ export async function markKitchenItemOpened(context, itemReference, options = {}
     const resolvedReference = normalizeKitchenReference(itemReference);
     const row = await resolveKitchenRowByReference(connection, context, resolvedReference);
     if (!row) {
-      throw createKitchenNotFoundError(resolvedReference.item_name || "that kitchen item");
+      throw await buildKitchenNotFoundError(connection, context, resolvedReference.item_name || "that kitchen item");
     }
 
     await updateKitchenRowAcrossHousehold(connection, context, row._id, { is_opened: 1 });
@@ -3767,7 +3871,7 @@ export async function updateKitchenItemQuantity(context, itemReference, quantity
       rows = single ? [single] : [];
     }
     if (rows.length === 0) {
-      throw createKitchenNotFoundError(resolvedReference.item_name || "that kitchen item");
+      throw await buildKitchenNotFoundError(connection, context, resolvedReference.item_name || "that kitchen item");
     }
 
     const updates = {
@@ -3809,7 +3913,7 @@ export async function updateKitchenItemExpiration(context, itemReference, expira
     const resolvedReference = normalizeKitchenReference(itemReference);
     const row = await resolveKitchenRowByReference(connection, context, resolvedReference);
     if (!row) {
-      throw createKitchenNotFoundError(resolvedReference.item_name || "that kitchen item");
+      throw await buildKitchenNotFoundError(connection, context, resolvedReference.item_name || "that kitchen item");
     }
 
     const expirationDate = parseKitchenExpirationDate(expirationInput);
@@ -3849,7 +3953,7 @@ export async function updateKitchenItemLocation(context, itemReference, location
     const resolvedReference = normalizeKitchenReference(itemReference);
     const row = await resolveKitchenRowByReference(connection, context, resolvedReference);
     if (!row) {
-      throw createKitchenNotFoundError(resolvedReference.item_name || "that kitchen item");
+      throw await buildKitchenNotFoundError(connection, context, resolvedReference.item_name || "that kitchen item");
     }
 
     await updateKitchenRowAcrossHousehold(connection, context, row._id, {
@@ -3882,7 +3986,7 @@ export async function updateKitchenItemDetails(context, itemReference, updates, 
     const resolvedReference = normalizeKitchenReference(itemReference);
     const row = await resolveKitchenRowByReference(connection, context, resolvedReference);
     if (!row) {
-      throw createKitchenNotFoundError(resolvedReference.item_name || "that kitchen item");
+      throw await buildKitchenNotFoundError(connection, context, resolvedReference.item_name || "that kitchen item");
     }
 
     const kitchenFields = {};
@@ -3960,7 +4064,7 @@ export async function discardKitchenItem(context, itemReference, reason, options
     const resolvedReference = normalizeKitchenReference(itemReference);
     const rows = await resolveKitchenRowsByReference(connection, context, resolvedReference);
     if (rows.length === 0) {
-      throw createKitchenNotFoundError(resolvedReference.item_name || "that kitchen item");
+      throw await buildKitchenNotFoundError(connection, context, resolvedReference.item_name || "that kitchen item");
     }
 
     // On Halo an ambiguous removal resolves to every matching row — discard all of them.

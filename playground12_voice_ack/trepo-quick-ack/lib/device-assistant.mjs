@@ -889,8 +889,26 @@ const WRITE_INTENT_PATTERNS = [
 // A genuine command (no interrogative frame) still forces its tool below.
 const HOWTO_INTENT_REGEX = /\b(?:how\s+(?:do|can|would|should|to)|how\s+d(?:o|oes)\b[^.?!]*\bi\b|where\s+(?:do|can|is|are|'?s)|where'?s|what\s+(?:is|are|can|'?s)|what'?s|why\s+(?:is|are|does|do|can|no)|can\s+i|could\s+i|do\s+you|are\s+you|is\s+there|is\s+it\s+possible)\b/i;
 
-function detectWriteIntent(transcript) {
+// Bare "<item> to/on the list" (no add verb): Halo voice shorthand. Without this
+// a verbless "Avocado to the list." fell through to auto and got logged as a DISH.
+// "the list" defaults to the SHOPPING list. Requires "the/my/your/shopping/grocery"
+// before "list" so plain nouns don't false-trigger.
+const BARE_TO_LIST_REGEX = /\bto\s+(?:the|my|your|our|a)\s+(?:shopping\s+|grocery\s+)?list\b|\bon\s+(?:the|my|your|our|a)\s+(?:shopping\s+|grocery\s+)?list\b|\bto\s+(?:my|the)\s+(?:shopping|grocery)\b/i;
+
+// Compound "throw away X and add [it] to the list" = a discard AND a shopping-add.
+// Forcing a single tool would drop one half, so we detect the compound and hand the
+// turn to the model (auto); the system prompt's two-action rule makes it call both.
+const COMPOUND_DISCARD_AND_LIST_REGEX = /\b(throw\s+(?:away|out)|toss(?:\s+out)?|discard|get\s+rid\s+of|remove)\b[\s\S]{0,60}\band\b[\s\S]{0,20}\b(?:add|put|throw|place)?\b[\s\S]{0,20}\b(?:to|on)\s+(?:the|my|your|our|a)\s+(?:shopping\s+|grocery\s+)?list\b/i;
+
+export function detectWriteIntent(transcript) {
   if (HOWTO_INTENT_REGEX.test(String(transcript || ""))) return "auto";
+  // Compound "throw away X and add to the list" is TWO actions; don't force a single
+  // tool (that dropped the list-add). Let the model issue both per the prompt rule.
+  if (COMPOUND_DISCARD_AND_LIST_REGEX.test(String(transcript || ""))) return "auto";
+  // Bare "<item> to the list" (no verb) → shopping-list add, never a dish log.
+  if (BARE_TO_LIST_REGEX.test(String(transcript || ""))) {
+    return { type: "function", function: { name: "add_to_shopping_list" } };
+  }
   // Consumption + an explicit REMOVAL ("I just had strawberries, can you remove them",
   // "finished the milk, take it out") is a KITCHEN discard, not a dish log. The
   // had/ate → log_dish pattern below would otherwise HARD-force log_dish and the
