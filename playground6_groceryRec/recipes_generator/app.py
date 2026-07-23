@@ -31,7 +31,13 @@ OPENAI_MAX_RETRIES = int(os.getenv('OPENAI_MAX_RETRIES', '2'))
 # items (_get_kitchen_ingredients returns _createdDate DESC) — plenty for 20 varied
 # recipes and deterministically fast. Matching still uses the full kitchen. Also give
 # the generation call more timeout headroom (Lambda timeout is 420s).
-RECIPE_GEN_MAX_INGREDIENTS = int(os.getenv('RECIPE_GEN_MAX_INGREDIENTS', '80'))
+RECIPE_GEN_MAX_INGREDIENTS = int(os.getenv('RECIPE_GEN_MAX_INGREDIENTS', '120'))
+# Beyond the detailed head, list the remaining kitchen items compactly (name
+# only, no description) so a 200+ item kitchen can still reach OLDER items in
+# recipes instead of them being invisible past the cap. Name-only keeps the
+# token cost small (~2-4 tokens/item), so a ~180-item tail is only ~a few
+# hundred tokens. Total context (head + tail) is bounded by RECIPE_GEN_MAX_TOTAL.
+RECIPE_GEN_MAX_TOTAL = int(os.getenv('RECIPE_GEN_MAX_TOTAL', '320'))
 RECIPE_GEN_TIMEOUT_SECONDS = int(os.getenv('RECIPE_GEN_TIMEOUT_SECONDS', '90'))
 # gpt-5.5's long-generation tail intermittently exceeds the 90s per-attempt client
 # timeout on EVERY retry (~3% of runs -> APITimeoutError at timeout*(retries+1)).
@@ -78,6 +84,14 @@ DB_CONNECT_TIMEOUT = int(os.getenv('DB_CONNECT_TIMEOUT_SECONDS', '5'))
 DB_READ_TIMEOUT = int(os.getenv('DB_READ_TIMEOUT_SECONDS', '10'))
 DB_WRITE_TIMEOUT = int(os.getenv('DB_WRITE_TIMEOUT_SECONDS', '10'))
 USE_SHARED_TABLES = os.getenv('USE_SHARED_TABLES', 'false').lower() == 'true'
+
+# Self-healing sweep for owners stuck with an unfulfilled recipe refresh (crashed/timed-out
+# generator run left kitchen_version > last_recipe_refresh_completed_version with
+# recipe_refresh_needed=1 and nothing to re-fire it). Triggered by an EventBridge rule with
+# input {"sweep": true}. RECIPE_SWEEP_ENABLED=false fully disables the branch.
+_RECIPE_SWEEP_ENABLED = os.getenv('RECIPE_SWEEP_ENABLED', 'true').strip().lower() == 'true'
+_RECIPE_SWEEP_BATCH = int(os.getenv('RECIPE_SWEEP_BATCH', '25'))  # owners re-driven per sweep run
+_RECIPE_SWEEP_CLAIM_TTL_MIN = int(os.getenv('RECIPE_SWEEP_CLAIM_TTL_MIN', '8'))  # don't re-fire an owner claimed < TTL ago (in-flight / backoff)
 
 
 def _report_backend_error(op, owner_id=None, code=None, error=None, job_id=None, service='recipes'):
@@ -925,7 +939,371 @@ def _recipe_meal_category(recipe, fallback_index=0):
     )
 
 
-def _generate_recipes_with_gpt(ingredients_list, kitchen_only_count=10, need_grocery_count=10, excluded_titles=None, owner=None):
+# --- Dietary preferences (household-scoped hard constraints on generation) ----------------
+_DIETARY_PREFS_TABLE = 'user_dietary_preferences'
+_DIETARY_PREF_KEYS = ('allergies', 'diets', 'religious', 'health', 'custom')
+
+
+def _resolve_household_owner_id(conn, owner):
+    """Map an acting identity (a member's user_id) to the shared HOUSEHOLD owner_id that keys
+    the ONE dietary-prefs record, so every household member's generation reads the same prefs
+    no matter who set them. Falls back to `owner` itself for a solo user (not in new_users) or
+    an id already at the owner_id level — so the single-user case is identity-preserving."""
+    safe = _sanitize_user_id(owner)
+    if not safe:
+        return safe
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT owner_id FROM new_users WHERE user_id = %s LIMIT 1", [safe])
+            row = cur.fetchone() or {}
+        hh = row.get('owner_id') or row.get('OWNER_ID')
+        return _sanitize_user_id(hh) if hh else safe
+    except Exception:
+        return safe
+
+
+def _get_user_preferences(conn, owner):
+    """Return {allergies, diets, religious, health, custom} (string lists) for the household
+    owner; all-empty if there is no row / the table is absent. Best-effort — never raises, so a
+    prefs read can't break recipe generation (no prefs = current behavior)."""
+    prefs = {k: [] for k in _DIETARY_PREF_KEYS}
+    if not owner:
+        return prefs
+    try:
+        household_owner = _resolve_household_owner_id(conn, owner)
+        with conn.cursor() as cur:
+            cur.execute(
+                f"SELECT allergies, diets, religious, health, custom "
+                f"FROM `{_DIETARY_PREFS_TABLE}` WHERE owner_id = %s LIMIT 1", [household_owner])
+            row = cur.fetchone()
+        if not row:
+            return prefs
+        for k in _DIETARY_PREF_KEYS:
+            v = row.get(k)
+            if isinstance(v, str):
+                try:
+                    v = json.loads(v)
+                except Exception:
+                    v = []
+            prefs[k] = [str(x).strip() for x in (v or []) if str(x).strip()]
+    except Exception as e:
+        print(json.dumps({'evt': 'dietary_prefs_read_failed', 'owner': str(owner),
+                          'error': str(e)[:200]}))
+    return prefs
+
+
+# ---------------------------------------------------------------------------
+# Deterministic post-generation dietary SCRUBBER
+# ---------------------------------------------------------------------------
+# Battle-tested ingredient detectors ported from the taxonomy stress-test
+# (confidence_sweep). Each detector takes a lowercased text blob (title +
+# ingredient strings) and returns the offending token, or None. Plant/vegan
+# qualifiers are stripped first so e.g. "peanut butter", "almond milk",
+# "vegan cheese", "rice noodle", "corn tortilla", "tamari" do NOT false-fire.
+# This is a DROP-only v1: recipes that violate a HARD exclusion are removed
+# (not regenerated). Hard-exclusion violation rates are low, so drops are rare.
+
+DIET_POST_FILTER_ENABLED = os.getenv('DIET_POST_FILTER_ENABLED', 'true').strip().lower() != 'false'
+
+_PLANT_BUTTER = r"(peanut|almond|cashew|sunflower|seed|nut|soy|plant|vegan|coconut)\s*butter"
+_PLANT_MILK = r"(coconut|almond|oat|soy|cashew|rice|hemp|plant|non-?dairy|nut)\s*milk"
+
+
+def _scrub_dairy(b):
+    b = re.sub(_PLANT_BUTTER, "", b)
+    b = re.sub(_PLANT_MILK, "", b)
+    for kill in ("vegan cheese", "dairy-free cheese", "vegan yogurt", "vegan butter",
+                 "dairy-free", "plant-based cheese"):
+        b = b.replace(kill, "")
+    for w in ["cheese", "cheddar", "mozzarella", "parmesan", "feta", "yogurt", "ghee",
+              "whey", "heavy cream", "sour cream", "cream cheese", " milk", " butter", "buttermilk"]:
+        if w in b:
+            return w.strip()
+    return None
+
+
+def _scrub_egg(b):
+    return "egg" if (re.search(r"\begg", b) and "eggplant" not in b) else None
+
+
+def _scrub_meat(b):
+    for w in ["chicken", "beef", "bacon", " pork", "sausage", "turkey", "lamb", "steak",
+              "ham ", "salami", "pepperoni", "chorizo", "meatball", "prosciutto", "veal"]:
+        if w in b:
+            return w.strip()
+    return None
+
+
+def _scrub_seafood(b):
+    for w in ["shrimp", "salmon", "fish", "tuna", "cod", "crab", "lobster", "clam", "oyster",
+              "anchovy", "tilapia", "scallop", "mussel", "sardine", "prawn", "halibut"]:
+        if w in b:
+            return w
+    return None
+
+
+def _scrub_fish(b):
+    for w in ["salmon", "tuna", "cod", "tilapia", "halibut", "anchovy", "sardine", "trout",
+              "bass", "mackerel", "fish"]:
+        if w in b:
+            return w
+    return None
+
+
+def _scrub_shellfish(b):
+    for w in ["shrimp", "crab", "lobster", "clam", "oyster", "mussel", "scallop", "prawn", "crawfish"]:
+        if w in b:
+            return w
+    return None
+
+
+def _scrub_peanut(b):
+    return "peanut" if "peanut" in b else None
+
+
+def _scrub_treenut(b):
+    for w in ["almond", "walnut", "cashew", "pecan", "pistachio", "hazelnut", "macadamia",
+              "brazil nut", "pine nut"]:
+        if w in b:
+            return w
+    return None
+
+
+def _scrub_sesame(b):
+    for w in ["sesame", "tahini"]:
+        if w in b:
+            return w
+    return None
+
+
+def _scrub_soy(b):
+    b = b.replace("soy-free", "")
+    for w in ["soy sauce", "soybean", " soy ", "tofu", "edamame", "tempeh", "miso"]:
+        if w in b:
+            return w.strip()
+    return None
+
+
+def _scrub_wheat(b):
+    hits = []
+    for w in ["wheat", "bread", "flour", "spaghetti", "couscous", "breadcrumb", "cracker", " bun "]:
+        if w in b and "gluten-free" not in b:
+            hits.append(w.strip())
+    if "pasta" in b and "gluten-free" not in b and "rice pasta" not in b:
+        hits.append("pasta")
+    if "noodle" in b and "rice noodle" not in b and "gluten-free" not in b:
+        hits.append("noodle")
+    if "tortilla" in b and "corn tortilla" not in b:
+        hits.append("tortilla")
+    return hits[0] if hits else None
+
+
+def _scrub_gluten(b):
+    w = _scrub_wheat(b)
+    if w:
+        return w
+    for x in ["barley", "rye", "malt", "seitan", "farro", "bulgur"]:
+        if x in b:
+            return x
+    if "soy sauce" in b and "tamari" not in b and "gluten-free soy" not in b:
+        return "soy sauce(wheat)"
+    return None
+
+
+def _scrub_honey(b):
+    return "honey" if "honey" in b else None
+
+
+def _scrub_pork(b):
+    for w in ["pork", "bacon", "ham ", "prosciutto", "pancetta", "lard", "gelatin"]:
+        if w in b:
+            return w.strip()
+    return None
+
+
+def _scrub_alcohol(b):
+    for w in ["wine", "beer", " rum", "vodka", "bourbon", "sake", "mirin", "sherry",
+              "brandy", "liqueur", "whiskey"]:
+        if w in b:
+            return w.strip()
+    return None
+
+
+# Allergen display-name -> detector. Keys are matched case-insensitively and by
+# substring so "Milk/Dairy", "Tree nuts", etc. resolve.
+_ALLERGEN_DETECTORS = [
+    ('dairy', _scrub_dairy), ('milk', _scrub_dairy),
+    ('egg', _scrub_egg),
+    ('peanut', _scrub_peanut),
+    ('tree nut', _scrub_treenut), ('treenut', _scrub_treenut),
+    ('shellfish', _scrub_shellfish),
+    ('fish', _scrub_fish),
+    ('wheat', _scrub_wheat),
+    ('soy', _scrub_soy),
+    ('sesame', _scrub_sesame),
+    ('gluten', _scrub_gluten),
+]
+
+# Exclusion diets -> list of detectors that must all pass. Quantitative diets
+# (keto/low-carb/paleo/etc) have NO deterministic check and are skipped here
+# (they stay prompt-only best-effort).
+_DIET_DETECTORS = {
+    'vegetarian': [_scrub_meat, _scrub_seafood],
+    'vegan': [_scrub_meat, _scrub_seafood, _scrub_dairy, _scrub_egg, _scrub_honey],
+    'pescatarian': [_scrub_meat],
+    'dairy-free': [_scrub_dairy],
+    'dairy free': [_scrub_dairy],
+    'gluten-free': [_scrub_gluten],
+    'gluten free': [_scrub_gluten],
+}
+
+
+def _recipe_blob(recipe):
+    """Lowercased title + ingredients + missing_ingredients (+ UWIH subtitle and
+    detail.matched/missing) for a recipe dict. Robust to missing keys."""
+    parts = [str(recipe.get('title', '') or ''), str(recipe.get('name', '') or ''),
+             str(recipe.get('subtitle', '') or '')]
+    for key in ('ingredients', 'missing_ingredients', 'matched_ingredients'):
+        v = recipe.get(key)
+        if isinstance(v, list):
+            parts += [str(x) for x in v]
+    detail = recipe.get('detail')
+    if isinstance(detail, dict):
+        for key in ('matched_ingredients', 'missing_ingredients'):
+            v = detail.get(key)
+            if isinstance(v, list):
+                parts += [str(x) for x in v]
+    return ' '.join(parts).lower()
+
+
+def _recipe_violates(recipe, prefs):
+    """Return a reason string if the recipe violates any HARD dietary exclusion in
+    prefs, else None. prefs = {allergies, diets, religious, health, custom}."""
+    b = _recipe_blob(recipe)
+    prefs = prefs or {}
+
+    # Allergies (safety-critical hard exclusions)
+    for name in prefs.get('allergies', []) or []:
+        low = str(name).strip().lower()
+        for token, fn in _ALLERGEN_DETECTORS:
+            if token in low:
+                hit = fn(b)
+                if hit:
+                    return f'allergy:{name}={hit}'
+
+    # Exclusion diets
+    for name in prefs.get('diets', []) or []:
+        low = str(name).strip().lower()
+        for diet_key, fns in _DIET_DETECTORS.items():
+            if diet_key == low or diet_key in low.replace(' ', '-'):
+                for fn in fns:
+                    hit = fn(b)
+                    if hit:
+                        return f'diet:{name}={hit}'
+                break
+
+    # Religious rules
+    for name in prefs.get('religious', []) or []:
+        low = str(name).strip().lower()
+        if 'kosher' in low:
+            p = _scrub_pork(b)
+            if p:
+                return f'kosher:pork={p}'
+            s = _scrub_shellfish(b)
+            if s:
+                return f'kosher:shellfish={s}'
+            m = _scrub_meat(b)
+            d = _scrub_dairy(b)
+            if m and d:
+                return f'kosher:meat+dairy={m}+{d}'
+        if 'halal' in low:
+            p = _scrub_pork(b)
+            if p:
+                return f'halal:pork={p}'
+            a = _scrub_alcohol(b)
+            if a:
+                return f'halal:alcohol={a}'
+
+    # Custom "no X" / "avoid X" / "no more X" -> substring match on X
+    for entry in prefs.get('custom', []) or []:
+        term = str(entry).strip().lower()
+        for prefix in ('no more ', 'avoid ', 'no '):
+            if term.startswith(prefix):
+                term = term[len(prefix):].strip()
+                break
+        if term and term in b:
+            return f'custom:{entry}={term}'
+
+    # Health entries are soft ("tailor toward"), not hard exclusions -> skip.
+    return None
+
+
+def _scrub_recipes(recipes, prefs, owner=None):
+    """Return recipes with any HARD-exclusion violator dropped. No-op when prefs
+    are empty or the feature flag is off (byte-unchanged behavior)."""
+    if not recipes:
+        return recipes
+    if not DIET_POST_FILTER_ENABLED:
+        return recipes
+    prefs = prefs or {}
+    if not any(prefs.get(k) for k in _DIETARY_PREF_KEYS):
+        return recipes
+    kept = []
+    for recipe in recipes:
+        if not isinstance(recipe, dict):
+            kept.append(recipe)
+            continue
+        reason = _recipe_violates(recipe, prefs)
+        if reason:
+            print(json.dumps({'evt': 'diet_scrub_dropped', 'owner': str(owner),
+                              'title': str(recipe.get('title') or recipe.get('name') or ''),
+                              'reason': reason}))
+            continue
+        kept.append(recipe)
+    return kept
+
+
+def _format_preferences_block(prefs):
+    """Render the DIETARY CONSTRAINTS prompt block. Empty categories are omitted; returns ''
+    when there are NO preferences at all (so the prompt is byte-for-byte unchanged)."""
+    prefs = prefs or {}
+    if not any(prefs.get(k) for k in _DIETARY_PREF_KEYS):
+        return ''
+    lines = ['DIETARY CONSTRAINTS (every recipe MUST comply):']
+    if prefs.get('allergies'):
+        lines.append('- ALLERGIES — NEVER include these or any derivative/trace '
+                     '(safety-critical): ' + ', '.join(prefs['allergies']))
+    if prefs.get('diets'):
+        lines.append('- DIET — recipes MUST be: ' + ', '.join(prefs['diets']))
+    if prefs.get('religious'):
+        lines.append('- RELIGIOUS: ' + ', '.join(prefs['religious']))
+        _religious_low = ' '.join(str(r).lower() for r in prefs['religious'])
+        if 'kosher' in _religious_low:
+            lines.append('  For KOSHER: no pork or shellfish, and never combine meat and '
+                         'dairy in the same recipe.')
+        if 'halal' in _religious_low:
+            lines.append('  For HALAL: no pork or pork derivatives (bacon, ham, lard, '
+                         'gelatin) and no alcohol including wine, beer, or cooking wine.')
+    if prefs.get('health'):
+        lines.append('- HEALTH — tailor toward (informational, not medical advice): '
+                     + ', '.join(prefs['health']))
+    if prefs.get('custom'):
+        lines.append("- ALSO AVOID/HONOR (user's own words): " + ', '.join(prefs['custom']))
+    lines.append(
+        'INGREDIENT-LEVEL CHECK: verify EVERY ingredient in each recipe against the '
+        'constraints above, including staples pulled from the kitchen. Do not assume a '
+        'staple is compliant just because it is common. Butter, milk, cream, cheese, '
+        'yogurt, and eggs are NOT vegan or dairy-free (use plant milk, vegan butter, or '
+        'omit them); honey is not vegan; regular soy sauce, teriyaki, most bread, pasta, '
+        'flour, and breadcrumbs contain gluten (use tamari or certified gluten-free '
+        'versions). Substitute any non-compliant ingredient with a compliant alternative '
+        'or leave it out.')
+    lines.append('Any recipe that violates an ALLERGY or DIET is unacceptable — omit it '
+                 'entirely and generate a compliant one instead.')
+    return '\n'.join(lines)
+
+
+def _generate_recipes_with_gpt(ingredients_list, kitchen_only_count=10, need_grocery_count=10, excluded_titles=None, owner=None, user_preferences_block=""):
     from openai import OpenAI
     client = OpenAI(
         api_key=os.getenv('OPENAI_API_KEY'),
@@ -936,13 +1314,31 @@ def _generate_recipes_with_gpt(ingredients_list, kitchen_only_count=10, need_gro
     need_grocery_count = max(0, int(need_grocery_count or 0))
     if kitchen_only_count == 0 and need_grocery_count == 0:
         return {'kitchen_only': [], 'need_grocery': []}
-    # Cap the generation context to the most-recent items so a huge kitchen can't
-    # blow the OpenAI timeout. ingredients_list is already _createdDate DESC.
+    # Cap the DETAILED generation context to the most-recent items so a huge
+    # kitchen can't blow the OpenAI timeout. ingredients_list is already
+    # _createdDate DESC. Items beyond the detailed head are still surfaced as a
+    # compact name-only tail so OLDER items remain reachable in recipes (a 200+
+    # item kitchen previously lost everything past the cap). Matching still uses
+    # the full kitchen regardless.
     full_ingredient_count = len(ingredients_list or [])
+    all_items = list(ingredients_list or [])
+    detailed_items = all_items[:RECIPE_GEN_MAX_INGREDIENTS]
+    tail_items = all_items[RECIPE_GEN_MAX_INGREDIENTS:RECIPE_GEN_MAX_TOTAL]
     if full_ingredient_count > RECIPE_GEN_MAX_INGREDIENTS:
-        ingredients_list = list(ingredients_list)[:RECIPE_GEN_MAX_INGREDIENTS]
-        print(f"[recipes_generator] Capped generation context {full_ingredient_count} -> {RECIPE_GEN_MAX_INGREDIENTS} most-recent items")
-    ingredients_str = _format_kitchen_for_prompt(ingredients_list) if ingredients_list else 'No specific ingredients (suggest pantry staples)'
+        print(f"[recipes_generator] Kitchen context: {len(detailed_items)} detailed + {len(tail_items)} compact (of {full_ingredient_count} total)")
+    ingredients_list = detailed_items
+    ingredients_str = _format_kitchen_for_prompt(detailed_items) if detailed_items else 'No specific ingredients (suggest pantry staples)'
+    # Append a compact name-only list of the remaining (older) items so they are
+    # still usable, without paying the descriptive-format token cost for all of
+    # them.
+    tail_names = [str((it or {}).get('name') or '').strip() for it in tail_items]
+    tail_names = [name for name in tail_names if name]
+    if tail_names:
+        ingredients_str = (
+            f"{ingredients_str}\n\n"
+            f"Additional kitchen items (also available; listed by name only): "
+            + ', '.join(tail_names)
+        )
     excluded_titles = [str(item).strip() for item in (excluded_titles or []) if str(item).strip()]
     exclusion_text = ''
     if excluded_titles:
@@ -974,8 +1370,13 @@ Measurement rules (IMPORTANT):
 - EVERY entry in "ingredients" MUST include a realistic quantity/measurement (e.g. "2 cups", "1 lb", "3 cloves", "1/2 tsp", "1 (14 oz) can") placed BEFORE the item name. Never output a bare ingredient with no amount.
 - Keep the kitchen product's EXACT name immediately after the amount so it still matches the user's inventory (kitchen item "Chicken Breasts" -> "1 lb Chicken Breasts", not "1 lb chicken").
 - Scale amounts sensibly for about 2 servings unless the dish implies otherwise, and make the steps reference those amounts naturally (e.g. "Add the 2 cups White Rice ...").
-- "missing_ingredients" stays a plain list of item names to buy (no amount required there).
-Return the JSON object only."""
+- "missing_ingredients" stays a plain list of item names to buy (no amount required there)."""
+    # Inject household dietary constraints (allergies as HARD exclusions, diets/health as
+    # requirements) right before the closing instruction. Empty when the owner has no prefs,
+    # so the prompt is unchanged for them.
+    if user_preferences_block:
+        system += "\n\n" + user_preferences_block
+    system += "\nReturn the JSON object only."
     user = (
         f"Kitchen grocery products (use exact product name in recipe ingredients; descriptions in parentheses clarify what each item is): {ingredients_str}\n\n"
         f"Generate exactly {kitchen_only_count} kitchen_only recipes using ONLY these items (plus pantry), and exactly {need_grocery_count} need_grocery recipes that use some of these items but need extra ingredients to buy (include missing_ingredients for each)."
@@ -1108,7 +1509,109 @@ def _load_current_recipes(conn, owner):
     )
 
 
+def _sweep_stuck_recipe_owners(context):
+    """Scheduled self-heal: re-drive owners stranded with an unfulfilled recipe refresh.
+
+    A crashed/timed-out generator run leaves kitchen_version >
+    last_recipe_refresh_completed_version with recipe_refresh_needed=1 and nothing to re-fire
+    it (the normal path only re-invokes on the success tail or a fresh kitchen change), so the
+    app shows "Updating recipes…" forever. This sweep CLAIMS each stuck owner (stamping
+    last_recipe_refresh_started_at so the next tick won't double-fire and a crashed child
+    naturally retries after the TTL) and self-invokes the generator with {"owner": id}. It
+    NEVER takes the per-owner lock and NEVER generates recipes inline — the real work runs in
+    those child invocations, which take the lock, generate, and clear the gap on success via
+    _mark_recipe_refresh_complete. Never raises out of handler.
+    """
+    if not _RECIPE_SWEEP_ENABLED:
+        return {'swept': 0, 'disabled': True}
+    try:
+        conn = _mysql_conn()
+        try:
+            _ensure_owner_kitchen_state_table(conn)
+
+            # Total stuck population (same condition, minus the claim-TTL/in-flight guard and
+            # the batch LIMIT) for observability of the backlog.
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"""
+                    SELECT COUNT(*) AS n FROM `{_OWNER_KITCHEN_STATE_TABLE}`
+                    WHERE kitchen_version > COALESCE(last_recipe_refresh_completed_version, 0)
+                      AND recipe_refresh_needed = 1
+                    """
+                )
+                stuck_total = int((cur.fetchone() or {}).get('n') or 0)
+
+            # Stuck owners not claimed within the TTL (in-flight guard + crash-retry backoff),
+            # oldest-completed first so the most-stale owners drain first.
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"""
+                    SELECT owner, kitchen_version FROM `{_OWNER_KITCHEN_STATE_TABLE}`
+                    WHERE kitchen_version > COALESCE(last_recipe_refresh_completed_version, 0)
+                      AND recipe_refresh_needed = 1
+                      AND (last_recipe_refresh_started_at IS NULL
+                           OR last_recipe_refresh_started_at < (UTC_TIMESTAMP() - INTERVAL %s MINUTE))
+                    ORDER BY last_recipe_refresh_completed_at ASC
+                    LIMIT %s
+                    """,
+                    [_RECIPE_SWEEP_CLAIM_TTL_MIN, _RECIPE_SWEEP_BATCH],
+                )
+                rows = cur.fetchall() or []
+
+            import boto3
+            lambda_client = boto3.client('lambda')
+            arn = context.invoked_function_arn
+            swept = 0
+            for row in rows:
+                owner = row.get('owner')
+                if not owner:
+                    continue
+                try:
+                    # CLAIM first, then invoke — so a failure between claim and invoke still
+                    # backs the owner off for the TTL (retried on a later tick), and a
+                    # concurrent sweep tick won't double-fire this owner.
+                    with conn.cursor() as cur:
+                        cur.execute(
+                            f"""
+                            UPDATE `{_OWNER_KITCHEN_STATE_TABLE}`
+                            SET last_recipe_refresh_started_at = UTC_TIMESTAMP(),
+                                last_recipe_refresh_requested_version = kitchen_version
+                            WHERE owner = %s
+                            """,
+                            [_sanitize_user_id(owner)],
+                        )
+                    conn.commit()
+                    lambda_client.invoke(
+                        FunctionName=arn,
+                        InvocationType='Event',
+                        Payload=json.dumps({'owner': owner}).encode('utf-8'),
+                    )
+                    swept += 1
+                except Exception as owner_err:
+                    _report_backend_error('recipe_sweep', owner_id=owner, code='claim_invoke_failed', error=owner_err)
+
+            # Structured marker for backlog + throughput observability.
+            print(json.dumps({
+                'evt': 'recipe_refresh_sweep',
+                'service': 'recipes',
+                'swept': swept,
+                'stuck_total': stuck_total,
+                'batch': _RECIPE_SWEEP_BATCH,
+            }))
+            return {'swept': swept, 'stuck_total': stuck_total}
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+    except Exception as e:
+        _report_backend_error('recipe_sweep', code='sweep_failed', error=e)
+        return {'swept': 0, 'error': 'sweep_failed'}
+
+
 def handler(event, context):
+    if (event or {}).get('sweep'):
+        return _sweep_stuck_recipe_owners(context)
     owner = (event.get('owner') or '').strip()
     if not owner:
         print('[recipes_generator] Missing owner')
@@ -1200,13 +1703,23 @@ def handler(event, context):
         # Always do a full regeneration — generate fresh 10+10 recipes every time
         # the kitchen changes so the user sees new suggestions.
         gpt_started_at = time.monotonic()
+        _structured_prefs = _get_user_preferences(conn, owner)
+        _prefs_block = _format_preferences_block(_structured_prefs)
         gpt_out = _generate_recipes_with_gpt(
             ingredients,
             kitchen_only_count=10,
             need_grocery_count=10,
             excluded_titles=[],
             owner=owner,
+            user_preferences_block=_prefs_block,
         )
+        # Deterministic post-generation scrubber: drop any recipe that violates a
+        # HARD dietary exclusion the LLM prompt missed. No-op when prefs are empty
+        # or DIET_POST_FILTER_ENABLED=false.
+        gpt_out = {
+            'kitchen_only': _scrub_recipes(gpt_out.get('kitchen_only') or [], _structured_prefs, owner=owner),
+            'need_grocery': _scrub_recipes(gpt_out.get('need_grocery') or [], _structured_prefs, owner=owner),
+        }
         print(
             f"[recipes_generator] GPT recipe generation owner={owner} "
             f"elapsed_ms={int((time.monotonic() - gpt_started_at) * 1000)} "

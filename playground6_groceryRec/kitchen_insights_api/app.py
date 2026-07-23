@@ -698,7 +698,369 @@ def _build_value_timeline(conn, owner, all_priced, current_total):
     return timeline
 
 
-def _generate_recipe_match(items):
+# --- Dietary preferences (household-scoped hard constraints on generation) ----------------
+_DIETARY_PREFS_TABLE = 'user_dietary_preferences'
+_DIETARY_PREF_KEYS = ('allergies', 'diets', 'religious', 'health', 'custom')
+
+
+def _resolve_household_owner_id(conn, owner):
+    """Map an acting identity (a member's user_id) to the shared HOUSEHOLD owner_id that keys
+    the ONE dietary-prefs record, so every member's UWIH match reads the same prefs. Falls back
+    to `owner` itself for a solo user / an id already at the owner_id level (identity-preserving)."""
+    safe = _sanitize_owner(owner)
+    if not safe:
+        return safe
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT owner_id FROM new_users WHERE user_id = %s LIMIT 1", [safe])
+            row = cur.fetchone() or {}
+        hh = row.get('owner_id') or row.get('OWNER_ID')
+        return _sanitize_owner(hh) if hh else safe
+    except Exception:
+        return safe
+
+
+def _get_user_preferences(conn, owner):
+    """Return {allergies, diets, religious, health, custom} (string lists) for the household
+    owner; all-empty if there is no row / the table is absent. Best-effort — never raises."""
+    prefs = {k: [] for k in _DIETARY_PREF_KEYS}
+    if not owner:
+        return prefs
+    try:
+        household_owner = _resolve_household_owner_id(conn, owner)
+        with conn.cursor() as cur:
+            cur.execute(
+                f"SELECT allergies, diets, religious, health, custom "
+                f"FROM `{_DIETARY_PREFS_TABLE}` WHERE owner_id = %s LIMIT 1", [household_owner])
+            row = cur.fetchone()
+        if not row:
+            return prefs
+        for k in _DIETARY_PREF_KEYS:
+            v = row.get(k)
+            if isinstance(v, str):
+                try:
+                    v = json.loads(v)
+                except Exception:
+                    v = []
+            prefs[k] = [str(x).strip() for x in (v or []) if str(x).strip()]
+    except Exception as e:
+        print(json.dumps({'evt': 'dietary_prefs_read_failed', 'owner': str(owner),
+                          'error': str(e)[:200]}))
+    return prefs
+
+
+# ---------------------------------------------------------------------------
+# Deterministic post-generation dietary SCRUBBER
+# ---------------------------------------------------------------------------
+# Battle-tested ingredient detectors ported from the taxonomy stress-test
+# (confidence_sweep). Each detector takes a lowercased text blob (title +
+# ingredient strings) and returns the offending token, or None. Plant/vegan
+# qualifiers are stripped first so e.g. "peanut butter", "almond milk",
+# "vegan cheese", "rice noodle", "corn tortilla", "tamari" do NOT false-fire.
+# This is a DROP-only v1: recipes that violate a HARD exclusion are removed
+# (not regenerated). Hard-exclusion violation rates are low, so drops are rare.
+
+DIET_POST_FILTER_ENABLED = os.getenv('DIET_POST_FILTER_ENABLED', 'true').strip().lower() != 'false'
+
+_PLANT_BUTTER = r"(peanut|almond|cashew|sunflower|seed|nut|soy|plant|vegan|coconut)\s*butter"
+_PLANT_MILK = r"(coconut|almond|oat|soy|cashew|rice|hemp|plant|non-?dairy|nut)\s*milk"
+
+
+def _scrub_dairy(b):
+    b = re.sub(_PLANT_BUTTER, "", b)
+    b = re.sub(_PLANT_MILK, "", b)
+    for kill in ("vegan cheese", "dairy-free cheese", "vegan yogurt", "vegan butter",
+                 "dairy-free", "plant-based cheese"):
+        b = b.replace(kill, "")
+    for w in ["cheese", "cheddar", "mozzarella", "parmesan", "feta", "yogurt", "ghee",
+              "whey", "heavy cream", "sour cream", "cream cheese", " milk", " butter", "buttermilk"]:
+        if w in b:
+            return w.strip()
+    return None
+
+
+def _scrub_egg(b):
+    return "egg" if (re.search(r"\begg", b) and "eggplant" not in b) else None
+
+
+def _scrub_meat(b):
+    for w in ["chicken", "beef", "bacon", " pork", "sausage", "turkey", "lamb", "steak",
+              "ham ", "salami", "pepperoni", "chorizo", "meatball", "prosciutto", "veal"]:
+        if w in b:
+            return w.strip()
+    return None
+
+
+def _scrub_seafood(b):
+    for w in ["shrimp", "salmon", "fish", "tuna", "cod", "crab", "lobster", "clam", "oyster",
+              "anchovy", "tilapia", "scallop", "mussel", "sardine", "prawn", "halibut"]:
+        if w in b:
+            return w
+    return None
+
+
+def _scrub_fish(b):
+    for w in ["salmon", "tuna", "cod", "tilapia", "halibut", "anchovy", "sardine", "trout",
+              "bass", "mackerel", "fish"]:
+        if w in b:
+            return w
+    return None
+
+
+def _scrub_shellfish(b):
+    for w in ["shrimp", "crab", "lobster", "clam", "oyster", "mussel", "scallop", "prawn", "crawfish"]:
+        if w in b:
+            return w
+    return None
+
+
+def _scrub_peanut(b):
+    return "peanut" if "peanut" in b else None
+
+
+def _scrub_treenut(b):
+    for w in ["almond", "walnut", "cashew", "pecan", "pistachio", "hazelnut", "macadamia",
+              "brazil nut", "pine nut"]:
+        if w in b:
+            return w
+    return None
+
+
+def _scrub_sesame(b):
+    for w in ["sesame", "tahini"]:
+        if w in b:
+            return w
+    return None
+
+
+def _scrub_soy(b):
+    b = b.replace("soy-free", "")
+    for w in ["soy sauce", "soybean", " soy ", "tofu", "edamame", "tempeh", "miso"]:
+        if w in b:
+            return w.strip()
+    return None
+
+
+def _scrub_wheat(b):
+    hits = []
+    for w in ["wheat", "bread", "flour", "spaghetti", "couscous", "breadcrumb", "cracker", " bun "]:
+        if w in b and "gluten-free" not in b:
+            hits.append(w.strip())
+    if "pasta" in b and "gluten-free" not in b and "rice pasta" not in b:
+        hits.append("pasta")
+    if "noodle" in b and "rice noodle" not in b and "gluten-free" not in b:
+        hits.append("noodle")
+    if "tortilla" in b and "corn tortilla" not in b:
+        hits.append("tortilla")
+    return hits[0] if hits else None
+
+
+def _scrub_gluten(b):
+    w = _scrub_wheat(b)
+    if w:
+        return w
+    for x in ["barley", "rye", "malt", "seitan", "farro", "bulgur"]:
+        if x in b:
+            return x
+    if "soy sauce" in b and "tamari" not in b and "gluten-free soy" not in b:
+        return "soy sauce(wheat)"
+    return None
+
+
+def _scrub_honey(b):
+    return "honey" if "honey" in b else None
+
+
+def _scrub_pork(b):
+    for w in ["pork", "bacon", "ham ", "prosciutto", "pancetta", "lard", "gelatin"]:
+        if w in b:
+            return w.strip()
+    return None
+
+
+def _scrub_alcohol(b):
+    for w in ["wine", "beer", " rum", "vodka", "bourbon", "sake", "mirin", "sherry",
+              "brandy", "liqueur", "whiskey"]:
+        if w in b:
+            return w.strip()
+    return None
+
+
+# Allergen display-name -> detector. Keys are matched case-insensitively and by
+# substring so "Milk/Dairy", "Tree nuts", etc. resolve.
+_ALLERGEN_DETECTORS = [
+    ('dairy', _scrub_dairy), ('milk', _scrub_dairy),
+    ('egg', _scrub_egg),
+    ('peanut', _scrub_peanut),
+    ('tree nut', _scrub_treenut), ('treenut', _scrub_treenut),
+    ('shellfish', _scrub_shellfish),
+    ('fish', _scrub_fish),
+    ('wheat', _scrub_wheat),
+    ('soy', _scrub_soy),
+    ('sesame', _scrub_sesame),
+    ('gluten', _scrub_gluten),
+]
+
+# Exclusion diets -> list of detectors that must all pass. Quantitative diets
+# (keto/low-carb/paleo/etc) have NO deterministic check and are skipped here
+# (they stay prompt-only best-effort).
+_DIET_DETECTORS = {
+    'vegetarian': [_scrub_meat, _scrub_seafood],
+    'vegan': [_scrub_meat, _scrub_seafood, _scrub_dairy, _scrub_egg, _scrub_honey],
+    'pescatarian': [_scrub_meat],
+    'dairy-free': [_scrub_dairy],
+    'dairy free': [_scrub_dairy],
+    'gluten-free': [_scrub_gluten],
+    'gluten free': [_scrub_gluten],
+}
+
+
+def _recipe_blob(recipe):
+    """Lowercased title + ingredients + missing_ingredients (+ UWIH subtitle and
+    detail.matched/missing) for a recipe dict. Robust to missing keys."""
+    parts = [str(recipe.get('title', '') or ''), str(recipe.get('name', '') or ''),
+             str(recipe.get('subtitle', '') or '')]
+    for key in ('ingredients', 'missing_ingredients', 'matched_ingredients'):
+        v = recipe.get(key)
+        if isinstance(v, list):
+            parts += [str(x) for x in v]
+    detail = recipe.get('detail')
+    if isinstance(detail, dict):
+        for key in ('matched_ingredients', 'missing_ingredients'):
+            v = detail.get(key)
+            if isinstance(v, list):
+                parts += [str(x) for x in v]
+    return ' '.join(parts).lower()
+
+
+def _recipe_violates(recipe, prefs):
+    """Return a reason string if the recipe violates any HARD dietary exclusion in
+    prefs, else None. prefs = {allergies, diets, religious, health, custom}."""
+    b = _recipe_blob(recipe)
+    prefs = prefs or {}
+
+    # Allergies (safety-critical hard exclusions)
+    for name in prefs.get('allergies', []) or []:
+        low = str(name).strip().lower()
+        for token, fn in _ALLERGEN_DETECTORS:
+            if token in low:
+                hit = fn(b)
+                if hit:
+                    return f'allergy:{name}={hit}'
+
+    # Exclusion diets
+    for name in prefs.get('diets', []) or []:
+        low = str(name).strip().lower()
+        for diet_key, fns in _DIET_DETECTORS.items():
+            if diet_key == low or diet_key in low.replace(' ', '-'):
+                for fn in fns:
+                    hit = fn(b)
+                    if hit:
+                        return f'diet:{name}={hit}'
+                break
+
+    # Religious rules
+    for name in prefs.get('religious', []) or []:
+        low = str(name).strip().lower()
+        if 'kosher' in low:
+            p = _scrub_pork(b)
+            if p:
+                return f'kosher:pork={p}'
+            s = _scrub_shellfish(b)
+            if s:
+                return f'kosher:shellfish={s}'
+            m = _scrub_meat(b)
+            d = _scrub_dairy(b)
+            if m and d:
+                return f'kosher:meat+dairy={m}+{d}'
+        if 'halal' in low:
+            p = _scrub_pork(b)
+            if p:
+                return f'halal:pork={p}'
+            a = _scrub_alcohol(b)
+            if a:
+                return f'halal:alcohol={a}'
+
+    # Custom "no X" / "avoid X" / "no more X" -> substring match on X
+    for entry in prefs.get('custom', []) or []:
+        term = str(entry).strip().lower()
+        for prefix in ('no more ', 'avoid ', 'no '):
+            if term.startswith(prefix):
+                term = term[len(prefix):].strip()
+                break
+        if term and term in b:
+            return f'custom:{entry}={term}'
+
+    # Health entries are soft ("tailor toward"), not hard exclusions -> skip.
+    return None
+
+
+def _scrub_recipes(recipes, prefs, owner=None):
+    """Return recipes with any HARD-exclusion violator dropped. No-op when prefs
+    are empty or the feature flag is off (byte-unchanged behavior)."""
+    if not recipes:
+        return recipes
+    if not DIET_POST_FILTER_ENABLED:
+        return recipes
+    prefs = prefs or {}
+    if not any(prefs.get(k) for k in _DIETARY_PREF_KEYS):
+        return recipes
+    kept = []
+    for recipe in recipes:
+        if not isinstance(recipe, dict):
+            kept.append(recipe)
+            continue
+        reason = _recipe_violates(recipe, prefs)
+        if reason:
+            print(json.dumps({'evt': 'diet_scrub_dropped', 'owner': str(owner),
+                              'title': str(recipe.get('title') or recipe.get('name') or ''),
+                              'reason': reason}))
+            continue
+        kept.append(recipe)
+    return kept
+
+
+def _format_preferences_block(prefs):
+    """Render the DIETARY CONSTRAINTS prompt block. Empty categories omitted; '' when there are
+    NO preferences (so the prompt is unchanged for users without prefs)."""
+    prefs = prefs or {}
+    if not any(prefs.get(k) for k in _DIETARY_PREF_KEYS):
+        return ''
+    lines = ['DIETARY CONSTRAINTS (every recipe MUST comply):']
+    if prefs.get('allergies'):
+        lines.append('- ALLERGIES — NEVER include these or any derivative/trace '
+                     '(safety-critical): ' + ', '.join(prefs['allergies']))
+    if prefs.get('diets'):
+        lines.append('- DIET — recipes MUST be: ' + ', '.join(prefs['diets']))
+    if prefs.get('religious'):
+        lines.append('- RELIGIOUS: ' + ', '.join(prefs['religious']))
+        _religious_low = ' '.join(str(r).lower() for r in prefs['religious'])
+        if 'kosher' in _religious_low:
+            lines.append('  For KOSHER: no pork or shellfish, and never combine meat and '
+                         'dairy in the same recipe.')
+        if 'halal' in _religious_low:
+            lines.append('  For HALAL: no pork or pork derivatives (bacon, ham, lard, '
+                         'gelatin) and no alcohol including wine, beer, or cooking wine.')
+    if prefs.get('health'):
+        lines.append('- HEALTH — tailor toward (informational, not medical advice): '
+                     + ', '.join(prefs['health']))
+    if prefs.get('custom'):
+        lines.append("- ALSO AVOID/HONOR (user's own words): " + ', '.join(prefs['custom']))
+    lines.append(
+        'INGREDIENT-LEVEL CHECK: verify EVERY ingredient in each recipe against the '
+        'constraints above, including staples pulled from the kitchen. Do not assume a '
+        'staple is compliant just because it is common. Butter, milk, cream, cheese, '
+        'yogurt, and eggs are NOT vegan or dairy-free (use plant milk, vegan butter, or '
+        'omit them); honey is not vegan; regular soy sauce, teriyaki, most bread, pasta, '
+        'flour, and breadcrumbs contain gluten (use tamari or certified gluten-free '
+        'versions). Substitute any non-compliant ingredient with a compliant alternative '
+        'or leave it out.')
+    lines.append('Any recipe that violates an ALLERGY or DIET is unacceptable — omit it '
+                 'entirely and generate a compliant one instead.')
+    return '\n'.join(lines)
+
+
+def _generate_recipe_match(items, user_preferences_block=""):
     """Use GPT to find recipes the user can make with current kitchen items."""
     if not items or len(items) < 3:
         return []
@@ -738,6 +1100,10 @@ Rules:
 - Prefer recipes with 0-1 missing ingredients
 - Keep recipe names short (2-4 words)
 - Return ONLY valid JSON"""
+    # Inject household dietary constraints (allergies as HARD exclusions, diets/health as
+    # requirements). Empty when the owner has no prefs, so the prompt is unchanged for them.
+    if user_preferences_block:
+        prompt += "\n\n" + user_preferences_block
 
     try:
         client = OpenAI(api_key=api_key)
@@ -1225,13 +1591,22 @@ def _get_insights(owner):
         kitchen_value_result = []
         recipe_match_result = []
 
+        # Fetch dietary prefs on the main thread (before the worker threads) so the "make now"
+        # recipe match honors household allergies/diets. Empty block = unchanged behavior.
+        _structured_prefs = _get_user_preferences(conn, owner)
+        _prefs_block = _format_preferences_block(_structured_prefs)
+
         def _run_kitchen_value():
             nonlocal kitchen_value_result
             kitchen_value_result = _generate_kitchen_value(items, conn, owner)
 
         def _run_recipe_match():
             nonlocal recipe_match_result
-            recipe_match_result = _generate_recipe_match(items)
+            _matches = _generate_recipe_match(items, user_preferences_block=_prefs_block)
+            # Deterministic post-generation scrubber: drop any "make now" recipe that
+            # violates a HARD dietary exclusion the LLM prompt missed. No-op when prefs
+            # are empty or DIET_POST_FILTER_ENABLED=false.
+            recipe_match_result = _scrub_recipes(_matches, _structured_prefs, owner=owner)
 
         t_value = threading.Thread(target=_run_kitchen_value)
         t_recipe = threading.Thread(target=_run_recipe_match)
