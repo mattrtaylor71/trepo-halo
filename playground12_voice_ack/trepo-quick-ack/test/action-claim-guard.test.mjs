@@ -4,7 +4,7 @@
 // (Q&A, "logged out", and App-Guide instructional text).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { detectActionClaim } from "../lib/device-assistant.mjs";
+import { detectActionClaim, scrubGuardLeakFromNarration } from "../lib/device-assistant.mjs";
 
 const domainOf = (s) => (detectActionClaim(s) || {}).domain || null;
 
@@ -37,4 +37,20 @@ test("dishes: non-triggers — Q&A, 'logged out', instructional (App Guide)", ()
 test("cross-domain: removal + shopping claims route to their own domains", () => {
   assert.equal(domainOf("I removed the cheese from your kitchen."), "kitchen_remove");
   assert.equal(domainOf("Added milk to your shopping list."), "shopping_add");
+});
+
+// F-106: on a kitchen-add turn where the dish-log guard suppressed a phantom
+// dish log but the kitchen add SUCCEEDED, the final narration must name the
+// items and must NOT leak internal tool names or guard-justification phrasing.
+test("F-106: 'add frozen salmon and an onion to my kitchen' leak → clean confirm, no tool tokens, no 'honestly'", () => {
+  const leaked = "I can't honestly call log_dish_ingredients for that message, because the user asked to add items to the kitchen, not to log something they ate. The kitchen check-in succeeded.";
+  const toolTrace = [
+    { toolName: "check_in_many_items", ok: true, args: { items: [{ item_name: "Frozen Salmon" }, { item_name: "Onion" }] } },
+    { toolName: "log_dish_ingredients", ok: false, suppressed: true, args: {} },
+  ];
+  const out = scrubGuardLeakFromNarration(leaked, toolTrace);
+  assert.match(out, /Frozen Salmon/);
+  assert.match(out, /Onion/);
+  assert.doesNotMatch(out, /log_dish_ingredients|check_in_many_items|check_in_item/);
+  assert.doesNotMatch(out, /honestly/i);
 });

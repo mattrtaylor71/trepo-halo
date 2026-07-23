@@ -12,6 +12,7 @@ import {
   getMealCalendar,
   addRecipeToMealCalendar,
   addManyToMealCalendar,
+  addGeneratedRecipesToMealCalendar,
   moveMealCalendarEntry,
   removeMealCalendarEntry,
   checkInKitchenItem,
@@ -142,6 +143,7 @@ const LOCAL_MEAL_CALENDAR_TOOLS = new Set([
   "get_meal_calendar",
   "add_recipe_to_meal_calendar",
   "add_many_to_meal_calendar",
+  "add_generated_recipes_to_meal_calendar",
   "move_meal_calendar_entry",
   "remove_meal_calendar_entry"
 ]);
@@ -157,7 +159,8 @@ const LOCAL_ERROR_STATUS = {
   invalid_date: 400,
   invalid_meal_slot: 400,
   no_recipes: 400,
-  no_entries: 400
+  no_entries: 400,
+  too_many_entries: 400
 };
 
 function slotLabel(slot) {
@@ -206,6 +209,15 @@ function summarizeLocalResult(toolName, toolResult, args) {
       if (failed.length) s += ` ${failed.length} couldn't be added.`;
       return s.trim() || null;
     }
+    case "add_generated_recipes_to_meal_calendar": {
+      const okOnes = (toolResult.results || []).filter((r) => r.ok);
+      const failed = (toolResult.results || []).filter((r) => !r.ok);
+      let s = okOnes.length
+        ? `Added ${okOnes.length} generated recipe${okOnes.length === 1 ? "" : "s"} to your meal plan.`
+        : "";
+      if (failed.length) s += ` ${failed.length} couldn't be added.`;
+      return s.trim() || null;
+    }
     case "move_meal_calendar_entry":
       return `Moved ${toolResult.title || "the entry"} to ${toolResult.new_date}${toolResult.new_meal_slot ? ` ${toolResult.new_meal_slot}` : ""}.`;
     case "remove_meal_calendar_entry":
@@ -243,6 +255,8 @@ async function runLocalToolReal(toolName, args, userContext, options) {
       return addRecipeToMealCalendar(userContext, args, options);
     case "add_many_to_meal_calendar":
       return addManyToMealCalendar(userContext, args, options);
+    case "add_generated_recipes_to_meal_calendar":
+      return addGeneratedRecipesToMealCalendar(userContext, args, options);
     case "move_meal_calendar_entry":
       return moveMealCalendarEntry(userContext, args, options);
     case "remove_meal_calendar_entry":
@@ -268,6 +282,8 @@ function mockLocalToolResult(toolName, args) {
       return { ok: true, entry: { id: "mock-entry" }, plan_date: args.plan_date, meal_slot: args.meal_slot, title: String(args.recipe_name || "").trim() || null };
     case "add_many_to_meal_calendar":
       return { ok: true, added: (args.entries || []).length, total: (args.entries || []).length, results: (args.entries || []).map((e) => ({ recipe_name: e?.recipe_name || null, plan_date: e?.plan_date || null, meal_slot: e?.meal_slot || null, ok: true, entry_id: "mock-entry" })) };
+    case "add_generated_recipes_to_meal_calendar":
+      return { ok: true, added: (args.entries || []).length, total: (args.entries || []).length, results: (args.entries || []).map((e) => ({ id: "mock-entry", plan_date: e?.plan_date || null, meal_slot: e?.meal_slot || null, title: e?.title || null, ok: true, error: null })) };
     case "move_meal_calendar_entry":
       return { ok: true, entry: { id: "mock-entry" }, new_date: args.new_date, new_meal_slot: args.new_meal_slot || null, title: args.title || null };
     case "remove_meal_calendar_entry":

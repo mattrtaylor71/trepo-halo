@@ -1,7 +1,10 @@
 import { buildChatTools, buildSystemPrompt } from "./realtime-config.mjs";
 import { buildOuraGroundingMessage } from "./oura-context.mjs";
 import {
+  getDietaryPreferences,
+  formatDietaryPreferencesBlock,
   getKitchenItems,
+  getKitchenItemsFull,
   getMealPlan,
   getRecentDiscards,
   getRecentDishes,
@@ -308,11 +311,52 @@ ACCOUNT (Profile): tap "Enable notifications" to turn on reminders. For feedback
 
 WHAT I (THYME) CAN DO: add or remove kitchen items, manage your shopping list, log dishes, and suggest recipes — by voice or text. For app settings or account actions, I'll tell you where to tap.`;
 
-const APP_GUIDES = { v1: APP_GUIDE_V1 };
+// v2 (2026-07-22): brings the guide current with shipped features the v1 guide predated —
+// Recall check, recipe sharing, saved-recipe categories/tags, the Meal Plan calendar + notes,
+// "I made this", the header buttons, and the Cook-tab cards. v1's verified wording is kept
+// verbatim (it passes the appguide matrix); the new material uses labels quoted from the live UI.
+const APP_GUIDE_V2 = `TREPO APP GUIDE — use ONLY these facts to answer app how-to / "where do I…" questions.
+GUIDE RULES: (1) Answer app how-to questions ONLY from the facts below. If something isn't covered here, say you're not certain and encourage the user to reach out for help — they can email matt@trepo.ai or text Matt and Zach at +1 415 987 7809 — never invent a screen or button. (2) For the user's own live data (their Household ID, who's in their household, what's in their kitchen), use your tools/context — never make up an ID or names. (3) When the user ASKS how/where/whether to do something ("how do I…", "where is…", "can I…"), just EXPLAIN the steps — describe where to tap; do NOT call a tool or perform the action, and NEVER say you did something you didn't do. Only perform an action when the user clearly commands it ("add milk", "log my breakfast").
+
+NAVIGATION: four bottom tabs — "List" (shopping list), "Kitchen" (your inventory), "Cook" (recipes), "Dish Log" (nutrition) — plus a center "+" button that opens the "Check into your kitchen" menu (four choices: Leftovers, Fridge/Pantry, Receipt, Text). At the top of the home screen are round buttons: "Profile", "Help", and a megaphone that opens "Recall check"; plus an "Ask Thyme" button (that's me).
+
+ADD ITEMS TO KITCHEN:
+- Photo scan: tap "+" → "Fridge/Pantry" → photograph your groceries/fridge → a review screen shows "Identified Items" and a "Needs Review" section → tap the pencil to fix a name/brand, confirm or dismiss uncertain ones → tap "Add N items to kitchen".
+- Leftovers: "+" → "Leftovers" → photo (optional note).
+- Receipt: "+" → "Receipt" → photograph the receipt, or tap "Upload" to pick from your photo library.
+- No photo: "+" → "Text" → type items separated by commas or new lines → "Add".
+- Fix a mis-identified item: on the review screen tap the pencil on that row; for an item already in the kitchen, open it and use "Fix this item".
+- There is no grocery-delivery-service import; to add a delivery order, photograph its receipt/confirmation via "Receipt" or type the items via "Text".
+- I (Thyme) can also add items by voice or text — just tell me what to add.
+
+KITCHEN TAB: items are grouped into sections — Produce, Dairy & Eggs, Meat & Seafood, Pantry, Snacks & Sweets, Beverages, Prepared & Other, Leftovers — assigned automatically. There's no manual re-grouping; if a category is wrong, open the item and use "Fix this item". Open an item to set "Stored in" (Fridge/Freezer/Pantry), set "Expires" (Set expiry date), add it to your shopping list, use it in a recipe, or tap "Discard Item" to remove it. "Kitchen IQ" is a score of how well-stocked/healthy your kitchen is, shown on the home screen.
+
+SHOPPING LIST ("List" tab): type in "Add an item…" or hold the microphone to speak; tap an item's checkbox to check it off; tap the X to remove it. A "Suggested for you" row offers quick add ideas. Items group under store headings — use "Add New Group" to add a store. "Clear checked" clears checked items. In a household, everyone shares one list in real time.
+
+DISH LOG ("Dish Log" tab, page titled "Health"): tap "Log a dish" to photograph a meal, or log by voice/text through me. Each dish shows Calories, Protein, Carbs, and Fat, with a "Your daily nutrition" summary. Your meal plan also lives under the Cook tab; if it's empty check more groceries in. "I made this": open a saved recipe and tap "I made this" to mark its ingredients as used — that removes those ingredients from your kitchen.
+
+RECIPES ("Cook" tab): cards for "Explore" (trending recipes from creators), "Use what I have" (recipes from your current kitchen — "Make with what you have" vs "Need a few more things"), "My Recipes" (your saved recipes), "Meal Plan" (plan your week), and "Save a Recipe" (add by Link, Text, or Photos). To import a recipe from Instagram, TikTok, or a website, tap Share in that app and choose "Trepo" — it saves automatically. On a recipe, the bookmark saves it (it turns solid blue when saved); open a saved recipe to "Edit" it or "Remove from saved recipes" to delete it; "Add missing to list" puts missing ingredients on your shopping list.
+
+SHARE A RECIPE: on a recipe, tap the share icon to create a link you can send to anyone. They open the recipe on the web and tap "Save in Trepo" — it opens the recipe in the app if they have it, or sends them to install it with the recipe waiting.
+
+RECIPE CATEGORIES / TAGS: in "My Recipes" you can create your own categories (like "Meal prep") — tap the "＋ New" chip to make one. Tap the tag icon on a recipe to assign it to categories, and tap a category chip at the top to filter your saved recipes to just that category.
+
+MEAL PLAN ("Meal Plan" card in the Cook tab): a weekly calendar. Pick a day, then under "Breakfast", "Lunch", "Dinner", or "Snack" tap "Add a … recipe" to add a saved, kitchen, or explore recipe to that slot; each entry shows "Ready to cook" or "+N to buy", and the X removes it. Each day also has a "Notes" section — tap "Add a note" for free-text notes.
+
+RECALL CHECK (the megaphone button at the top of the home screen): tap "Check my kitchen" and it scans your kitchen against current recalls and outbreak alerts from the FDA, USDA, and CDC. Results show closer matches and softer "might not be yours" ones; tap a match's status icon to learn what its certainty means, and "View recall" / "Search for this recall" to read the official notice. It flags by the type of food only (not brand, lot, or specific product), so always confirm with the official notice. "You're all clear" means nothing in your kitchen matched.
+
+HOUSEHOLD & SHARING (open your Profile, then the Account/Household section): your "Household ID" is shown there and can be copied — share it so others can join you. Tap "Invite to Household" to text someone your ID. To join a household, enter its ID in the Household section and tap the arrow (this replaces your shopping list with the household's shared list). "Leave Household" leaves it. Everyone in a household shares the same kitchen, shopping list, and recipes in real time; in "My Recipes" a "MY OWN | HOUSEHOLD" slider switches between your recipes and the household's shared ones. If a partner can't see your items, make sure you are both in the SAME household (same Household ID) — there is no separate members list; the shared Household ID is what links you.
+
+ACCOUNT (Profile): tap "Enable notifications" to turn on reminders. "Spread the word" copies your App Store link so you can share Trepo. For feedback or help, email matt@trepo.ai. "Log Out" signs out; "Delete Account" permanently deletes your data.
+
+WHAT I (THYME) CAN DO: add or remove kitchen items, manage your shopping list, log dishes, and suggest recipes — by voice or text. For app settings or account actions, I'll tell you where to tap.`;
+
+const APP_GUIDES = { v1: APP_GUIDE_V1, v2: APP_GUIDE_V2 };
 
 // Returns the app-guide system message(s), or [] when PROMPT_GUIDE_VERSION=off.
+// Default is v2 (current app); rollback = set PROMPT_GUIDE_VERSION=v1 (or off).
 function getAppGuideMessages() {
-  const version = String(process.env.PROMPT_GUIDE_VERSION || "v1").trim().toLowerCase();
+  const version = String(process.env.PROMPT_GUIDE_VERSION || "v2").trim().toLowerCase();
   if (version === "off" || version === "none" || version === "") return [];
   return [{ role: "system", content: APP_GUIDES[version] || APP_GUIDE_V1 }];
 }
@@ -473,6 +517,19 @@ function summarizeKitchenGroundingArray(values, limit = 4) {
   return items.join(", ");
 }
 
+// Most-recent items kept with full enrichment in the kitchen grounding
+// message. Every item beyond this head is still listed, but compactly.
+const KITCHEN_GROUNDING_DETAILED_HEAD = 40;
+
+// Compact one-liner for a kitchen item: "name (category, location)". Keeps the
+// full kitchen visible to Thyme without dumping per-item enrichment (a ~250
+// item tail is only ~2.5k input tokens this way).
+function formatCompactKitchenGroundingLine(item) {
+  const name = item.item_name || "Unknown item";
+  const attrs = [item.category, item.storage_location].filter(Boolean);
+  return attrs.length > 0 ? `${name} (${attrs.join(", ")})` : name;
+}
+
 function formatKitchenGroundingLine(item) {
   const parts = [item.item_name];
   if (item.id) {
@@ -557,22 +614,44 @@ async function buildKitchenGroundingMessage(userContext, env) {
   }
 
   try {
-    const items = await getKitchenItems(userContext, { env, limit: 50 });
+    // Read the WHOLE kitchen so Thyme is aware of every item. The most-recent
+    // head keeps full enrichment; the remaining tail is listed compactly so a
+    // large kitchen is never partially invisible (fixes the 25-item cap that
+    // made Thyme suggest pantry-only / repetitive meals and claim it could only
+    // see part of the kitchen).
+    const items = await getKitchenItemsFull(userContext, { env });
     if (!Array.isArray(items) || items.length === 0) {
       return null;
     }
 
-    const itemLines = items
-      .slice(0, 50)
-      .map((item) => formatKitchenGroundingLine(item));
+    const totalCount = items.length;
+    const detailedItems = items.slice(0, KITCHEN_GROUNDING_DETAILED_HEAD);
+    const remainingItems = items.slice(KITCHEN_GROUNDING_DETAILED_HEAD);
 
-    return [
-      "Current kitchen inventory for grounding food references, follow-up updates, and product-detail questions:",
-      ...itemLines,
-      "The kitchen data may include item_id, brand, variant, category, price, ingredients, nutrition_summary, harmful_ingredients, UPF, quantity, location, expiration, and storage_guidance (how long items typically keep, storage zone, and timing).",
+    const detailedLines = detailedItems.map((item) => formatKitchenGroundingLine(item));
+    const compactLines = remainingItems.map((item) => `- ${formatCompactKitchenGroundingLine(item)}`);
+
+    const lines = [
+      `Current kitchen inventory (${totalCount} item${totalCount === 1 ? "" : "s"} total) for grounding food references, follow-up updates, meal ideas, and product-detail questions. This is your COMPLETE kitchen; you can see every item.`,
+      `Detailed items (${detailedItems.length} most-recent, with full enrichment):`,
+      ...detailedLines
+    ];
+
+    if (compactLines.length > 0) {
+      lines.push(
+        `Remaining ${compactLines.length} kitchen items (compact - name (category, location)); these are just as present, only listed with less detail:`,
+        ...compactLines
+      );
+    }
+
+    lines.push(
+      "The detailed kitchen data may include item_id, brand, variant, category, price, ingredients, nutrition_summary, harmful_ingredients, UPF, quantity, location, expiration, and storage_guidance (how long items typically keep, storage zone, and timing).",
+      "Treat both the detailed and compact lists as fully visible inventory. Never say you can only see part of the kitchen, and draw on fridge and pantry items across the whole list (not just the most-recent ones) when suggesting meals or answering what the user has.",
       "If the user refers to food vaguely such as 'that rice', 'it', 'those', or a broad food name after a recent kitchen action, prefer the strongest current kitchen match.",
       "If multiple similar kitchen items match a broad reference, ask one short clarifying question and name the likely candidates."
-    ].join("\n");
+    );
+
+    return lines.join("\n");
   } catch (error) {
     console.warn("[WARN] kitchen grounding preload failed:", error?.message || error);
     return null;
@@ -852,6 +931,7 @@ const ACTION_CLAIM_RULES = [
     okTools: new Set([
       "add_recipe_to_meal_calendar",
       "add_many_to_meal_calendar",
+      "add_generated_recipes_to_meal_calendar",
       "move_meal_calendar_entry",
       "remove_meal_calendar_entry"
     ]),
@@ -930,6 +1010,120 @@ const ACTION_CLAIM_RULES = [
 // succeeded this turn (recovery signal).
 const WRITE_TOOL_NAMES = new Set(ACTION_CLAIM_RULES.flatMap((r) => [...r.okTools]));
 
+// ── Guard-leak scrub (F-106) ───────────────────────────────────────────
+// The dish-log suppression guard is silent-correct: it skips a phantom dish-log
+// but the PRIMARY action (kitchen add / list add / discard) still succeeds.
+// Bug: the model narrated the guard's internal reasoning verbatim at the user —
+// tool names and "I can't honestly …" — even though the real action worked
+// (c2ed3a8d, 854f0d88, 3ed72da8). This is a DETERMINISTIC backstop: when the
+// turn has a successful PRIMARY write AND the final narration leaks a tool-name
+// token or guard-justification phrasing, we replace the narration with a clean
+// confirmation naming exactly the items that were actually written. The prompt
+// rule (realtime-config buildSystemPrompt) is the first line of defense; this is
+// the belt-and-suspenders that never lets the leak reach the user.
+
+// Primary write tools whose success should be confirmed to the user by item
+// name when the model's own narration is unusable (leaked). Dish-log tools are
+// deliberately excluded — a suppressed dish log is NOT a primary action.
+const PRIMARY_WRITE_TOOLS = new Set([
+  "check_in_item",
+  "check_in_many_items",
+  "add_to_shopping_list",
+  "add_many_to_shopping_list",
+  "discard_item",
+]);
+
+// Tokens that must never appear in user-facing narration — internal tool names
+// plus the guard's justification phrasing. Presence of any of these alongside a
+// successful primary write means the narration leaked the guard's reasoning.
+const GUARD_LEAK_TOKENS = [
+  "log_dish_ingredients",
+  "log_dish_from_voice",
+  "update_recent_dish",
+  "append_to_recent_dish",
+  "mark_dish_consumed",
+  "save_generated_recipe",
+  "save_recipe_from_tiktok",
+  "check_in_item",
+  "check_in_many_items",
+  "discard_item",
+  "dish_log_suppressed",
+  "dish-log action",
+  "dish-log tool",
+  "skip_dishlog",
+];
+const GUARD_LEAK_PHRASES = [
+  /\bcan'?t\s+honestly\b/i,
+  /\bcannot\s+honestly\b/i,
+  /\bi\s+did\s+already\s+complete\b/i,
+  /\bwithout\s+making\s+something\s+up\b/i,
+  /\bno\s+(?:recent\s+)?dish\s+details\b/i,
+  /\bnot\s+to\s+log\s+something\s+they\s+ate\b/i,
+  /\bshouldn'?t\s+invent\s+a\s+meal\b/i,
+];
+
+// True when narration leaked an internal tool name or guard-justification phrase.
+function narrationLeaksGuardReasoning(text) {
+  const value = String(text || "");
+  if (!value) return false;
+  const lower = value.toLowerCase();
+  if (GUARD_LEAK_TOKENS.some((tok) => lower.includes(tok.toLowerCase()))) return true;
+  return GUARD_LEAK_PHRASES.some((re) => re.test(value));
+}
+
+// Pull the human item names out of a successful primary-write tool-trace entry.
+function primaryWriteItemNames(entry) {
+  if (!entry || !entry.ok || !PRIMARY_WRITE_TOOLS.has(entry.toolName)) return [];
+  const args = entry.args || {};
+  const names = [];
+  if (Array.isArray(args.items)) {
+    for (const it of args.items) {
+      const n = it && typeof it === "object" ? it.item_name : it;
+      if (n && String(n).trim()) names.push(String(n).trim());
+    }
+  }
+  if (args.item_name && String(args.item_name).trim()) names.push(String(args.item_name).trim());
+  return names;
+}
+
+// Build a clean, user-facing confirmation from the successful primary writes in
+// the turn. Returns null when there is no successful primary write to confirm
+// (so the caller leaves the model's narration untouched). Phrasing mirrors the
+// good replies already in the corpus ("Added to your kitchen: …"). No em dashes.
+function buildPrimaryWriteConfirmation(toolTrace) {
+  const trace = Array.isArray(toolTrace) ? toolTrace : [];
+  const kitchenNames = [];
+  const listNames = [];
+  const discardNames = [];
+  for (const entry of trace) {
+    if (!entry || !entry.ok) continue;
+    const names = primaryWriteItemNames(entry);
+    if (names.length === 0) continue;
+    if (entry.toolName === "check_in_item" || entry.toolName === "check_in_many_items") kitchenNames.push(...names);
+    else if (entry.toolName === "add_to_shopping_list" || entry.toolName === "add_many_to_shopping_list") listNames.push(...names);
+    else if (entry.toolName === "discard_item") discardNames.push(...names);
+  }
+  const uniq = (arr) => [...new Set(arr)];
+  const sections = [];
+  if (kitchenNames.length) sections.push(`Added to your kitchen:\n${uniq(kitchenNames).map((n) => `- ${n}`).join("\n")}`);
+  if (listNames.length) sections.push(`Added to your shopping list:\n${uniq(listNames).map((n) => `- ${n}`).join("\n")}`);
+  if (discardNames.length) sections.push(`Removed from your kitchen:\n${uniq(discardNames).map((n) => `- ${n}`).join("\n")}`);
+  if (sections.length === 0) return null;
+  return sections.join("\n\n");
+}
+
+// F-106 deterministic scrub: if the final narration leaked guard reasoning AND a
+// primary write succeeded this turn, replace the narration with a clean
+// confirmation of what actually happened. Returns the (possibly rewritten) text.
+export function scrubGuardLeakFromNarration(text, toolTrace) {
+  if (!narrationLeaksGuardReasoning(text)) return text;
+  const clean = buildPrimaryWriteConfirmation(toolTrace);
+  // Only rewrite when we have a real successful action to confirm. If nothing
+  // primary succeeded, leave the text alone — the false-confirmation guard and
+  // honest-failure paths own that case; we must never invent a success.
+  return clean || text;
+}
+
 // ── Recipe-save vs dish-log mutual-exclusion guard ─────────────────────
 // "Save a recipe (to cook later)" and "log a dish (that I ate)" are DIFFERENT
 // actions. The model sometimes treats "save <food>" as BOTH — emitting
@@ -965,8 +1159,10 @@ export function shouldSuppressDishLog(toolName, { batchHasRecipeSave = false, re
 }
 
 // Synthetic tool result handed back to the model in place of the suppressed
-// dish-log write. Tells it the write was intentionally skipped and to confirm
-// the recipe save instead of claiming a dish was logged.
+// dish-log write. Kept SHORT and instructional (not user-facing prose) so the
+// model does not quote it verbatim at the user (F-106: the old wordy note was
+// being narrated word-for-word, tool name and all). The user-facing reply must
+// confirm ONLY the successful primary action; never mention this suppression.
 function suppressedDishLogResult() {
   return {
     ok: false,
@@ -974,7 +1170,7 @@ function suppressedDishLogResult() {
     statusCode: 409,
     actionSummary: null,
     error: "dish_log_suppressed_recipe_save",
-    note: "Dish log intentionally skipped: this turn saved a recipe (to cook later), not a dish the user ate. Confirm the recipe was saved — do NOT tell the user a dish was logged.",
+    note: "skip_dishlog:confirm_primary_action_only",
   };
 }
 
@@ -1051,8 +1247,12 @@ export async function* runDeviceAssistantStreaming({ transcript, userContext, en
     buildOuraGroundingMessage(userContext, env)
   ]);
   const readOnlyIntentMessage = buildReadOnlyIntentMessage(transcript, normalizedSessionMessages);
+  // Household dietary prefs (safety-critical: allergies) injected into the system prompt so
+  // Thyme honors them in suggestions and can state them when asked. Best-effort; a fetch
+  // failure / no prefs yields an empty block = unchanged behavior.
+  const dietaryBlock = formatDietaryPreferencesBlock(await getDietaryPreferences(userContext, { env }));
   const messages = [
-    { role: "system", content: buildSystemPrompt(userContext, { responseSurface: normalizedResponseSurface }) },
+    { role: "system", content: buildSystemPrompt(userContext, { responseSurface: normalizedResponseSurface, dietaryBlock }) },
     ...getAppGuideMessages(),
     ...(shoppingGroundingMessage ? [{ role: "system", content: shoppingGroundingMessage }] : []),
     ...(kitchenGroundingMessage ? [{ role: "system", content: kitchenGroundingMessage }] : []),
@@ -1165,6 +1365,18 @@ export async function* runDeviceAssistantStreaming({ transcript, userContext, en
         yield { type: "text_delta", delta: `\n${claim.failText}` };
       }
 
+      // F-106 guard-leak scrub: if the narration leaked the dish-log guard's
+      // internal reasoning (tool names / "can't honestly") but a primary write
+      // actually succeeded, replace it with a clean confirmation of what happened.
+      // Mirrors the false-confirm streaming pattern: overwrite fullText and yield
+      // the corrected text as an appended delta so the client's final text is clean.
+      const scrubbed = scrubGuardLeakFromNarration(fullText, toolTrace);
+      if (scrubbed !== fullText) {
+        console.log(JSON.stringify({ evt: "assistant_guard_leak_scrubbed", userId: userContext?.userId || null, surface: "streaming" }));
+        fullText = scrubbed;
+        yield { type: "text_delta", delta: `\n${scrubbed}` };
+      }
+
       const uiResponse = buildVoiceUiResponse({
         text: fullText || "Okay.",
         quickItems,
@@ -1261,6 +1473,7 @@ export async function* runDeviceAssistantStreaming({ transcript, userContext, en
   }
 
   // Exhausted turns
+  fullText = scrubGuardLeakFromNarration(fullText, toolTrace);
   const uiResponse = buildVoiceUiResponse({
     text: fullText || "I heard you, but I couldn't finish that request.",
     quickItems,
@@ -1403,8 +1616,12 @@ export async function runDeviceAssistant({ transcript, userContext, env, session
     buildOuraGroundingMessage(userContext, env)
   ]);
   const readOnlyIntentMessage = buildReadOnlyIntentMessage(transcript, normalizedSessionMessages);
+  // Household dietary prefs (safety-critical: allergies) injected into the system prompt so
+  // Thyme honors them in suggestions and can state them when asked. Best-effort; a fetch
+  // failure / no prefs yields an empty block = unchanged behavior.
+  const dietaryBlock = formatDietaryPreferencesBlock(await getDietaryPreferences(userContext, { env }));
   const messages = [
-    { role: "system", content: buildSystemPrompt(userContext, { responseSurface: normalizedResponseSurface }) },
+    { role: "system", content: buildSystemPrompt(userContext, { responseSurface: normalizedResponseSurface, dietaryBlock }) },
     ...getAppGuideMessages(),
     ...(shoppingGroundingMessage ? [{ role: "system", content: shoppingGroundingMessage }] : []),
     ...(kitchenGroundingMessage ? [{ role: "system", content: kitchenGroundingMessage }] : []),
@@ -1481,6 +1698,15 @@ export async function runDeviceAssistant({ transcript, userContext, env, session
         const reason = domainToolAttempted ? "retry_tool_call_failed" : "retry_no_tool_call";
         console.log(JSON.stringify({ evt: "assistant_false_confirm", tool: claim.expectedTool, domain: claim.domain, userId: userContext?.userId || null, recovered: false, reason }));
         lastAssistantText = claim.failText;
+      }
+
+      // F-106 guard-leak scrub: replace any narration that leaked the dish-log
+      // guard's internal reasoning with a clean confirmation of the primary
+      // write that actually succeeded (no tool names, no "can't honestly").
+      const scrubbed = scrubGuardLeakFromNarration(lastAssistantText, toolTrace);
+      if (scrubbed !== lastAssistantText) {
+        console.log(JSON.stringify({ evt: "assistant_guard_leak_scrubbed", userId: userContext?.userId || null, surface: "sync" }));
+        lastAssistantText = scrubbed;
       }
 
       const uiResponse = buildVoiceUiResponse({
@@ -1579,6 +1805,7 @@ export async function runDeviceAssistant({ transcript, userContext, env, session
     }
   }
 
+  lastAssistantText = scrubGuardLeakFromNarration(lastAssistantText, toolTrace);
   const uiResponse = buildVoiceUiResponse({
     text: lastAssistantText || "I heard you, but I couldn't finish that request.",
     quickItems,

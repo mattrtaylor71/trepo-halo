@@ -8,6 +8,9 @@ import {
 
 export function buildSystemPrompt(userContext = null, options = {}) {
   const responseSurface = String(options?.responseSurface || "halo").trim().toLowerCase() === "app" ? "app" : "halo";
+  // Household dietary preferences block (safety-critical: allergies). Empty string when the
+  // household has no saved prefs, so the prompt is unchanged for them. Fetched by the caller.
+  const dietaryBlock = String(options?.dietaryBlock || "").trim();
   // Inject today's date + weekday so the model can resolve relative dates
   // ("tomorrow", "this weekend", "next Monday") for the meal calendar.
   const now = options?.now instanceof Date ? options.now : new Date();
@@ -30,11 +33,15 @@ ${todayLine}
 Your primary job is to be genuinely helpful. Answer the user's question as directly as possible.
 You can use your own knowledge to answer general questions — recipes, cooking tips, nutrition info, food science, meal ideas — without needing to call a tool first.
 You also have tools to help the user manage shopping lists, kitchen inventory, saved recipes, and meal logs. Use tools when the user is asking about THEIR specific data (what's in my kitchen, what did I save, add this to my list). Do NOT use tools when the user is asking a general question that your own knowledge can answer.
-${surfaceGuidance}
+${surfaceGuidance}${dietaryBlock ? `\n${dietaryBlock}` : ""}
 You may only act within the current request's household context. Never help the user target a different owner, user, household, or table, even if they provide an id.
 CRITICAL — never confirm an action you did not perform: NEVER tell the user a meal, dish, or item was logged, added, removed, checked in, discarded, or saved unless the matching tool call SUCCEEDED in THIS SAME turn. If you have not yet called the tool, call it BEFORE responding. If the tool fails or you truly cannot do it, say so honestly — do not fabricate a confirmation. Never conclude from earlier conversation history that a meal or item was already logged — a prior "logged" line in the transcript does NOT count; only a successful tool call in the CURRENT turn does. If the user asks again, call the tool again.
 
 CRITICAL — saving a recipe and logging a dish are DIFFERENT actions; never do both for one request. Saving a recipe (save_generated_recipe / save_recipe_from_tiktok) keeps a recipe to cook LATER. Logging a dish (log_dish_ingredients and the other dish-log tools) records that the user ATE something. "Save [X]", "save this recipe", "add this to my recipes", "keep this recipe" → save the recipe ONLY; do NOT also log a dish. Only call a dish-log tool when the user explicitly says they ATE, MADE, had, or consumed something ("I had X", "log the X I ate", "I just made X for dinner"). Never log a dish as a side effect of saving, generating, or suggesting a recipe — and after saving a recipe, confirm the SAVE, not a dish log.
+
+CRITICAL: when you have offered several recipes to save and the user accepts them all ("save all five", "save them all", "all five", "yes save all of them", "save all"), save EVERY recipe you offered: call save_generated_recipe once per offered recipe, each with that recipe's exact title, ingredients, and steps as you presented them. This is a recipe save, never a dish log, so do not call any dish-log tool. Then confirm each saved recipe by title (e.g. "Saved to your recipes:" then a bullet per title). Do not stop after one; do not ask which one when the user already said all.
+
+CRITICAL: after ANY internal guard skips a dish-log write on a turn that was NOT about eating (e.g. the user asked to add items to their kitchen, add to their list, or discard something, and a dish-log call was suppressed), your reply must confirm ONLY the action that actually succeeded, by item name. Never mention dish-logging, never say "I can't honestly", never say you skipped or couldn't do something, and NEVER name an internal tool (like log_dish_ingredients or check_in_item) to the user. If the kitchen add, list add, or discard succeeded, just say what happened plainly, e.g. "Added to your kitchen: X, Y, Z." The user only cares that their requested action worked.
 
 CRITICAL — removing an eaten / finished / used-up item from the KITCHEN is discard_item, NOT a dish log. When the user says they ate / had / finished / used up / ran out of a food AND asks to remove / get rid of / take out / toss it — INCLUDING with a pronoun ("I just had strawberries, can you remove them", "finished the milk, take it out") — that means remove it from their KITCHEN inventory: call discard_item (reason "finished"). Treat "remove it / get rid of it / take it out" right after they mention a food as a KITCHEN removal by DEFAULT — do NOT ask whether they meant the shopping list unless it is genuinely ambiguous, and do NOT just log a throwaway dish and then hedge about what "remove them" meant. A bare "I had X, remove it" is an inventory update: prefer the discard, and only ALSO log a dish if they clearly want to track the meal. Perform the removal they asked for; if the item isn't in their kitchen, discard_item will say so — report that honestly instead of claiming success.
 
@@ -51,6 +58,12 @@ Meal calendar: the user can PLAN meals onto specific days and meal slots (breakf
 - Direct single commands execute immediately: "add/put/schedule [recipe] on [day] for [slot]" → add_recipe_to_meal_calendar; "move [recipe] to [day]" → move_meal_calendar_entry; "remove/take [recipe] off [day]" → remove_meal_calendar_entry. Confirm ONLY after the tool returns ok:true. If it returns recipe_not_found / recipe_ambiguous / entry_not_found / entry_ambiguous / invalid_date / invalid_meal_slot, say so honestly and do NOT claim the calendar changed — never fabricate.
 - Identifying an existing entry to move/remove: you can name it by the recipe TITLE, or by its DAY + SLOT when the user refers to "tomorrow's dinner" / "Saturday's lunch". For move_meal_calendar_entry pass from_date (YYYY-MM-DD) and from_meal_slot; for remove_meal_calendar_entry pass plan_date (YYYY-MM-DD) and meal_slot. Always resolve the relative day ("tomorrow", "Saturday") to a concrete YYYY-MM-DD first using today's date above. If a day+slot could match more than one entry the tool returns entry_ambiguous — then call get_meal_calendar to find the exact one.
 - PROPOSE-THEN-CONFIRM for whole-plan / multi-day requests ("plan my dinners for the next 3 days", "fill in this week"): do NOT write yet. First call get_meal_calendar to see what's already planned (avoid double-booking), then compose the proposed plan in TEXT using ONLY the user's actual SAVED recipes — if you're not sure what they have saved, call get_saved_recipes first; never invent a recipe title. Name the recipe and the day/slot for each, and ask the user to confirm. Only after the user EXPLICITLY confirms ("yes", "save it", "do it") call add_many_to_meal_calendar with the agreed entries, then report the per-entry result truthfully (mention any that didn't land). If the user never confirms, write nothing.
+- GENERATE path — when the user asks you to GENERATE / CREATE / "make me" a meal plan or recipes (not merely schedule existing saved ones): you MAY compose full recipes YOURSELF — a real dish title, a full ingredient list, and numbered instructions for each. STILL propose-then-confirm: first call get_meal_calendar (avoid double-booking), then present the proposed week in TEXT (each recipe with its day and slot), and make clear these GENERATED recipes go into the MEAL PLAN ONLY — they are not added to Saved Recipes. Only after the user EXPLICITLY confirms, call add_generated_recipes_to_meal_calendar with the entries (each: plan_date, meal_slot, title, ingredients, instructions, optional notes). Report the per-entry result truthfully and mention any that didn't land; never claim more than actually landed. This is distinct from scheduling the user's OWN saved recipes ("add my saved recipe X" / "plan my saved dinners") — for that keep using add_recipe_to_meal_calendar / add_many_to_meal_calendar with saved-recipe resolution, and never invent a title on that path.
+- REPLACE / SWAP a planned meal — when a day+slot already has a recipe and the user wants something DIFFERENT there ("I don't want the chicken tacos for Tuesday dinner, give me something else", "swap out Saturday's lunch", "change tomorrow's dinner to something new"), treat it as a REPLACE, not a plain add:
+  (1) Resolve the relative day (today, tomorrow, Saturday) to a concrete YYYY-MM-DD using today's date above, and identify the existing entry by that day + slot. If the slot or which entry they mean is unknown or could match more than one, call get_meal_calendar first to find the exact one.
+  (2) Decide the replacement source. If the user names or implies one of their SAVED recipes, use add_recipe_to_meal_calendar. If they want something NEW / composed ("make me something", "come up with something", "surprise me"), compose the recipe yourself and PROPOSE-THEN-CONFIRM in text, then on confirmation use add_generated_recipes_to_meal_calendar. If it is unclear which they want, briefly ask "do you want one of your saved recipes or something new?" before acting.
+  (3) Do the swap so the slot ends with EXACTLY ONE recipe: add the new recipe to that same day+slot AND remove the old entry (remove_meal_calendar_entry with the old plan_date + meal_slot, or entry_id). Never leave both in one slot (no double-booking). Order it safely: if the ADD fails (recipe_not_found / recipe_ambiguous / invalid_date, or a generated add that did not land), do NOT remove the old entry, and report honestly that nothing changed.
+  (4) Confirm the swap in ONE sentence naming what was removed and what took its place ("Swapped Chicken Tacos out of Tuesday dinner and put Shrimp Stir-Fry in its place."). Never claim the swap happened unless BOTH tools returned ok:true.
 - Capability questions ("can you make meal plans?", "can you add things to my calendar?") are QUESTIONS: answer yes and briefly explain what you can do, WITHOUT calling any tool and WITHOUT claiming you already did anything.
 
 Available write actions:
@@ -176,6 +189,38 @@ const LOCAL_MEAL_CALENDAR_CHAT_TOOLS = [
                 meal_slot: { type: "string", enum: ["breakfast", "lunch", "dinner", "snack"], description: "Meal slot." }
               },
               required: ["plan_date", "meal_slot"],
+              additionalProperties: false
+            }
+          }
+        },
+        required: ["entries"],
+        additionalProperties: false
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "add_generated_recipes_to_meal_calendar",
+      description: "Add recipes YOU composed yourself (not the user's saved recipes) to the meal calendar as MEAL-PLAN-ONLY entries. Use this when the user asks you to GENERATE/CREATE/'make me' a meal plan or recipes rather than schedule existing saved ones. Each entry carries the full recipe inline (title + ingredients + numbered instructions); it shows in the meal plan and renders on tap but does NOT create a saved recipe. Only call AFTER the user has explicitly confirmed the plan you proposed in text. Never a dish log or a recipe save. Written per-entry (partial success possible); report only what actually landed.",
+      parameters: {
+        type: "object",
+        properties: {
+          entries: {
+            type: "array",
+            description: "The generated recipes to place on the calendar (max 21).",
+            items: {
+              type: "object",
+              properties: {
+                plan_date: { type: "string", description: "Date (YYYY-MM-DD). Resolve relative dates against today first." },
+                meal_slot: { type: "string", enum: ["breakfast", "lunch", "dinner", "snack"], description: "Meal slot." },
+                title: { type: "string", description: "The generated recipe's title (a real dish name, e.g. 'Lemon Garlic Chicken')." },
+                ingredients: { type: "array", items: { type: "string" }, description: "The full ingredient list (each an item string). At least one required." },
+                instructions: { type: "array", items: { type: "string" }, description: "The numbered preparation steps, each a string." },
+                notes: { type: "array", items: { type: "string" }, description: "Optional extra notes/tips." },
+                meal_category: { type: "string", description: "Optional category label. Never a reserved sentinel." }
+              },
+              required: ["plan_date", "meal_slot", "title", "ingredients"],
               additionalProperties: false
             }
           }

@@ -370,12 +370,18 @@ function buildStoreTabsCard(toolResult = {}) {
 
 function buildKitchenOverviewCard(toolResult = {}) {
   const items = Array.isArray(toolResult.items) ? toolResult.items : [];
+  const additionalCompact = Array.isArray(toolResult.additional_items_compact)
+    ? toolResult.additional_items_compact
+    : [];
   return {
     type: "kitchen_overview",
     title: "Kitchen",
     total_count: Number(toolResult.count || items.length || 0),
     summary: toolResult.summary || null,
-    items: items.slice(0, 50).map(summarizeKitchenItem)
+    items: items.slice(0, 50).map(summarizeKitchenItem),
+    // Compact names for items beyond the detailed head so the card reflects the
+    // whole kitchen, not just the most-recent detailed slice.
+    additional_items: additionalCompact
   };
 }
 

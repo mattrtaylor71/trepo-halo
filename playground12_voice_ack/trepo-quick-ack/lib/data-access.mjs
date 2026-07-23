@@ -768,6 +768,89 @@ function resolveShoppingOwnerId(context) {
   return context.userId || context.tableOwnerId || context.ownerId;
 }
 
+// --- Dietary preferences (household-scoped; safety-critical — Thyme must honor allergies) ---
+const _DIETARY_PREFS_TABLE = "user_dietary_preferences";
+const _DIETARY_PREF_KEYS = ["allergies", "diets", "religious", "health", "custom"];
+
+async function _resolveHouseholdOwnerId(connection, owner) {
+  // Map an acting member user_id to the shared HOUSEHOLD owner_id that keys the one prefs
+  // record (JS twin of the generators' _resolve_household_owner_id). Fallback to the id itself
+  // for a solo user / an id already at the owner_id level.
+  const safe = String(owner || "").replace(/[^a-zA-Z0-9_-]/g, "");
+  if (!safe) return safe;
+  try {
+    const [rows] = await connection.execute(
+      "SELECT owner_id FROM new_users WHERE user_id = ? LIMIT 1", [safe]);
+    const hh = rows?.[0]?.owner_id;
+    return hh ? String(hh).replace(/[^a-zA-Z0-9_-]/g, "") : safe;
+  } catch {
+    return safe;
+  }
+}
+
+// Fetch the household's dietary preferences (resolved to the shared owner_id). Best-effort:
+// returns all-empty lists on any failure / no row / missing table, so Thyme degrades to its
+// current behavior when there are no prefs.
+export async function getDietaryPreferences(context, options = {}) {
+  const empty = { allergies: [], diets: [], religious: [], health: [], custom: [] };
+  const owner = resolveShoppingOwnerId(context);
+  if (!owner) return empty;
+  try {
+    return await withDbConnection(async (connection) => {
+      if (!(await tableExists(connection, _DIETARY_PREFS_TABLE))) return empty;
+      const household = await _resolveHouseholdOwnerId(connection, owner);
+      const [rows] = await connection.execute(
+        `SELECT allergies, diets, religious, health, custom
+         FROM \`${_DIETARY_PREFS_TABLE}\` WHERE owner_id = ? LIMIT 1`,
+        [household]
+      );
+      const row = rows?.[0];
+      if (!row) return empty;
+      const out = {};
+      for (const key of _DIETARY_PREF_KEYS) {
+        const parsed = parseJsonColumn(row[key], []);
+        out[key] = (Array.isArray(parsed) ? parsed : [])
+          .map((x) => String(x == null ? "" : x).trim())
+          .filter(Boolean);
+      }
+      return out;
+    }, options);
+  } catch (err) {
+    console.warn("[dietary] getDietaryPreferences failed (non-fatal):", err?.message || err);
+    return empty;
+  }
+}
+
+// Render the dietary-constraints block for Thyme's system prompt. Empty categories omitted;
+// '' when there are NO prefs (so the prompt is unchanged). Adds the two Thyme-specific safety
+// rules: explicit-allergen-request -> warn, and answer "what are my preferences" from here.
+export function formatDietaryPreferencesBlock(prefs) {
+  const p = prefs || {};
+  const has = (k) => Array.isArray(p[k]) && p[k].length > 0;
+  if (!_DIETARY_PREF_KEYS.some(has)) return "";
+  const lines = ["DIETARY PREFERENCES & SAFETY (this household saved dietary preferences — honor them in EVERY recipe, suggestion, and meal idea):"];
+  if (has("allergies")) {
+    lines.push(`- ALLERGIES (safety-critical): ${p.allergies.join(", ")}. NEVER suggest, generate, or describe a recipe that contains these or any derivative/trace. If the user EXPLICITLY asks for something that contains a saved allergen (e.g. asks for a peanut butter recipe while nut-allergic), do NOT just provide it — WARN clearly that it conflicts with their saved allergy (name it) and offer an allergen-free alternative or ask them to confirm they still want it.`);
+  }
+  if (has("diets")) lines.push(`- DIET — every recipe/suggestion MUST be: ${p.diets.join(", ")}`);
+  if (has("religious")) {
+    const religiousLc = p.religious.map((r) => String(r || "").toLowerCase());
+    let religiousLine = `- RELIGIOUS: ${p.religious.join(", ")}`;
+    if (religiousLc.some((r) => r.includes("kosher"))) {
+      religiousLine += ". KOSHER means no pork and no shellfish (shrimp, crab, lobster, clams, etc.), and never mix meat and dairy in one dish.";
+    }
+    if (religiousLc.some((r) => r.includes("halal"))) {
+      religiousLine += ". HALAL means no pork or pork derivatives (bacon, ham, lard, gelatin from pork) and no alcohol (including wine, beer, and cooking with them).";
+    }
+    lines.push(religiousLine);
+  }
+  if (has("health")) lines.push(`- HEALTH — tailor toward (informational, not medical advice): ${p.health.join(", ")}`);
+  if (has("custom")) lines.push(`- ALSO AVOID/HONOR (their own words): ${p.custom.join(", ")}`);
+  lines.push("INGREDIENT-LEVEL CHECK: check EVERY ingredient in any recipe or suggestion against the constraints above, including staples. Do not assume a staple is compliant just because it is common. Butter, milk, cream, cheese, yogurt, and eggs are NOT vegan or dairy-free (use plant milk, vegan butter, or omit them); honey is not vegan; regular soy sauce, teriyaki, most bread, pasta, flour, and breadcrumbs contain gluten (use tamari or certified gluten-free versions). Substitute any non-compliant ingredient with a compliant alternative or leave it out.");
+  lines.push("When the user ASKS about their dietary preferences / restrictions / allergies, state what is saved here — do NOT say you don't know them; these ARE their saved preferences.");
+  return lines.join("\n");
+}
+
 function resolveApiOwnerId(context) {
   return context.ownerId || context.userId || context.tableOwnerId;
 }
@@ -2166,6 +2249,37 @@ async function getKitchenRows(connection, ownerId, limit = 25) {
   return rows || [];
 }
 
+// Reads the WHOLE active kitchen with no LIMIT. Used only to build the
+// model-facing overview/grounding context so Thyme can see every item (the
+// 25-item cap on getKitchenRows made large kitchens partially invisible).
+// Deliberately separate from getKitchenRows so search/resolve/matching paths
+// and other callers keep their bounded reads.
+async function getKitchenRowsFull(connection, ownerId) {
+  if (WRITE_SHARED_ONLY) {
+    await ensureSharedTables(connection);
+    const [rows] = await connection.execute(
+      `SELECT * FROM \`${SHARED_KITCHEN_TABLE}\` WHERE \`owner_id\` = ? AND \`action\` = 'IN' ORDER BY COALESCE(_updatedDate, _createdDate) DESC`,
+      [ownerId]
+    );
+    return rows || [];
+  }
+
+  const tableName = kitchenTableName(ownerId);
+  if (!(await tableExists(connection, tableName))) {
+    return [];
+  }
+
+  await ensureKitchenVoiceColumns(connection, tableName);
+  const [rows] = await connection.execute(
+    `SELECT *
+     FROM \`${tableName}\`
+     WHERE action = 'IN'
+     ORDER BY COALESCE(_updatedDate, _createdDate) DESC`
+  );
+
+  return rows || [];
+}
+
 function summarizeKitchenRowForDisambiguation(row) {
   const parts = [row.product_name || "Unknown item"];
   if (row.storage_location) {
@@ -3413,12 +3527,48 @@ export async function getKitchenItems(context, options = {}) {
   }, options);
 }
 
+// Returns EVERY active kitchen item (no cap) mapped for the model-facing
+// overview/grounding context. Callers slice this into a detailed head plus a
+// compact tail so nothing in a large kitchen is invisible to Thyme.
+export async function getKitchenItemsFull(context, options = {}) {
+  return withDbConnection(async (connection) => {
+    const rows = await getKitchenRowsFull(connection, resolveTableOwnerId(context));
+    const items = rows.map(mapKitchenRow);
+    console.log("[DEBUG] kitchen items loaded (full):", JSON.stringify({
+      ownerId: context?.ownerId || null,
+      userId: context?.userId || null,
+      count: items.length
+    }));
+    return items;
+  }, options);
+}
+
+// Number of most-recent items kept with FULL detail in the model-facing
+// overview. The rest of the kitchen is surfaced as compact one-liners so
+// nothing is invisible while keeping token cost bounded.
+const KITCHEN_OVERVIEW_DETAILED_HEAD = 40;
+
+// Compact one-liner for a kitchen item: "name (category, location)". Only the
+// present fields are shown so a bare item still yields "name".
+function formatCompactKitchenItem(item) {
+  const name = item?.item_name || "Unknown item";
+  const attrs = [item?.category, item?.storage_location].filter(Boolean);
+  return attrs.length > 0 ? `${name} (${attrs.join(", ")})` : name;
+}
+
 export async function getKitchenOverview(context, options = {}) {
-  const items = await getKitchenItems(context, options);
+  // Read the WHOLE kitchen so the total count and compact tail are truthful and
+  // complete. Detailed enrichment is emitted only for the most-recent head.
+  const allItems = await getKitchenItemsFull(context, options);
+  const totalCount = allItems.length;
+  const detailedItems = allItems.slice(0, KITCHEN_OVERVIEW_DETAILED_HEAD);
+  const remainingItems = allItems.slice(KITCHEN_OVERVIEW_DETAILED_HEAD);
+  const remainingCompact = remainingItems.map(formatCompactKitchenItem);
+
   const householdSummary = await buildHouseholdSummary(context, options);
   const summary = {
     household_size: householdSummary.household_size || context?.householdSize || 0,
-    kitchen_count: householdSummary.kitchen_count || items.length,
+    kitchen_count: householdSummary.kitchen_count || totalCount,
     shopping_count: householdSummary.shopping_count || 0,
     discard_count: householdSummary.discard_count || 0,
     recent_dish_count: householdSummary.recent_dish_count || 0,
@@ -3428,13 +3578,24 @@ export async function getKitchenOverview(context, options = {}) {
   console.log("[DEBUG] kitchen overview built:", JSON.stringify({
     ownerId: context?.ownerId || null,
     userId: context?.userId || null,
-    count: items.length,
+    total_count: totalCount,
+    detailed_count: detailedItems.length,
+    compact_count: remainingCompact.length,
     summary
   }));
 
   return {
-    items,
-    count: items.length,
+    items: detailedItems,
+    // Truthful full kitchen size so Thyme never claims partial visibility.
+    count: totalCount,
+    total_item_count: totalCount,
+    detailed_item_count: detailedItems.length,
+    // Compact one-liners for every item beyond the detailed head. Empty when
+    // the whole kitchen already fits in the detailed head.
+    additional_items_compact: remainingCompact,
+    visibility_note: remainingCompact.length > 0
+      ? `Showing full detail for the ${detailedItems.length} most-recent items. All ${totalCount} kitchen items are listed; the remaining ${remainingCompact.length} appear as compact name (category, location) entries in additional_items_compact. You can see the entire kitchen.`
+      : `All ${totalCount} kitchen items are shown with full detail. You can see the entire kitchen.`,
     summary
   };
 }
@@ -6277,6 +6438,100 @@ export async function addManyToMealCalendar(context, args = {}, options = {}) {
       });
     } catch (error) {
       results.push({ ...label, ok: false, error: error?.message || "add_failed" });
+    }
+  }
+  const added = results.filter((r) => r.ok).length;
+  return { ok: added > 0, added, total: results.length, results };
+}
+
+// Cap on generated entries per batch — one week of 3 meals + snacks, generously.
+const _MEAL_CALENDAR_GENERATED_MAX = 21;
+
+// Push RECIPES THAT THYME COMPOSED ITSELF into the meal calendar as MEAL-PLAN-ONLY
+// entries. Unlike addRecipe/addMany (which RESOLVE existing SAVED recipes and snapshot
+// them as source_type 'saved'), this takes each recipe INLINE and writes source_type
+// 'manual', source_id null, with the title/ingredients/instructions/notes embedded —
+// so it shows in the meal plan and renders on tap, WITHOUT creating any saved_recipes
+// row. Each entry writes INDEPENDENTLY (per-entry ok/error); one bad entry never aborts
+// the batch. meal_category is never the iOS note sentinel ('__note__'), so a generated
+// recipe renders as a recipe, not a note.
+export async function addGeneratedRecipesToMealCalendar(context, args = {}, options = {}) {
+  const entries = Array.isArray(args?.entries) ? args.entries : [];
+  if (entries.length === 0) {
+    return { ok: false, error: "no_entries" };
+  }
+  if (entries.length > _MEAL_CALENDAR_GENERATED_MAX) {
+    return { ok: false, error: "too_many_entries", max: _MEAL_CALENDAR_GENERATED_MAX };
+  }
+
+  const ownerId = resolveMealCalendarOwnerId(context);
+  const cleanList = (value) =>
+    (Array.isArray(value) ? value : [])
+      .map((v) => String(v == null ? "" : v).trim())
+      .filter(Boolean);
+
+  const results = [];
+  for (const entry of entries) {
+    const planDate = normalizePlanDate(entry?.plan_date);
+    const slot = normalizeMealSlot(entry?.meal_slot);
+    const title = String(entry?.title || "").trim();
+    const ingredients = cleanList(entry?.ingredients);
+    const instructions = cleanList(entry?.instructions);
+    const notes = cleanList(entry?.notes);
+    // A generated RECIPE must never carry the iOS note sentinel meal_category, or the
+    // app would render it as a note instead of a recipe.
+    let mealCategory = String(entry?.meal_category || "").trim() || null;
+    if (mealCategory === "__note__") {
+      mealCategory = null;
+    }
+
+    const label = {
+      id: null,
+      plan_date: entry?.plan_date || null,
+      meal_slot: entry?.meal_slot || null,
+      title: title || null
+    };
+
+    if (!planDate) { results.push({ ...label, ok: false, error: "invalid_date" }); continue; }
+    if (!slot) { results.push({ ...label, ok: false, error: "invalid_meal_slot" }); continue; }
+    if (!title) { results.push({ ...label, ok: false, error: "missing_title" }); continue; }
+    if (ingredients.length === 0) { results.push({ ...label, ok: false, error: "missing_ingredients" }); continue; }
+
+    const body = {
+      plan_date: planDate,
+      meal_slot: slot,
+      source_type: "manual",
+      source_id: null,
+      title,
+      image_url: null,
+      ingredients,
+      instructions,
+      notes,
+      meal_category: mealCategory
+    };
+    try {
+      const payload = await fetchHouseholdApiJson(
+        `/meal-calendar/${encodeURIComponent(ownerId)}`,
+        { ...options, method: "POST", body }
+      );
+      const saved = normalizeMealCalendarEntry(payload?.entry);
+      results.push({
+        id: saved?.id || null,
+        plan_date: planDate,
+        meal_slot: slot,
+        title,
+        ok: true,
+        error: null
+      });
+    } catch (error) {
+      results.push({
+        id: null,
+        plan_date: planDate,
+        meal_slot: slot,
+        title,
+        ok: false,
+        error: error?.message || "add_failed"
+      });
     }
   }
   const added = results.filter((r) => r.ok).length;
