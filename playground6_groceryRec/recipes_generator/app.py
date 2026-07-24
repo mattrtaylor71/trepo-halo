@@ -6,6 +6,7 @@ import sys
 import time
 import hashlib
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor
 try:
     import pymysql
 except ImportError as exc:
@@ -1680,25 +1681,12 @@ def handler(event, context):
             print(f'[recipes_generator] Not enough kitchen items owner={owner} count={len(ingredients)} min={MIN_KITCHEN_ITEMS}')
             return
 
-        current_kitchen_raw, current_need_raw = _load_current_recipes(conn, owner)
-        current_kitchen_source = _parse_json_field(current_kitchen_raw)
-        current_need_source = _parse_json_field(current_need_raw)
-        current_kitchen = _normalize_recipe_batch(
-            current_kitchen_source,
-            'kitchen_only',
-            kitchen_context,
-            request_id=owner,
-            start_index=0,
-            source_label='recipes_generator_current_kitchen',
-        )
-        current_need = _normalize_recipe_batch(
-            current_need_source,
-            'need_grocery',
-            kitchen_context,
-            request_id=owner,
-            start_index=0,
-            source_label='recipes_generator_current_need',
-        )
+        # The current (old) recipes are about to be replaced by the full regeneration below and
+        # are not referenced anywhere after this point, so we SKIP the expensive availability +
+        # substitution matching on them. That matching was ~half of the regen's per-recipe
+        # substitution LLM calls, all computed and discarded — a pure waste that slowed regen.
+        current_kitchen = []
+        current_need = []
 
         # Always do a full regeneration — generate fresh 10+10 recipes every time
         # the kitchen changes so the user sees new suggestions.
@@ -1725,22 +1713,22 @@ def handler(event, context):
             f"elapsed_ms={int((time.monotonic() - gpt_started_at) * 1000)} "
             f"full_regen=True"
         )
-        new_kitchen = _normalize_recipe_batch(
-            (gpt_out.get('kitchen_only') or [])[:10],
-            'kitchen_only',
-            kitchen_context,
-            request_id=owner,
-            start_index=0,
-            source_label='recipes_generator_new_kitchen',
-        )
-        new_need = _normalize_recipe_batch(
-            (gpt_out.get('need_grocery') or [])[:10],
-            'need_grocery',
-            kitchen_context,
-            request_id=owner,
-            start_index=0,
-            source_label='recipes_generator_new_need',
-        )
+        # Normalize the two new sections CONCURRENTLY. Each fires parallel per-recipe
+        # substitution matching internally, and the two sections are independent, so overlap
+        # them instead of running one after the other.
+        with ThreadPoolExecutor(max_workers=2) as _norm_pool:
+            _fut_new_kitchen = _norm_pool.submit(
+                _normalize_recipe_batch,
+                (gpt_out.get('kitchen_only') or [])[:10],
+                'kitchen_only', kitchen_context, owner, 0, 'recipes_generator_new_kitchen',
+            )
+            _fut_new_need = _norm_pool.submit(
+                _normalize_recipe_batch,
+                (gpt_out.get('need_grocery') or [])[:10],
+                'need_grocery', kitchen_context, owner, 0, 'recipes_generator_new_need',
+            )
+            new_kitchen = _fut_new_kitchen.result()
+            new_need = _fut_new_need.result()
 
         kitchen_only = _dedupe_recipes(new_kitchen)[:10]
         need_grocery = _dedupe_recipes(new_need)[:10]

@@ -824,21 +824,36 @@ def match_recipes_fast(recipes, kitchen_context, request_id=None, log_fn=None, s
     if not recipes:
         return {}, meta
 
-    # Step 1: Run deterministic matching for all recipes (instant fallback)
+    # Decide up front whether the parallel LLM step (Step 2) will run. If it will, it applies
+    # the substitution callback ITSELF, per recipe, in parallel. So the deterministic Step 1
+    # must NOT also run the substitution LLM call — doing so serialized dozens of ~4s calls in
+    # a plain loop and was the dominant cost of a regen (~2 min). Only run substitutions in the
+    # deterministic step when the LLM step is NOT going to run, and even then run them in parallel.
+    client = _openai_client() if llm_inventory_matching_enabled() else None
+    will_run_llm = client is not None
+    det_substitution_callback = None if will_run_llm else substitution_callback
+
+    # Step 1: deterministic matching for all recipes (instant fallback).
     deterministic_results = {}
-    for recipe in recipes:
-        recipe_id = _safe_text(recipe.get('id') or recipe.get('_id'))
-        deterministic_results[recipe_id] = deterministic_availability(recipe, kitchen_context, substitution_callback=substitution_callback)
+    if det_substitution_callback and len(recipes) > 1:
+        # LLM matching is disabled but we still owe substitutions — parallelize, never serialize.
+        det_workers = min(len(recipes), int(os.getenv('OPENAI_INVENTORY_MAX_WORKERS', '24')))
+        with ThreadPoolExecutor(max_workers=det_workers) as det_executor:
+            det_futures = {
+                det_executor.submit(deterministic_availability, recipe, kitchen_context, substitution_callback=det_substitution_callback):
+                    _safe_text((recipe or {}).get('id') or (recipe or {}).get('_id'))
+                for recipe in recipes
+            }
+            for det_future in as_completed(det_futures):
+                deterministic_results[det_futures[det_future]] = det_future.result()
+    else:
+        for recipe in recipes:
+            recipe_id = _safe_text(recipe.get('id') or recipe.get('_id'))
+            deterministic_results[recipe_id] = deterministic_availability(recipe, kitchen_context, substitution_callback=det_substitution_callback)
 
-    if not llm_inventory_matching_enabled():
+    if not will_run_llm:
         meta['used_fallback'] = True
-        meta['error'] = 'llm_inventory_matching_disabled'
-        return deterministic_results, meta
-
-    client = _openai_client()
-    if client is None:
-        meta['used_fallback'] = True
-        meta['error'] = 'openai_client_unavailable'
+        meta['error'] = 'llm_inventory_matching_disabled' if not llm_inventory_matching_enabled() else 'openai_client_unavailable'
         return deterministic_results, meta
 
     # Step 2: Fire parallel compact LLM calls (one per recipe)
@@ -848,7 +863,7 @@ def match_recipes_fast(recipes, kitchen_context, request_id=None, log_fn=None, s
     normalized = dict(deterministic_results)  # start with deterministic, upgrade with LLM
     llm_success_count = 0
 
-    max_workers = min(len(recipes), int(os.getenv('OPENAI_INVENTORY_MAX_WORKERS', '12')))
+    max_workers = min(len(recipes), int(os.getenv('OPENAI_INVENTORY_MAX_WORKERS', '24')))
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = {
             executor.submit(
