@@ -1148,6 +1148,15 @@ exports.handler = async (event, context) => {
     const captureMode = (typeof cameraMeta === 'object' ? cameraMeta.capture_mode : null) || null;
     const isLeftovers = captureMode === 'leftovers';
 
+    // Leftovers can carry a user-set servings count from camera_meta. Use it as the item
+    // quantity so the number the user picked is what lands in the kitchen (quantity > 1
+    // becomes quantity_value in the writer). Default/absent servings leaves quantity as-is.
+    const servingsRaw = (typeof cameraMeta === 'object') ? cameraMeta.servings : null;
+    const servings = Number.isFinite(Number(servingsRaw)) ? Math.max(1, Math.floor(Number(servingsRaw))) : null;
+    if (servings && servings > 1) {
+      quantity = servings;
+    }
+
     console.log('[dynamo] Loaded job:', {
       has_action: !!job.action,
       action: action,
