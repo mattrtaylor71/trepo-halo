@@ -875,8 +875,13 @@ const WRITE_INTENT_PATTERNS = [
   // Meal-calendar commands (planning to cook LATER) must win over the dish-log
   // "for <slot>" pattern below — an add/put/schedule verb here means schedule, not
   // "I ate". A genuine "I had X for dinner" uses had/ate (no add verb) → dish log.
-  { pattern: /\b(add|put|schedule|slot|pencil)\b.{0,40}\b(calendar|meal[-\s]?plan|meal[-\s]?calendar)\b/i, tool: "add_recipe_to_meal_calendar" },
-  { pattern: /\b(add|put|schedule|slot|pencil)\b.{0,40}\b(?:for|to)\s+(breakfast|lunch|dinner|snack)\b/i,   tool: "add_recipe_to_meal_calendar" },
+  // Calendar ADD is ambiguous between a SAVED recipe (add_recipe_to_meal_calendar)
+  // and one Thyme just GENERATED (add_generated_recipes_to_meal_calendar). Forcing the
+  // saved-recipe tool 404s a generated recipe (the swap-in-a-new-recipe bug). Force
+  // "required" instead so the model MUST act but picks the right add tool; and for a
+  // swap confirm ("... and take X off") the follow-up auto turn can still issue remove.
+  { pattern: /\b(add|put|schedule|slot|pencil)\b.{0,40}\b(calendar|meal[-\s]?plan|meal[-\s]?calendar)\b/i, tool: "__meal_calendar_add__" },
+  { pattern: /\b(add|put|schedule|slot|pencil)\b.{0,40}\b(?:for|to)\s+(breakfast|lunch|dinner|snack)\b/i,   tool: "__meal_calendar_add__" },
   { pattern: /\b(move|reschedule|shift|bump)\b.{0,50}\b(calendar|to\s+(?:mon|tue|wed|thu|fri|sat|sun|monday|tuesday|wednesday|thursday|friday|saturday|sunday|tomorrow|next|this|\d{4}-\d{2}-\d{2}))\b/i, tool: "move_meal_calendar_entry" },
   { pattern: /\b(remove|take\s+off|unschedule)\b.{0,40}\b(calendar|meal[-\s]?plan|meal[-\s]?calendar)\b/i,   tool: "remove_meal_calendar_entry" },
   { pattern: /\b(log|had|ate|just ate|i ate|i had|eaten|for (breakfast|lunch|dinner|snack))\b/i, tool: "log_dish_from_voice" },
@@ -921,6 +926,9 @@ export function detectWriteIntent(transcript) {
     // Don't let "had/ate" hard-force a dish log when they're clearly asking to remove it.
     if (tool === "log_dish_from_voice" && wantsRemoval) continue;
     if (pattern.test(transcript)) {
+      // Calendar-add: don't lock to a specific add tool (saved vs generated); require
+      // a tool call and let the model choose the correct one.
+      if (tool === "__meal_calendar_add__") return "required";
       return { type: "function", function: { name: tool } };
     }
   }
