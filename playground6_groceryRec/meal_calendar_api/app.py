@@ -149,16 +149,38 @@ def _dual_write_to_shared(conn, owner, item_id):
 
 
 def _dual_delete_from_shared(conn, owner, item_id):
+    """Remove the mirror row (owner_id + _id) from shared_meal_calendar.
+
+    Symmetric with _dual_write_to_shared: ensures the shared table exists first,
+    deletes by the exact composite key the write path stores, then VERIFIES the
+    row is actually gone. Because the connection is autocommit and the per-owner
+    delete has already committed by the time this runs, a swallowed failure here
+    would permanently strand the mirror row. So we retry once on a transient
+    error and only fire `dual_delete_miss` on a genuine miss (row still present
+    or a hard error). Idempotent + safe when the shared row is already absent."""
     if not DUAL_WRITE:
         return
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
-                f"DELETE FROM `{_SHARED_TABLE}` WHERE `owner_id` = %s AND `_id` = %s",
-                (owner, item_id),
-            )
-    except Exception as exc:
-        _log_miss('dual_delete_miss', owner, item_id, exc)
+    last_exc = None
+    for attempt in range(2):
+        try:
+            _ensure_shared_table(conn)
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"DELETE FROM `{_SHARED_TABLE}` WHERE `owner_id` = %s AND `_id` = %s",
+                    (owner, item_id),
+                )
+                # Confirm removal; row already-absent counts as success (idempotent).
+                cur.execute(
+                    f"SELECT COUNT(*) c FROM `{_SHARED_TABLE}` "
+                    f"WHERE `owner_id` = %s AND `_id` = %s",
+                    (owner, item_id),
+                )
+                if cur.fetchone()['c'] == 0:
+                    return
+                last_exc = 'shared row still present after delete'
+        except Exception as exc:
+            last_exc = exc
+    _log_miss('dual_delete_miss', owner, item_id, last_exc)
 
 
 def _log_miss(evt, owner, item_id, exc):
