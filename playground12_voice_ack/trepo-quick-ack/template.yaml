@@ -120,8 +120,9 @@ Globals:
         WRITE_SHARED_ONLY: "true"
         OPENAI_RETRY_BASE_MS: "1000"
         # App how-to guide version. Set to "off" to instantly disable the guide
-        # (rollback) without a code change; "v1" is the current guide.
-        PROMPT_GUIDE_VERSION: "v1"
+        # (rollback) without a code change; "v2" is the current guide (live since
+        # 2026-07-22). Keep this in sync with live so a sam deploy does not revert it.
+        PROMPT_GUIDE_VERSION: "v2"
         DB_POOL_CONNECTION_LIMIT: "2"
         DB_POOL_QUEUE_LIMIT: "100"
         DB_CONNECT_TIMEOUT_MS: "5000"
