@@ -5,8 +5,11 @@ import json
 import sys
 import time
 import hashlib
+import uuid
+import urllib.request
+import urllib.parse
 from pathlib import Path
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 try:
     import pymysql
 except ImportError as exc:
@@ -1005,6 +1008,13 @@ def _get_user_preferences(conn, owner):
 # (not regenerated). Hard-exclusion violation rates are low, so drops are rare.
 
 DIET_POST_FILTER_ENABLED = os.getenv('DIET_POST_FILTER_ENABLED', 'true').strip().lower() != 'false'
+# Spare recipes to request per section for users WITH dietary preferences, because the scrub
+# runs after generation and every drop would otherwise leave the set short of ten. Measured
+# drop rate on real runs was 9-12 recipes per full regeneration across both sections.
+RECIPE_DIET_HEADROOM = int(os.getenv('RECIPE_DIET_HEADROOM', '5'))
+# Recipes in the fast first batch, published before the full set is generated. Small enough
+# to come back quickly, big enough to fill the screen.
+RECIPE_FIRST_BATCH = int(os.getenv('RECIPE_FIRST_BATCH', '4'))
 
 _PLANT_BUTTER = r"(peanut|almond|cashew|sunflower|seed|nut|soy|plant|vegan|coconut)\s*butter"
 _PLANT_MILK = r"(coconut|almond|oat|soy|cashew|rice|hemp|plant|non-?dairy|nut)\s*milk"
@@ -1016,8 +1026,13 @@ def _scrub_dairy(b):
     for kill in ("vegan cheese", "dairy-free cheese", "vegan yogurt", "vegan butter",
                  "dairy-free", "plant-based cheese"):
         b = b.replace(kill, "")
-    for w in ["cheese", "cheddar", "mozzarella", "parmesan", "feta", "yogurt", "ghee",
-              "whey", "heavy cream", "sour cream", "cream cheese", " milk", " butter", "buttermilk"]:
+    for w in ["cheese", "cheddar", "mozzarella", "parmesan", "parmigiano", "pecorino",
+              "feta", "ricotta", "mascarpone", "halloumi", "paneer", "burrata", "brie",
+              "gruyere", "gouda", "yogurt", "yoghurt", "ghee", "whey", "casein", "custard",
+              "creme fraiche", "crème fraîche", "clotted cream", "condensed milk",
+              "evaporated milk", "heavy cream", "double cream", "sour cream",
+              "cream cheese", "ice cream", "kefir", "quark", "curd", " milk", " butter",
+              "buttermilk"]:
         if w in b:
             return w.strip()
     return None
@@ -1058,15 +1073,56 @@ def _scrub_shellfish(b):
     return None
 
 
+_ALLERGEN_NEGATIONS = (
+    "peanut-free", "peanut free", "nut-free", "nut free", "dairy-free", "dairy free",
+    "gluten-free", "gluten free", "egg-free", "egg free", "soy-free", "soy free",
+    "sesame-free", "sesame free", "wheat-free", "wheat free", "no peanuts", "no nuts",
+)
+
+
+def _strip_allergen_negations(b):
+    """Remove 'peanut-free'/'nut free'/etc BEFORE matching, so a label advertising the
+    ABSENCE of an allergen is not read as its presence. Without this, 'peanut-free
+    chocolate' is flagged as containing peanuts and a safe recipe is hidden."""
+    for phrase in _ALLERGEN_NEGATIONS:
+        b = b.replace(phrase, " ")
+    return b
+
+
 def _scrub_peanut(b):
-    return "peanut" if "peanut" in b else None
+    # "peanut" alone missed the names peanuts actually travel under: groundnut (UK/India/
+    # Africa), arachis (the botanical name used on labels and in oils), satay and its
+    # spellings, and monkey nut. Every one of these is a real ingredient line on real
+    # recipe sites, and each is a hospital visit for an allergic user.
+    b = _strip_allergen_negations(b)
+    for w in ("peanut", "groundnut", "ground nut", "arachis", "satay", "sate sauce",
+              "monkey nut", "beer nut", "goober"):
+        if w in b:
+            return w
+    return None
 
 
 def _scrub_treenut(b):
-    for w in ["almond", "walnut", "cashew", "pecan", "pistachio", "hazelnut", "macadamia",
-              "brazil nut", "pine nut"]:
+    # Beyond the bare nut names, tree nuts hide inside prepared ingredients that never
+    # say "nut": marzipan and frangipane are almond, praline/nougat/gianduja/nutella are
+    # hazelnut, amaretto is apricot-kernel/almond, and pesto is pine nut unless it
+    # explicitly says otherwise. These are the forms that reach a recipe page.
+    b = _strip_allergen_negations(b)
+    # A peanut is a legume, not a tree nut. Remove peanut forms before the generic
+    # "nut butter"/"nut flour" sweep, or "Spicy Peanut Butter Noodles" is withheld from
+    # someone whose only allergy is tree nuts. Peanuts remain fully covered by
+    # _scrub_peanut for anyone who declares that allergy.
+    b = b.replace("peanut butter", " ").replace("peanut flour", " ").replace("peanut", " ")
+    for w in ("almond", "walnut", "cashew", "pecan", "pistachio", "hazelnut", "macadamia",
+              "brazil nut", "pine nut", "pignoli", "marzipan", "frangipane", "praline",
+              "nougat", "gianduja", "nutella", "amaretto", "amaretti", "filbert",
+              "chestnut", "nut butter", "nut flour", "nut meal"):
         if w in b:
             return w
+    # Pesto is pine nut by default. A pesto that names a different nut is caught above;
+    # one that says nut-free has already been stripped by the negation pass.
+    if "pesto" in b:
+        return "pesto(pine nut)"
     return None
 
 
@@ -1100,6 +1156,17 @@ def _scrub_wheat(b):
 
 
 def _scrub_gluten(b):
+    # "noodle" alone is not gluten: zucchini noodles, rice noodles, glass/mung-bean
+    # noodles and shirataki are all gluten-free staples of exactly the recipes a
+    # gluten-free user wants. Measured: it silently dropped "Avocado Pesto Zucchini
+    # Noodles" from a gluten-free feed. Remove the gluten-free noodle forms before the
+    # sweep, the same way plant milks are removed before the dairy sweep.
+    for gf in ("zucchini noodle", "zoodle", "rice noodle", "glass noodle", "shirataki",
+               "sweet potato noodle", "kelp noodle", "veggie noodle", "vegetable noodle",
+               "chickpea noodle", "lentil noodle", "buckwheat noodle", "gluten-free noodle",
+               "gluten free noodle", "gluten-free pasta", "gluten free pasta",
+               "chickpea pasta", "lentil pasta", "rice pasta", "corn pasta"):
+        b = b.replace(gf, " ")
     w = _scrub_wheat(b)
     if w:
         return w
@@ -1304,7 +1371,7 @@ def _format_preferences_block(prefs):
     return '\n'.join(lines)
 
 
-def _generate_recipes_with_gpt(ingredients_list, kitchen_only_count=10, need_grocery_count=10, excluded_titles=None, owner=None, user_preferences_block=""):
+def _generate_recipes_with_gpt(ingredients_list, kitchen_only_count=10, need_grocery_count=10, excluded_titles=None, owner=None, user_preferences_block="", prefer_fast_model=False):
     from openai import OpenAI
     client = OpenAI(
         api_key=os.getenv('OPENAI_API_KEY'),
@@ -1429,7 +1496,13 @@ Measurement rules (IMPORTANT):
                    input_summary=_gen_input, error=gen_err, owner_id=owner)
             raise
 
+    # The first batch goes straight to the fast model. The primary times out often enough
+    # (~182s before failing over) that paying that cost TWICE — once for the teaser and again
+    # for the full set — turned a 121s wait into 287s. Speed is the entire point of the first
+    # batch; the full set still gets the primary model's quality.
     _gen_model = os.getenv('OPENAI_MODEL', 'gpt-4o')
+    if prefer_fast_model and RECIPE_GEN_FALLBACK_MODEL:
+        _gen_model = RECIPE_GEN_FALLBACK_MODEL
     try:
         return _generate_once(client, _gen_model)
     except Exception as _primary_err:
@@ -1482,6 +1555,37 @@ def _build_recipe_record(recipe, fallback_index=0):
     if 'missing_ingredients' in (recipe or {}):
         record['missing_ingredients'] = recipe.get('missing_ingredients') or []
     return record
+
+
+def _publish_partial_recipes(conn, target_owners, kitchen_only, need_grocery):
+    """Write what is ready so far, keeping status 'regenerating'.
+
+    A full regeneration takes tens of seconds and used to write NOTHING until every recipe was
+    finished, so the user watched a loading screen the whole time even though half the set had
+    been ready for a while. The client already renders a partial set during 'regenerating';
+    it just never received one.
+
+    Best-effort: a failure here must not fail the generation that is still in flight.
+    """
+    try:
+        kitchen_list, need_list = _build_recipes(kitchen_only or [], need_grocery or [])
+        if not kitchen_list and not need_list:
+            return
+        with conn.cursor() as cur:
+            for target_owner in target_owners:
+                table = _recipes_table(target_owner)
+                cur.execute(f"""
+                    UPDATE `{table}`
+                    SET kitchen_only = %s, need_grocery = %s, _updatedDate = NOW()
+                    WHERE _id = 'current'
+                """, (json.dumps(kitchen_list), json.dumps(need_list)))
+        conn.commit()
+        for target_owner in target_owners:
+            _dual_write_recipes_to_shared(conn, target_owner)
+        print(json.dumps({'evt': 'recipes_partial_published',
+                          'kitchen_only': len(kitchen_list), 'need_grocery': len(need_list)}))
+    except Exception as exc:
+        print(json.dumps({'evt': 'recipes_partial_publish_failed', 'error': str(exc)[:160]}))
 
 
 def _build_recipes(kitchen_only, need_grocery):
@@ -1610,9 +1714,583 @@ def _sweep_stuck_recipe_owners(context):
         return {'swept': 0, 'error': 'sweep_failed'}
 
 
+# ============================================================================
+# Personalised Explore — agent-sourced, dietary-safe
+# ============================================================================
+# Explore is a single global table of 337 creator recipes, identical for everyone and
+# blind to dietary preferences. Filtering that pool is not enough: measured against the
+# production filter, a vegan+gluten-free user has only 90 of 337 left, and those 90
+# merely SURVIVED rather than being chosen for them.
+#
+# So this builds a per-user Explore instead. The agent proposes REAL recipe URLs from
+# well-known sites; each is then fetched and parsed by the existing, proven extractor
+# behind POST /analyze-url. That split matters: **the model suggests, the extractor
+# verifies.** A hallucinated URL simply fails to extract and is dropped, so no invented
+# recipe can reach a user — the recipe text always comes from the real page.
+#
+# Every surviving recipe then passes the SAME deterministic dietary filter used for
+# UseWhatIHave (_recipe_violates), applied AFTER generation regardless of what the model
+# was told. With agent sourcing this filter is the only line of defence, which is why it
+# was hardened first. Fail-closed: if filtering leaves few, we show few, never unsafe.
+
+_EXPLORE_PERSONAL_TABLE = 'shared_explore_personal'
+EXPLORE_AGENT_TARGET = int(os.getenv('EXPLORE_AGENT_TARGET', '15'))
+EXPLORE_AGENT_CANDIDATES = int(os.getenv('EXPLORE_AGENT_CANDIDATES', '20'))
+# 15 is a hard requirement, and a single pass cannot guarantee it: the funnel loses ~55%
+# at extraction (sites with no structured recipe data) and more again at the safety
+# filter. So the agent runs ROUNDS until it has 15, telling the model which dishes it has
+# already used so each round brings new ones, and stopping on the job deadline.
+EXPLORE_AGENT_MAX_ROUNDS = int(os.getenv('EXPLORE_AGENT_MAX_ROUNDS', '6'))
+EXPLORE_AGENT_FIRST_ROUND = int(os.getenv('EXPLORE_AGENT_FIRST_ROUND', '6'))
+EXPLORE_AGENT_WORKERS = int(os.getenv('EXPLORE_AGENT_WORKERS', '10'))
+# Suggesting known recipe URLs is recall, not reasoning. The default OPENAI_MODEL here is
+# gpt-5.5, which measured 138-216s for this prompt and left nothing of the Lambda's 420s
+# for the extraction pass. The cheap structured model this app already uses elsewhere does
+# the same job in seconds.
+EXPLORE_AGENT_MODEL = os.getenv('EXPLORE_AGENT_MODEL',
+                                os.getenv('OPENAI_INVENTORY_MODEL', 'gpt-4.1-mini'))
+# Whole-job deadline. The extraction fan-out must never run the function into its own
+# ceiling: past this we stop collecting and store what we already have, rather than dying
+# with nothing. Same principle as the recipe ladder's deadline budgeting.
+EXPLORE_AGENT_DEADLINE_SECONDS = float(os.getenv('EXPLORE_AGENT_DEADLINE_SECONDS', '330'))
+# A build holding the claim longer than this is treated as dead so the next trigger can take
+# over. Comfortably above the agent deadline plus the Lambda's own ceiling, so a slow-but-alive
+# build is never stolen from underneath itself.
+_EXPLORE_BUILD_STALE_SECONDS = float(os.getenv('EXPLORE_BUILD_STALE_SECONDS', '480'))
+EXPLORE_ANALYZE_URL = os.getenv(
+    'EXPLORE_ANALYZE_URL',
+    'https://7tn3gvwvh7.execute-api.us-east-1.amazonaws.com/analyze-url')
+
+
+def _prefs_hash(prefs):
+    """Stable fingerprint of a preference set, so we only rebuild when it actually
+    changes — not on every save of the same values."""
+    norm = {k: sorted([str(x).strip().lower() for x in (prefs.get(k) or []) if str(x).strip()])
+            for k in _DIETARY_PREF_KEYS}
+    return hashlib.md5(json.dumps(norm, sort_keys=True).encode()).hexdigest()[:32]
+
+
+def _ensure_explore_personal_table(conn):
+    with conn.cursor() as cur:
+        cur.execute(f"""
+            CREATE TABLE IF NOT EXISTS `{_EXPLORE_PERSONAL_TABLE}` (
+              `_id` VARCHAR(64) NOT NULL, `owner_id` VARCHAR(64) NOT NULL,
+              `prefs_hash` VARCHAR(32) NOT NULL, `rank` INT NOT NULL DEFAULT 0,
+              `title` VARCHAR(255) NOT NULL, `image_url` VARCHAR(1000) DEFAULT NULL,
+              `source_url` VARCHAR(1000) DEFAULT NULL, `source_domain` VARCHAR(255) DEFAULT NULL,
+              `ingredients` JSON DEFAULT NULL, `instructions` JSON DEFAULT NULL,
+              `notes` JSON DEFAULT NULL, `meal_category` VARCHAR(32) DEFAULT NULL,
+              `why` VARCHAR(255) DEFAULT NULL,
+              `_createdDate` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              PRIMARY KEY (`_id`), KEY `idx_owner_rank` (`owner_id`,`rank`),
+              KEY `idx_owner_prefs` (`owner_id`,`prefs_hash`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4""")
+    conn.commit()
+
+
+# Search results for a broad query ("vegan gluten free dinner recipe") are dominated by
+# roundups and category pages, which carry no single ingredient list. Individual recipe
+# pages come from searching a SPECIFIC DISH. So the work is split by what each side is
+# actually good at: the model names dishes, the search engine finds the real page.
+_EXPLORE_ROUNDUP_RE = re.compile(
+    r'^\d+\s|\b\d+\s+(of\s+)?(the\s+)?(best|favou?rite|incredible|easy|amazing|top)\b'
+    r'|/recipes/?$|/category/|/categories/|/tag/|/collections?/|reddit\.com|pinterest\.'
+    r'|youtube\.com|facebook\.com|/search', re.I)
+# Brave's free tier allows roughly one query per second; anything faster returns 429.
+BRAVE_QPS_DELAY = float(os.getenv('BRAVE_QPS_DELAY_SECONDS', '1.15'))
+
+
+def _diet_query_terms(prefs):
+    """The restriction words to put INTO the search query. Searching a dish name alone
+    returns the ordinary version of that dish, so a vegan feed fills with recipes that
+    then fail the safety filter — one run dropped 10 of 12 that way. Putting the diet in
+    the query makes the search engine do the filtering first, and the safety filter then
+    catches what slips through rather than doing all the work."""
+    terms = []
+    for d in (prefs.get('diets') or []):
+        terms.append(str(d).strip().lower())
+    for a in (prefs.get('allergies') or []):
+        terms.append(f"{str(a).strip().lower()}-free")
+    for r in (prefs.get('religious') or []):
+        terms.append(str(r).strip().lower())
+    seen, out = set(), []
+    for t in terms:
+        if t and t not in seen:
+            seen.add(t)
+            out.append(t)
+    return ' '.join(out[:4])
+
+
+def _brave_find_recipe_url(dish, diet_terms=''):
+    """Search one dish name and return the first result that looks like a single recipe
+    page. Roundups, category pages and social links are skipped — they have no one
+    ingredient list to extract."""
+    key = os.getenv('BRAVE_API_KEY', '').strip()
+    if not key:
+        return None
+    query = f'{diet_terms} {dish} recipe'.strip() if diet_terms else f'{dish} recipe'
+    url = 'https://api.search.brave.com/res/v1/web/search?' + urllib.parse.urlencode(
+        {'q': query, 'count': 8})
+    try:
+        req = urllib.request.Request(
+            url, headers={'Accept': 'application/json', 'X-Subscription-Token': key})
+        with urllib.request.urlopen(req, timeout=20) as r:
+            data = json.load(r)
+    except Exception as exc:
+        print(json.dumps({'evt': 'brave_search_failed', 'dish': dish, 'error': str(exc)[:120]}))
+        return None
+    for item in ((data.get('web') or {}).get('results') or []):
+        title, link = item.get('title', ''), item.get('url', '')
+        if not link or _EXPLORE_ROUNDUP_RE.search(title) or _EXPLORE_ROUNDUP_RE.search(link):
+            continue
+        return {'url': link, 'title': title}
+    return None
+
+
+_EXPLORE_BUILD_TABLE = 'shared_explore_build'
+
+
+def _ensure_explore_build_table(conn):
+    with conn.cursor() as cur:
+        cur.execute(f"""
+            CREATE TABLE IF NOT EXISTS `{_EXPLORE_BUILD_TABLE}` (
+              `owner_id` VARCHAR(64) NOT NULL, `prefs_hash` VARCHAR(32) NOT NULL,
+              `status` VARCHAR(16) NOT NULL DEFAULT 'building',
+              `found` INT NOT NULL DEFAULT 0, `target` INT NOT NULL DEFAULT 15,
+              `claim_token` VARCHAR(36) NULL,
+              `started_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                            ON UPDATE CURRENT_TIMESTAMP,
+              PRIMARY KEY (`owner_id`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4""")
+        # Tables created before the claim existed need the column adding. MySQL has no
+        # ADD COLUMN IF NOT EXISTS, so the duplicate-column error is the "already there" path.
+        try:
+            cur.execute(f"ALTER TABLE `{_EXPLORE_BUILD_TABLE}` "
+                        f"ADD COLUMN `claim_token` VARCHAR(36) NULL")
+        except Exception:
+            pass
+    conn.commit()
+
+
+def _explore_try_claim(conn, owner, fingerprint, target, token):
+    """Atomically claim the right to build this owner's feed. True if we own it.
+
+    Two triggers land for the same person seconds apart routinely: a second save of the
+    same preferences, a household fan-out, a client retry. Without a claim each one runs
+    the whole agent - double the API spend, and two writers racing on the same rows. This
+    is a compare-and-swap on the build row: whoever gets their token in owns the build,
+    everyone else backs off.
+
+    A claim older than _EXPLORE_BUILD_STALE_SECONDS counts as abandoned, so a run that died
+    mid-build can never lock someone out of ever getting a feed again.
+
+    MySQL evaluates ON DUPLICATE KEY UPDATE assignments left to right and later expressions
+    see the NEW value of earlier columns - so every column after `claim_token` applies only
+    when the claim was actually won.
+    """
+    with conn.cursor() as cur:
+        cur.execute(
+            f"""INSERT INTO `{_EXPLORE_BUILD_TABLE}`
+                  (owner_id, prefs_hash, status, found, target, claim_token,
+                   started_at, updated_at)
+                VALUES (%s,%s,'building',0,%s,%s,UTC_TIMESTAMP(),UTC_TIMESTAMP())
+                ON DUPLICATE KEY UPDATE
+                  claim_token = IF(status <> 'building'
+                                   OR updated_at < UTC_TIMESTAMP() - INTERVAL %s SECOND,
+                                   VALUES(claim_token), claim_token),
+                  prefs_hash = IF(claim_token = VALUES(claim_token),
+                                  VALUES(prefs_hash), prefs_hash),
+                  status     = IF(claim_token = VALUES(claim_token), 'building', status),
+                  found      = IF(claim_token = VALUES(claim_token), 0, found),
+                  target     = IF(claim_token = VALUES(claim_token), VALUES(target), target),
+                  started_at = IF(claim_token = VALUES(claim_token),
+                                  UTC_TIMESTAMP(), started_at),
+                  updated_at = UTC_TIMESTAMP()""",
+            [owner, fingerprint, target, token, int(_EXPLORE_BUILD_STALE_SECONDS)])
+    conn.commit()
+    with conn.cursor() as cur:
+        cur.execute(f"SELECT claim_token FROM `{_EXPLORE_BUILD_TABLE}` WHERE owner_id = %s",
+                    [owner])
+        row = cur.fetchone() or {}
+    held = row.get('claim_token') if isinstance(row, dict) else (row[0] if row else None)
+    return held == token
+
+
+def _explore_build_mark(conn, owner, fingerprint, status, found, target):
+    """Publish progress so the app can show recipes arriving instead of a blank wait.
+    A full build takes ~163s for the hardest preference sets; nobody should watch a
+    spinner for that long when the first recipe is ready in about twenty seconds."""
+    with conn.cursor() as cur:
+        cur.execute(
+            f"""INSERT INTO `{_EXPLORE_BUILD_TABLE}`
+                  (owner_id, prefs_hash, status, found, target)
+                VALUES (%s,%s,%s,%s,%s)
+                ON DUPLICATE KEY UPDATE prefs_hash=VALUES(prefs_hash),
+                  status=VALUES(status), found=VALUES(found), target=VALUES(target)""",
+            [owner, fingerprint, status, found, target])
+    conn.commit()
+
+
+def _explore_store_one(conn, owner, fingerprint, rank, r):
+    """Insert ONE recipe the moment it survives the safety filter, so it is visible to the
+    next poll rather than waiting for the whole batch."""
+    with conn.cursor() as cur:
+        cur.execute(
+            f"""INSERT INTO `{_EXPLORE_PERSONAL_TABLE}`
+                (_id, owner_id, prefs_hash, `rank`, title, image_url, source_url,
+                 source_domain, ingredients, instructions, notes, why)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+            [str(uuid.uuid4()), owner, fingerprint, rank, r['title'], r.get('image_url'),
+             r.get('source_url'), r.get('source_domain'), json.dumps(r['ingredients']),
+             json.dumps(r['instructions']), json.dumps(r.get('notes') or []),
+             (r.get('why') or '')[:255]])
+    conn.commit()
+
+
+def _explore_agent_propose_dishes(prefs, count, exclude=None):
+    """Ask the model for DISH NAMES, not URLs.
+
+    Measured: asked for URLs it produced 0 of 16 that existed, because it generates
+    plausible slugs rather than recalling real pages. Naming good dishes that fit a set of
+    restrictions is the thing it is genuinely reliable at, so that is all it is asked for."""
+    from openai import OpenAI
+    exclude = exclude or set()
+    client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'),
+                    timeout=float(os.getenv('EXPLORE_AGENT_TIMEOUT_SECONDS', '90')))
+    lines = []
+    for key, label in (('allergies', 'MUST NOT CONTAIN (allergy)'), ('diets', 'diet'),
+                       ('religious', 'religious rule'), ('health', 'health goal'),
+                       ('custom', 'personal preference')):
+        vals = [str(x).strip() for x in (prefs.get(key) or []) if str(x).strip()]
+        if vals:
+            lines.append(f"- {label}: {', '.join(vals)}")
+    block = "\n".join(lines) or "- no restrictions"
+    system = (
+        "You name excellent, well-known dishes. Return dish names only — no URLs, no "
+        "recipes, no commentary.\n"
+        "Each must fully satisfy every requirement given.\n"
+        "Vary cuisine, meal type and effort. Favour proper meals over two-ingredient "
+        "snacks. Prefer dishes a good food blog would have a dedicated recipe page for.\n"
+        'Respond as JSON: {"dishes":[{"name":"","why":"max 12 words"}]}')
+    user = f"Name {count} dishes for someone with these requirements:\n{block}"
+    if exclude:
+        user += ("\n\nAlready suggested — do NOT repeat these or close variants:\n"
+                 + ", ".join(sorted(exclude)[:60]))
+    resp = _create_chat(client, model=EXPLORE_AGENT_MODEL,
+                        messages=[{'role': 'system', 'content': system},
+                                  {'role': 'user', 'content': user}],
+                        response_format={'type': 'json_object'})
+    text = resp.choices[0].message.content or '{}'
+    try:
+        dishes = (json.loads(text) or {}).get('dishes') or []
+    except Exception:
+        dishes = [json.loads(c) for c in re.findall(r'\{[^{}]*"name"[^{}]*\}', text)]
+    out = [{'name': str(d.get('name') or '').strip(), 'why': str(d.get('why') or '').strip()[:255]}
+           for d in dishes if str((d or {}).get('name') or '').strip()]
+    print(json.dumps({'evt': 'explore_agent_dishes', 'count': len(out)}))
+    return out[:count]
+
+
+def _explore_agent_iter_urls(prefs, count, exclude=None, seen_urls=None):
+    """Dish names from the model, real URLs from search, YIELDED as each one is found.
+
+    Search is rate-limited to about one query a second, so a round of fifteen spends ~17s
+    here. Returning a list meant nothing could be extracted until the last search came back
+    and the whole round then landed at once. Yielding lets each candidate start extracting
+    while the next is still being searched for, so recipes reach the screen steadily instead
+    of in clumps separated by silence.
+    """
+    dishes = _explore_agent_propose_dishes(prefs, count, exclude=exclude)
+    diet_terms = _diet_query_terms(prefs)
+    seen_urls = seen_urls if seen_urls is not None else set()
+    seen_domains, found = {}, 0
+    for dish in dishes:
+        hit = _brave_find_recipe_url(dish['name'], diet_terms)
+        time.sleep(BRAVE_QPS_DELAY)
+        if not hit:
+            continue
+        if hit['url'] in seen_urls:
+            continue
+        domain = urllib.parse.urlparse(hit['url']).netloc.lower()
+        if seen_domains.get(domain, 0) >= 3:      # no single blog fills the feed
+            continue
+        seen_urls.add(hit['url'])
+        seen_domains[domain] = seen_domains.get(domain, 0) + 1
+        found += 1
+        yield {'url': hit['url'], 'title': hit.get('title') or dish['name'],
+               'why': dish.get('why') or ''}
+    print(json.dumps({'evt': 'explore_agent_proposed', 'dishes': len(dishes),
+                      'urls': found, 'domains': len(seen_domains)}))
+
+
+def _explore_screen_and_fetch(candidate):
+    """Liveness check and extraction for ONE candidate, as a single unit of work.
+
+    Kept together so a candidate can go search -> screen -> extract -> stored without waiting
+    on its neighbours. Returns (was_live, recipe_or_None) so the caller can keep its funnel
+    counts accurate without a second pass.
+    """
+    try:
+        if not _explore_url_is_live(candidate['url']):
+            return (False, None)
+    except Exception:
+        return (False, None)
+    try:
+        return (True, _explore_fetch_one(candidate))
+    except Exception:
+        return (True, None)
+
+
+def _explore_url_is_live(url):
+    """Cheap liveness check before spending a full extraction on a URL.
+
+    web_search cuts fabrication but does not eliminate it — a measured run still returned
+    URLs that 404. A HEAD costs ~0.3s against ~10s for an extraction, so screening first
+    lets us over-propose candidates without burning the job's deadline on dead links.
+    Sites that reject HEAD but serve GET are retried; anything still failing is dropped."""
+    for method in ('HEAD', 'GET'):
+        try:
+            req = urllib.request.Request(
+                url, method=method,
+                headers={'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) '
+                                       'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36'})
+            with urllib.request.urlopen(req, timeout=12) as r:
+                if 200 <= r.status < 300:
+                    return True
+        except Exception:
+            continue
+    return False
+
+
+def _explore_fetch_one(candidate):
+    """Fetch + parse ONE candidate through the shared extractor. Returns None on any
+    failure — a hallucinated or dead URL is simply dropped, never guessed at."""
+    try:
+        req = urllib.request.Request(
+            EXPLORE_ANALYZE_URL,
+            data=json.dumps({'url': candidate['url']}).encode(),
+            headers={'Content-Type': 'application/json'})
+        with urllib.request.urlopen(req, timeout=35) as r:
+            payload = json.load(r)
+    except Exception as exc:
+        print(json.dumps({'evt': 'explore_agent_fetch_failed', 'url': candidate['url'],
+                          'error': str(exc)[:160]}))
+        return None
+    text = payload.get('recipe') or ''
+    if not text or text.strip() == 'Not enough recipe information.':
+        return None
+
+    def section(name):
+        m = re.search(rf'{name}:\s*\n(.*?)(\n\n[A-Z][a-z]+:|\Z)', text, re.S)
+        if not m:
+            return []
+        return [ln.lstrip('- ').strip() for ln in m.group(1).split('\n') if ln.strip()]
+
+    ingredients, instructions = section('Ingredients'), section('Instructions')
+    if not ingredients or not instructions:
+        return None                      # same usability bar as a saved recipe
+    title = (re.search(r'Title:\s*\n(.+)', text) or [None, candidate.get('title') or ''])
+    title = title.group(1).strip() if hasattr(title, 'group') else (candidate.get('title') or '')
+    return {
+        'title': (title or candidate.get('title') or 'Recipe')[:255],
+        'ingredients': ingredients, 'instructions': instructions,
+        'notes': section('Notes'),
+        'image_url': payload.get('image_url') or (payload.get('image_urls') or [None])[0],
+        'source_url': candidate['url'],
+        'source_domain': urllib.parse.urlparse(candidate['url']).netloc,
+        'why': candidate.get('why') or '',
+    }
+
+
+def _personalize_explore(conn, owner, request_id=None):
+    """Build this owner's personalised Explore. Safe to call repeatedly: a no-op when the
+    preference fingerprint already matches what is stored."""
+    prefs = _get_user_preferences(conn, owner)
+    _ensure_explore_personal_table(conn)
+    _ensure_explore_build_table(conn)
+    if not any(prefs.get(k) for k in _DIETARY_PREF_KEYS):
+        # Preferences were cleared. Drop the personalised feed rather than leaving it in
+        # place: the app decides which feed to show from what is stored here, so a stale
+        # feed means someone who removed every filter still sees a filtered Explore.
+        with conn.cursor() as cur:
+            cur.execute(f"DELETE FROM `{_EXPLORE_PERSONAL_TABLE}` WHERE owner_id = %s", [owner])
+            cur.execute(f"DELETE FROM `{_EXPLORE_BUILD_TABLE}` WHERE owner_id = %s", [owner])
+        conn.commit()
+        return {'skipped': 'no_preferences', 'cleared': True}
+    fingerprint = _prefs_hash(prefs)
+
+    # "Already built" means a COMPLETED build for these exact preferences. Keying it on a
+    # row count instead strands anyone whose build died early - a run that stopped at five
+    # recipes looks good enough forever and never retries, which is what left a tester
+    # staring at five recipes and a progress bar that never moved.
+    with conn.cursor() as cur:
+        cur.execute(
+            f"""SELECT b.status, b.prefs_hash, b.target,
+                       (SELECT COUNT(*) FROM `{_EXPLORE_PERSONAL_TABLE}` p
+                         WHERE p.owner_id = b.owner_id AND p.prefs_hash = b.prefs_hash) AS n
+                  FROM `{_EXPLORE_BUILD_TABLE}` b WHERE b.owner_id = %s""", [owner])
+        row = cur.fetchone()
+    if row:
+        _get = (lambda k, i: row.get(k)) if isinstance(row, dict) else (lambda k, i: row[i])
+        if (_get('status', 0) == 'complete' and _get('prefs_hash', 1) == fingerprint
+                and int(_get('n', 3) or 0) >= int(_get('target', 2) or EXPLORE_AGENT_TARGET)):
+            return {'skipped': 'unchanged', 'count': int(_get('n', 3) or 0)}
+
+    token = uuid.uuid4().hex
+    if not _explore_try_claim(conn, owner, fingerprint, EXPLORE_AGENT_TARGET, token):
+        # Someone else is already building this feed. Backing off is the whole point:
+        # running anyway would double the spend and race them writing the same rows.
+        print(json.dumps({'evt': 'explore_build_skipped_concurrent', 'owner': owner}))
+        return {'skipped': 'already_building'}
+
+    started = time.monotonic()
+    deadline = started + EXPLORE_AGENT_DEADLINE_SECONDS
+    # Clear the previous feed now that the build is ours, so the app shows an honest
+    # "finding your recipes" state and then watches them arrive one at a time.
+    with conn.cursor() as cur:
+        cur.execute(f"DELETE FROM `{_EXPLORE_PERSONAL_TABLE}` WHERE owner_id = %s", [owner])
+    conn.commit()
+    safe, seen_dishes, seen_urls = [], set(), set()
+    proposed_total = live_total = extracted_total = dropped_total = 0
+
+    # Rounds until the target is met. Each round asks for fresh dish names (the model is
+    # told what it has already given), searches them, screens for liveness, extracts, and
+    # applies the safety filter. A round that adds nothing still costs a round, so the
+    # round cap and the deadline both bound the work.
+    for round_no in range(1, EXPLORE_AGENT_MAX_ROUNDS + 1):
+        if len(safe) >= EXPLORE_AGENT_TARGET or time.monotonic() > deadline:
+            break
+        want = EXPLORE_AGENT_TARGET - len(safe)
+        # Round 1 is deliberately small. Search is rate-limited to ~1 query/sec, so asking
+        # for 20 dishes up front means ~23s before extraction even starts and the screen
+        # stays empty. A short first round puts a real recipe on screen in ~20s, and the
+        # later rounds do the bulk while the user already has something to look at.
+        round_size = (EXPLORE_AGENT_FIRST_ROUND if round_no == 1
+                      else max(EXPLORE_AGENT_CANDIDATES, want * 2))
+        round_live = round_extracted = 0
+        handled = set()
+
+        def _publish(future):
+            """Screen result -> safety filter -> stored, for one candidate.
+
+            Filtering and storing per recipe rather than per round is what lets the app show
+            them arriving; the safety gate still runs on every single recipe before it is
+            kept, regardless of what the model was told."""
+            nonlocal round_live, round_extracted, dropped_total
+            try:
+                was_live, result = future.result()
+            except Exception:
+                was_live, result = False, None
+            if was_live:
+                round_live += 1
+            if not result:
+                return
+            round_extracted += 1
+            reason = _recipe_violates(result, prefs) if DIET_POST_FILTER_ENABLED else None
+            if reason:
+                dropped_total += 1
+                print(json.dumps({'evt': 'diet_scrub_dropped', 'owner': str(owner),
+                                  'title': str(result.get('title') or ''),
+                                  'reason': reason}))
+            elif (result.get('source_url')
+                  and all(result['source_url'] != x.get('source_url') for x in safe)
+                  and len(safe) < EXPLORE_AGENT_TARGET):
+                safe.append(result)
+                try:
+                    _explore_store_one(conn, owner, fingerprint, len(safe) - 1, result)
+                    _explore_build_mark(conn, owner, fingerprint, 'building',
+                                        len(safe), EXPLORE_AGENT_TARGET)
+                except Exception as exc:
+                    print(json.dumps({'evt': 'explore_store_failed',
+                                      'owner': owner, 'error': str(exc)[:160]}))
+
+        futures = []
+        with ThreadPoolExecutor(max_workers=EXPLORE_AGENT_WORKERS) as pool:
+            # Submit each candidate the moment search produces it, and publish anything that
+            # has already finished. Extraction therefore overlaps the next search instead of
+            # waiting for the whole round.
+            for c in _explore_agent_iter_urls(prefs, round_size, exclude=seen_dishes,
+                                              seen_urls=seen_urls):
+                proposed_total += 1
+                seen_dishes.add((c.get('title') or '').lower()[:60])
+                futures.append(pool.submit(_explore_screen_and_fetch, c))
+                for f in [f for f in futures if f.done() and f not in handled]:
+                    handled.add(f)
+                    _publish(f)
+                if len(safe) >= EXPLORE_AGENT_TARGET or time.monotonic() > deadline:
+                    break
+            for f in as_completed(futures):
+                if f in handled:
+                    continue
+                handled.add(f)
+                _publish(f)
+                if len(safe) >= EXPLORE_AGENT_TARGET or time.monotonic() > deadline:
+                    for pf in futures:
+                        pf.cancel()
+                    break
+
+        live_total += round_live
+        extracted_total += round_extracted
+        print(json.dumps({'evt': 'explore_agent_round', 'round': round_no,
+                          'live': round_live, 'extracted': round_extracted,
+                          'kept_total': len(safe)}))
+
+    fetched = []          # kept for the shape of the summary below
+    dropped = dropped_total
+    # The safety gate ran inside every round, on every recipe, after generation and
+    # regardless of what the model was told — it is the only thing standing between an
+    # allergic user and a web-sourced recipe, so nothing reaches this point unfiltered.
+    safe = safe[:EXPLORE_AGENT_TARGET]
+
+    # Rows were written as they were found; nothing left to flush. Close the build so the
+    # app stops polling and drops the progress hero.
+    _explore_build_mark(conn, owner, fingerprint,
+                        'complete' if safe else 'failed', len(safe), EXPLORE_AGENT_TARGET)
+    out = {'owner': owner, 'proposed': proposed_total, 'live': live_total,
+           'extracted': extracted_total, 'dropped_unsafe': dropped,
+           'stored': len(safe), 'target': EXPLORE_AGENT_TARGET,
+           'met_target': len(safe) >= EXPLORE_AGENT_TARGET,
+           'prefs_hash': fingerprint,
+           'elapsed_ms': int((time.monotonic() - started) * 1000)}
+    print(json.dumps({'evt': 'explore_personalized', **out}))
+    return out
+
 def handler(event, context):
     if (event or {}).get('sweep'):
         return _sweep_stuck_recipe_owners(context)
+    # Personalised-Explore build. Separate entry point so it can be invoked on its own
+    # (from a preferences save) without running the whole UseWhatIHave regeneration.
+    if (event or {}).get('explore_personalize'):
+        _owner = (event.get('owner') or '').strip()
+        if not _owner:
+            print('[explore_personalize] Missing owner')
+            return {'error': 'missing owner'}
+        _conn = _mysql_conn()
+        try:
+            return _personalize_explore(_conn, _owner)
+        except Exception as _exc:
+            print(json.dumps({'evt': 'explore_personalize_failed', 'owner': _owner,
+                              'error': str(_exc)[:300]}))
+            _report_backend_error('explore_personalize', owner_id=_owner,
+                                  code='explore_personalize_failed', error=_exc)
+            # Close the build out. Left in 'building' it holds the claim until the stale
+            # window expires and the app keeps polling a build that is never coming back,
+            # so a crash has to publish a terminal state, not just log one.
+            try:
+                with _conn.cursor() as _cur:
+                    _cur.execute(f"UPDATE `{_EXPLORE_BUILD_TABLE}` SET status = 'failed', "
+                                 f"claim_token = NULL, updated_at = UTC_TIMESTAMP() "
+                                 f"WHERE owner_id = %s", [_owner])
+                _conn.commit()
+            except Exception:
+                pass
+            return {'error': str(_exc)[:200]}
+        finally:
+            try:
+                _conn.close()
+            except Exception:
+                pass
     owner = (event.get('owner') or '').strip()
     if not owner:
         print('[recipes_generator] Missing owner')
@@ -1693,11 +2371,55 @@ def handler(event, context):
         gpt_started_at = time.monotonic()
         _structured_prefs = _get_user_preferences(conn, owner)
         _prefs_block = _format_preferences_block(_structured_prefs)
+        # The dietary scrub runs AFTER generation, so asking for exactly ten guarantees a
+        # short set the moment anything is dropped - and a short set used to leave the client
+        # polling forever. Ask for headroom up front for anyone with preferences: one larger
+        # call costs less latency than a second round trip, and the extras are trimmed to ten
+        # below. Users without preferences are unaffected (headroom is zero).
+        _has_prefs = any(_structured_prefs.get(k) for k in _DIETARY_PREF_KEYS)
+        _ask = 10 + (RECIPE_DIET_HEADROOM if _has_prefs else 0)
+
+        # A FAST FIRST BATCH, then the rest.
+        #
+        # Asking for the whole set in one call meant nothing existed for ~120s — the entire
+        # wait is the model generating, so publishing "as sections finish" saved about three
+        # seconds of it. Generating a handful first puts real recipes on screen in a fraction
+        # of the time, and the remainder arrives while the user is already reading. Same total
+        # work, and the app already renders a partial set during 'regenerating'.
+        _first = min(RECIPE_FIRST_BATCH, _ask)
+        first_out = _generate_recipes_with_gpt(
+            ingredients,
+            kitchen_only_count=_first,
+            need_grocery_count=_first,
+            excluded_titles=[],
+            owner=owner,
+            user_preferences_block=_prefs_block,
+            prefer_fast_model=True,
+        )
+        first_out = {
+            'kitchen_only': _scrub_recipes(first_out.get('kitchen_only') or [], _structured_prefs, owner=owner),
+            'need_grocery': _scrub_recipes(first_out.get('need_grocery') or [], _structured_prefs, owner=owner),
+        }
+        _first_titles = [str((r or {}).get('title') or '').strip() for r in
+                         (first_out.get('kitchen_only') or []) + (first_out.get('need_grocery') or [])]
+        try:
+            with ThreadPoolExecutor(max_workers=2) as _fp:
+                _fk = _fp.submit(_normalize_recipe_batch, (first_out.get('kitchen_only') or []),
+                                 'kitchen_only', kitchen_context, owner, 0, 'recipes_generator_first_kitchen')
+                _fn = _fp.submit(_normalize_recipe_batch, (first_out.get('need_grocery') or []),
+                                 'need_grocery', kitchen_context, owner, 0, 'recipes_generator_first_need')
+                _publish_partial_recipes(conn, target_owners,
+                                         _dedupe_recipes(_fk.result()),
+                                         _dedupe_recipes(_fn.result()))
+        except Exception as _exc:
+            print(json.dumps({'evt': 'recipes_first_batch_failed', 'error': str(_exc)[:160]}))
+
+        # The remainder, excluding what we already showed so the set does not repeat itself.
         gpt_out = _generate_recipes_with_gpt(
             ingredients,
-            kitchen_only_count=10,
-            need_grocery_count=10,
-            excluded_titles=[],
+            kitchen_only_count=_ask,
+            need_grocery_count=_ask,
+            excluded_titles=[t for t in _first_titles if t],
             owner=owner,
             user_preferences_block=_prefs_block,
         )
@@ -1717,17 +2439,25 @@ def handler(event, context):
         # substitution matching internally, and the two sections are independent, so overlap
         # them instead of running one after the other.
         with ThreadPoolExecutor(max_workers=2) as _norm_pool:
+            # Normalize the headroom too, not just the first ten - deduping afterwards can
+            # itself drop the set below ten, and there is no point generating spares if they
+            # are sliced off before they can cover a gap.
             _fut_new_kitchen = _norm_pool.submit(
                 _normalize_recipe_batch,
-                (gpt_out.get('kitchen_only') or [])[:10],
+                (gpt_out.get('kitchen_only') or [])[:_ask],
                 'kitchen_only', kitchen_context, owner, 0, 'recipes_generator_new_kitchen',
             )
             _fut_new_need = _norm_pool.submit(
                 _normalize_recipe_batch,
-                (gpt_out.get('need_grocery') or [])[:10],
+                (gpt_out.get('need_grocery') or [])[:_ask],
                 'need_grocery', kitchen_context, owner, 0, 'recipes_generator_new_need',
             )
+            # Publish as each section lands rather than after both. The app already renders
+            # whatever exists while status is 'regenerating' — it was simply never given
+            # anything until the very end, so a dietary change looked like minutes of nothing.
             new_kitchen = _fut_new_kitchen.result()
+            _publish_partial_recipes(conn, target_owners,
+                                     _dedupe_recipes(new_kitchen)[:10], [])
             new_need = _fut_new_need.result()
 
         kitchen_only = _dedupe_recipes(new_kitchen)[:10]
@@ -1738,6 +2468,14 @@ def handler(event, context):
             if not has_existing_recipes:
                 for target_owner in target_owners:
                     _set_status(conn, target_owner, 'failed', 'Could not build a full 10+10 recipe set after survivor backfill')
+            else:
+                # Their previous recipes are still on screen and still fine, but the row was
+                # moved to 'regenerating' when this run started. Returning without resolving
+                # it left the client polling a regeneration that was never going to land -
+                # that is the loader that sticks at 94%. Every exit from here has to publish
+                # a terminal status, even the ones where nothing is wrong.
+                for target_owner in target_owners:
+                    _set_status(conn, target_owner, 'ready')
             return
 
         kitchen_only_list, need_grocery_list = _build_recipes(kitchen_only, need_grocery)

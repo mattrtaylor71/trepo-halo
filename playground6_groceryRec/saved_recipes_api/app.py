@@ -13,7 +13,7 @@ from decimal import Decimal
 from html import unescape
 from io import BytesIO
 from pathlib import Path
-from urllib.parse import urljoin, urlparse, urlunparse, parse_qs, unquote
+from urllib.parse import urljoin, urlparse, urlunparse, parse_qs, unquote, quote
 
 import boto3
 import requests
@@ -72,6 +72,8 @@ _ASYNC_TASK_GENERATE_SAVED_RECIPE_IMAGE = 'generate_saved_recipe_image'
 _ASYNC_TASK_PROCESS_SAVED_RECIPE_BATCH = 'process_saved_recipe_batch'
 _ASYNC_TASK_PROCESS_SAVED_RECIPE_URL = 'process_saved_recipe_url'
 _ASYNC_TASK_REFINE_SAVED_RECIPE_TEXT = 'refine_saved_recipe_text'
+_ASYNC_TASK_REPAIR_SAVED_RECIPE = 'repair_saved_recipe'
+_ASYNC_TASK_PERSONALIZE_WARM = 'personalize_warm'
 _SAVED_RECIPE_BATCH_JOB_TYPE = 'saved_recipe_batch'
 _JOB_STATUS_PENDING = 'PENDING'
 _JOB_STATUS_RUNNING = 'RUNNING'
@@ -94,7 +96,14 @@ _SCRAPECREATORS_VIDEO_ENDPOINT = 'https://api.scrapecreators.com/v2/tiktok/video
 _SLIDESHOW_OCR_MAX_SLIDES = max(1, int(os.getenv('SLIDESHOW_OCR_MAX_SLIDES', '10')))
 _APIFY_INSTAGRAM_ACTOR_ENV = 'APIFY_INSTAGRAM_ACTOR'
 _APIFY_INSTAGRAM_ACTOR = os.getenv(_APIFY_INSTAGRAM_ACTOR_ENV, 'apify~instagram-scraper')
-_APIFY_RUN_TIMEOUT_SECONDS = max(1, int(os.getenv('APIFY_RUN_TIMEOUT_SECONDS', '45')))
+# Apify's instagram-scraper actor WAS non-functional (0 successful runs), so the read
+# timeout was cut to 10s to fail fast into the html fallback. The actor has since
+# recovered — but its run-sync latency is 6-25s (median ~8.5s), so a 10s budget timed
+# out on ~45% of real reels and dropped them onto the html source, whose og:description
+# caption is usually too thin to yield a recipe ("Not enough recipe information."). 30s
+# covers the observed distribution with headroom and still leaves room inside the 120s
+# Lambda timeout. Env-overridable.
+_APIFY_RUN_TIMEOUT_SECONDS = max(1, int(os.getenv('APIFY_RUN_TIMEOUT_SECONDS', '30')))
 _YTDLP_COOKIEFILE_ENV = 'YTDLP_COOKIEFILE'
 _YTDLP_COOKIEFILE_B64_ENV = 'YTDLP_COOKIEFILE_B64'
 _YTDLP_SSM_PARAM_NAME = '/trepo/ytdlp-cookiefile-b64'
@@ -167,7 +176,13 @@ _OWNER_RECIPE_AVAILABILITY_TABLE = 'owner_recipe_availability'
 # Max saved recipes to LLM-match synchronously in one /personalize call. Cache-read
 # serves the rest instantly; a cold recompute beyond this cap defers to the next call
 # so a single request can never exceed the API-gateway timeout.
-_MAX_PERSONALIZE_SYNC_COMPUTE = int(os.getenv('MAX_PERSONALIZE_SYNC_COMPUTE', '20'))
+_MAX_PERSONALIZE_SYNC_COMPUTE = int(os.getenv('MAX_PERSONALIZE_SYNC_COMPUTE', '8'))
+# Background warm: after the sync cap serves the first slice, self-invoke to compute the
+# rest (persisting to cache) so subsequent polls/opens hit the cache instead of the LLM.
+# Fully reversible: PERSONALIZE_ASYNC_WARM=false restores the pre-warm behavior.
+_PERSONALIZE_ASYNC_WARM = os.getenv('PERSONALIZE_ASYNC_WARM', 'true').strip().lower() == 'true'
+_PERSONALIZE_WARM_MAX = int(os.getenv('PERSONALIZE_WARM_MAX', '60'))
+_PERSONALIZE_WARM_CHUNK = int(os.getenv('PERSONALIZE_WARM_CHUNK', '12'))
 _INGREDIENT_NOISE_TOKENS = {
     'a', 'an', 'and', 'fresh', 'organic', 'large', 'small', 'medium', 'lean', 'extra', 'virgin',
     'boneless', 'skinless', 'shredded', 'chopped', 'diced', 'minced', 'sliced', 'ground',
@@ -417,6 +432,55 @@ def _safe_owner_token(owner):
     return re.sub(r'[^a-zA-Z0-9_-]', '', (owner or ''))
 
 
+def _household_owner_filter(conn, owner):
+    """(sql_fragment, params) restricting a shared_saved_recipes read to the acting user's
+    HOUSEHOLD rather than just the user.
+
+    Saved recipes are written per-user but read from the shared table, so a household
+    member who has saved nothing sees an empty list even though their household has
+    hundreds — household 43375 is the live case (one member 207 recipes, the other 0
+    visible). This mirrors exactly how _get_kitchen_items_for_matching already scopes
+    kitchen reads, via _get_household_member_ids.
+
+    READ-ONLY. Mutations continue to resolve by the acting user's own per-owner table
+    (_fetch_saved_recipe_by_id), so cross-member edit/delete still 404s.
+    Falls back to the acting user alone if household resolution fails, so a lookup
+    problem degrades to today's behaviour rather than erroring.
+    """
+    try:
+        members = _get_household_member_ids(conn, owner) or []
+    except Exception:
+        members = []
+    members = [m for m in members if m]
+    if not members:
+        members = [owner]
+    placeholders = ', '.join(['%s'] * len(members))
+    return f"owner_id IN ({placeholders})", list(members)
+
+
+def _dedupe_household_rows(rows, acting_owner):
+    """Collapse the same recipe saved by multiple members, preferring the ACTING user's
+    own copy so tapping it opens an editable row. Mirrors the dedupe already used by
+    _read_household_saved_recipe_rows. Rows without a hash are always kept."""
+    acting = _safe_owner_token(acting_owner)
+    seen = {}
+    out = []
+    for row in rows:
+        key = row.get('resolved_url_hash')
+        if not key:
+            out.append(row)
+            continue
+        if key not in seen:
+            seen[key] = len(out)
+            out.append(row)
+            continue
+        idx = seen[key]
+        if _safe_owner_token(row.get('owner_id')) == acting and \
+                _safe_owner_token(out[idx].get('owner_id')) != acting:
+            out[idx] = row
+    return out
+
+
 def _get_household_member_ids(conn, acting_user_id):
     """Return all user_ids sharing the same household (owner_id) as the acting user."""
     safe = _safe_owner_token(acting_user_id)
@@ -450,7 +514,9 @@ def _dual_write_saved_recipe_to_shared(conn, owner, recipe_id, request_id=None):
         if not row:
             return
         # _SAVED_RECIPE_SELECT_FIELDS omits resolved_url_hash — recompute identically.
-        resolved_url_hash = row.get('resolved_url_hash') or _sha256(
+        # Uses the same canonical key as the writer so the recomputed value matches what
+        # _save_saved_recipe_record stored (identical to the old value for non-Instagram).
+        resolved_url_hash = row.get('resolved_url_hash') or _resolved_url_hash(
             row.get('resolved_url') or row.get('source_url') or recipe_id)
 
         def _j(v):
@@ -532,7 +598,7 @@ def _fan_out_saved_recipe_to_household(conn, primary_owner, recipe_id, request_i
     # is NOT NULL in the member table; without this the fan-out INSERT threw
     # (1048, "Column 'resolved_url_hash' cannot be null") and household members
     # silently never received the shared recipe.
-    member_hash = row.get('resolved_url_hash') or _sha256(
+    member_hash = row.get('resolved_url_hash') or _resolved_url_hash(
         row.get('resolved_url') or row.get('source_url') or recipe_id
     )
     for member_id in other_members:
@@ -618,6 +684,25 @@ def _fan_out_delete_to_household(conn, primary_owner, recipe_id, request_id=None
                     continue
                 cur.execute(f"DELETE FROM `{member_table}` WHERE _id = %s LIMIT 1", [recipe_id])
             conn.commit()
+            # Mirror the MEMBER's delete too. _delete_saved_recipe mirrors the ACTING owner's
+            # row, but this fan-out only ever touched the members' per-owner tables — so every
+            # household member's shared_saved_recipes row survived the delete and, now that
+            # READ_SHARED_SAVED_RECIPES is true, reads come FROM that mirror: the recipe
+            # reappears for the household members who didn't press delete. Same pattern, same
+            # flag gate, same non-blocking contract as the acting-owner delete above.
+            if DUAL_WRITE_SAVED_RECIPES:
+                try:
+                    with conn.cursor() as cur:
+                        cur.execute(
+                            f"DELETE FROM `{_SHARED_SAVED_RECIPES_TABLE}` WHERE owner_id = %s AND _id = %s LIMIT 1",
+                            [member_id, recipe_id],
+                        )
+                    conn.commit()
+                except Exception as exc:
+                    print(json.dumps({'evt': 'dual_write_miss',
+                                      'family': 'saved_recipes_delete_fanout',
+                                      'owner_id': str(member_id), 'recipe_id': str(recipe_id),
+                                      'error': str(exc)[:500]}), file=sys.stderr)
             _delete_owner_recipe_availability(conn, member_id, 'saved', recipe_id)
         except Exception as exc:
             _log_event(request_id, 'household_recipe_delete_fanout_error', member=member_id, error=str(exc))
@@ -644,9 +729,20 @@ def _table_has_column(conn, table, column_name):
 def _ensure_column(conn, table, column_name, ddl):
     if _table_has_column(conn, table, column_name):
         return
-    with conn.cursor() as cur:
-        cur.execute(f"ALTER TABLE `{table}` ADD COLUMN {ddl}")
-    conn.commit()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(f"ALTER TABLE `{table}` ADD COLUMN {ddl}")
+        conn.commit()
+    except pymysql.err.OperationalError as exc:
+        # 1060 = ER_DUP_FIELDNAME. The has-column check above then the ALTER is check-then-act:
+        # two concurrent requests for the same owner (the app fires several /saved-recipes calls
+        # on load; autocommit=True so this is genuine concurrency, not a stale snapshot) can both
+        # pass the check on a fresh table and both fire the ALTER — the loser gets 1060. The
+        # column now exists (the desired end state), so treat it as success. Re-raise anything
+        # else (a bad DDL is ProgrammingError; a missing table is 1146 — neither matches here).
+        if exc.args and exc.args[0] == 1060:
+            return
+        raise
 
 
 def _ensure_saved_recipes_table(conn, owner):
@@ -753,12 +849,21 @@ def _classify_meal_category(title, ingredients, request_id=None):
     return _meal_category_heuristic(title, ings) or 'other'
 
 
-def _apply_saved_recipe_meal_category(conn, owner, recipe_id, title, ingredients, request_id=None):
+def _apply_saved_recipe_meal_category(conn, owner, recipe_id, title, ingredients, request_id=None, provided_category=None):
     """Classify + persist meal_category onto the owner's saved-recipe row. Called
     right BEFORE the shared dual-write so the mirror picks it up. Non-blocking: a
-    failure leaves meal_category NULL (renders as 'other'; backfill/next-write fixes)."""
+    failure leaves meal_category NULL (renders as 'other'; backfill/next-write fixes).
+
+    If provided_category is already a valid category (e.g. a CLAIM reusing the share
+    snapshot's stored meal_category), use it directly and SKIP the classify LLM — no
+    reason to re-derive what we already have. Only the prestructured/claim path passes
+    it; normal URL/text/image saves pass None and still classify via LLM."""
     try:
-        category = _classify_meal_category(title, ingredients, request_id=request_id)
+        provided = _safe_text(provided_category).lower()
+        if provided in RECIPE_MEAL_CATEGORIES:
+            category = provided
+        else:
+            category = _classify_meal_category(title, ingredients, request_id=request_id)
         table = _saved_recipes_table(owner)
         with conn.cursor() as cur:
             cur.execute(
@@ -1409,6 +1514,51 @@ def _sha256(value):
     return hashlib.sha256(str(value or '').encode('utf-8')).hexdigest()
 
 
+# Instagram share links carry a per-share ?igsh= token, so the SAME reel shared twice
+# yields two different URLs and exact-string dedupe can NEVER fire. Reduce any Instagram
+# content URL to a stable identity key built from its shortcode, ignoring /reel/ vs /p/
+# (Instagram serves the same content under both) and dropping query + fragment.
+_INSTAGRAM_SHORTCODE_RE = re.compile(r'^/(?:reel|reels|p|tv)/([A-Za-z0-9_-]+)')
+
+
+def _dedupe_key_for_url(url):
+    """Identity key used for duplicate detection. Non-Instagram URLs are returned
+    unchanged so their existing hashes stay valid."""
+    text = _safe_text(url)
+    if not text:
+        return text
+    try:
+        parsed = urlparse(text)
+    except ValueError:
+        return text
+    host = (parsed.netloc or '').lower()
+    if not (host in _VALID_INSTAGRAM_HOSTS or host.endswith('.instagram.com')):
+        return text
+    match = _INSTAGRAM_SHORTCODE_RE.match(parsed.path or '')
+    if not match:
+        return text
+    return f'instagram:{match.group(1)}'
+
+
+def _resolved_url_hash(resolved_url):
+    """Hash written on NEW rows: the canonical identity key."""
+    return _sha256(_dedupe_key_for_url(resolved_url))
+
+
+def _resolved_url_hash_candidates(resolved_url):
+    """Hashes to CHECK when deciding whether we already hold this recipe. The canonical
+    key first, then the legacy raw-URL hash, so rows written before canonicalization
+    still dedupe instead of silently duplicating. Order matters only for readability —
+    both are looked up."""
+    keys = []
+    canonical = _dedupe_key_for_url(resolved_url)
+    raw = _safe_text(resolved_url)
+    for key in (canonical, raw):
+        if key and key not in keys:
+            keys.append(key)
+    return [_sha256(key) for key in keys]
+
+
 def _sha256_bytes(value):
     return hashlib.sha256(value or b'').hexdigest()
 
@@ -1520,12 +1670,74 @@ def _put_saved_recipe_batch_job(job):
     return job
 
 
+# Retention for FAILED jobs. The submission payload (and, for image saves, the uploaded
+# photos it references) is what makes a failed save re-drivable — it is deliberately kept
+# so a fix-then-sweep can replay it. But users submitted these intending a saved recipe,
+# not indefinite storage of failures, so failed job records carry a TTL and age out.
+# Successful jobs are untouched by this.
+_FAILED_JOB_TTL_DAYS = max(1, int(os.getenv('FAILED_JOB_TTL_DAYS', '30')))
+
+
+def _failed_job_ttl_epoch():
+    return int(time.time()) + (_FAILED_JOB_TTL_DAYS * 86400)
+
+
+# BUILD_STAMP is written into the deployment zip by scripts/deploy_overlay.sh at deploy
+# time (deploy timestamp + sha256 of app.py). We deploy to $LATEST without publishing
+# versions, so AWS_LAMBDA_FUNCTION_VERSION is the literal string "$LATEST" on every build
+# and answers nothing — on 2026-07-25 five deploys shared it. The stamp is what actually
+# identifies which build handled a job.
+#
+# Read once at cold start and FAIL SOFT: a missing or unreadable stamp records
+# 'unstamped' and must never break the function. An unstamped build is a small
+# observability loss; a build that won't import is an outage.
+def _read_build_stamp():
+    try:
+        stamp_path = Path(__file__).resolve().parent / 'BUILD_STAMP'
+        if not stamp_path.exists():
+            return 'unstamped'
+        return _safe_text(stamp_path.read_text(encoding='utf-8')).splitlines()[0][:120] or 'unstamped'
+    except Exception:
+        return 'unstamped'
+
+
+_BUILD_STAMP = _read_build_stamp()
+
+
+def _build_identity():
+    """Which build handled this job. Today proved we need to know WHICH deploy failed a
+    save: three deploys landed within 25 minutes and the only way to attribute a failure
+    was to correlate timestamps by hand."""
+    return {
+        'build_stamp': _BUILD_STAMP,
+        'function_version': _safe_text(os.getenv('AWS_LAMBDA_FUNCTION_VERSION')),
+        'log_stream': _safe_text(os.getenv('AWS_LAMBDA_LOG_STREAM_NAME')),
+    }
+
+
 def _update_saved_recipe_batch_job(job_id, **fields):
     job = _get_saved_recipe_batch_job(job_id)
     if not job:
         raise ServiceError('Saved recipe batch job not found.', status_code=404)
     job.update(fields)
     job['updated_at'] = _utc_now_iso()
+    # On a terminal failure, stamp the job so it is re-drivable AND attributable:
+    # where the original input lives, what failed, and which build failed it.
+    if _safe_text(job.get('status')) == _JOB_STATUS_FAILED:
+        identity = _build_identity()
+        job.setdefault('failed_at', job['updated_at'])
+        # Prefer the deploy stamp; function_version is "$LATEST" for every build.
+        job['failed_build'] = identity.get('build_stamp') or 'unstamped'
+        job['failed_function_version'] = identity.get('function_version')
+        job['failed_log_stream'] = identity.get('log_stream')
+        # input_refs makes the re-drive contract explicit instead of implicit: the
+        # submission JSON is never deleted and image objects it points at survive, so
+        # these two fields are all a sweep needs.
+        job['input_refs'] = {
+            'payload_s3_key': _safe_text(job.get('payload_s3_key')),
+            'kind': _safe_text(job.get('submission_kind')),
+        }
+        job['ttl'] = job.get('ttl') or _failed_job_ttl_epoch()
     _put_saved_recipe_batch_job(job)
     return job
 
@@ -1750,6 +1962,10 @@ def _build_saved_recipe_input(body):
     content = _safe_text(payload.get('content') or payload.get('text') or payload.get('caption'))
     image_url = _safe_text(payload.get('image_url') or payload.get('imageUrl'))
     image_base64 = _safe_text(payload.get('image_base64') or payload.get('imageBase64') or payload.get('image_data') or payload.get('imageData'))
+    # Attribution hints. Deliberately NOT part of provided_modes below: they describe where
+    # already-extracted content came from, they are not another way of supplying a recipe.
+    source_url_hint = _safe_text(payload.get('source_url') or payload.get('sourceUrl'))
+    source_image_hint = _safe_text(payload.get('source_image_url') or payload.get('sourceImageUrl'))
     raw_images = payload.get('images')
     images = []
     if raw_images is not None:
@@ -1778,6 +1994,8 @@ def _build_saved_recipe_input(body):
         return {
             'kind': 'content',
             'content': content,
+            'source_url': source_url_hint,
+            'image_url': source_image_hint,
         }
     if images:
         return {
@@ -1792,25 +2010,46 @@ def _build_saved_recipe_input(body):
     }
 
 
+def _text_hero_image(extraction):
+    """The real photo a text save was handed, if any. Only http(s) — never a synthetic URL."""
+    url = _safe_text((extraction or {}).get('image_url'))
+    return url if url.lower().startswith(('http://', 'https://')) else None
+
+
 def _manual_recipe_url(kind, fingerprint):
     return f"app://saved-recipes/{kind}/{fingerprint}"
 
 
-def _build_text_recipe_extraction(content):
+def _build_text_recipe_extraction(content, source_url=None, image_url=None):
+    """Recipe from text the caller already holds.
+
+    `source_url` is an attribution hint, not a fetch instruction: the caller is saving
+    content it has already extracted (and, for the personalised Explore feed, already run
+    through the dietary filter), so nothing here re-reads the page. Recording the real URL
+    instead of the synthetic app:// one keeps the saved recipe pointing at where it came
+    from, lets it dedupe against the same recipe saved by URL, and lets the client recognise
+    it as saved — matching on a synthetic hash it cannot compute is why bookmarks on
+    agent-found recipes lit up and then went dark again.
+    """
     source_text = _safe_text(content)
     if not source_text:
         raise ServiceError('Provide recipe text.', status_code=400)
     fingerprint = _sha256(source_text)
     synthetic_url = _manual_recipe_url('text', fingerprint)
+    attributed = _safe_text(source_url)
+    # Only trust a real http(s) URL; anything else falls back to the synthetic one.
+    if attributed and not attributed.lower().startswith(('http://', 'https://')):
+        attributed = ''
+    hero = _safe_text(image_url)
     return {
-        'url': synthetic_url,
-        'resolved_url': synthetic_url,
+        'url': attributed or synthetic_url,
+        'resolved_url': attributed or synthetic_url,
         'platform': 'text',
         'content': source_text,
         'caption': source_text,
         'title': '',
-        'image_url': '',
-        'image_urls': [],
+        'image_url': hero,
+        'image_urls': [hero] if hero else [],
         'source': 'user_text',
         'author_name': None,
         'caption_field': 'content',
@@ -2008,7 +2247,8 @@ Rules:
 - Do not return markdown fences or extra prose."""
 
 
-def _extract_recipe_fragment_from_image(prepared_image, request_id=None, image_index=None):
+def _extract_recipe_fragment_from_image(prepared_image, request_id=None, image_index=None,
+                                        escalate_on_not_recipe=True):
     client = _openai_client()
     image_reference = f"data:{prepared_image['content_type']};base64,{base64.b64encode(prepared_image['image_bytes']).decode('ascii')}"
     # A transient OpenAI blip was flagging VALID recipe images as not_recipe → the whole
@@ -2061,6 +2301,14 @@ def _extract_recipe_fragment_from_image(prepared_image, request_id=None, image_i
         last_reason = 'not_recipe' if payload.get('not_recipe') else 'empty_transcription'
         _log_event(request_id, 'saved_recipe_image_extract_retry', model=model,
                    image_index=image_index, attempt=attempt_idx + 1, failure_reason=last_reason)
+        # A confident "this isn't a recipe" on a VIDEO COVER FRAME is almost always right,
+        # and re-asking twice more cannot turn a photo of a person in a kitchen into a recipe
+        # card. Those six doomed model calls were eating the whole request budget, so audio
+        # never ran — and audio is the only rung that recovers the steps for a talking video.
+        # The escalation still applies in full to user-uploaded images, where the picture
+        # really is a recipe and a transient blip is the likely explanation.
+        if not escalate_on_not_recipe and last_reason == 'not_recipe':
+            break
     # All attempts, including the flagship failover, agree it's not a usable recipe.
     raise ServiceError('Not enough recipe information.', status_code=422)
 
@@ -2108,6 +2356,7 @@ def _extract_recipe_from_social_preview_images(extraction, request_id=None):
                 prepared_image,
                 request_id=request_id,
                 image_index=f'preview-{image_index}',
+                escalate_on_not_recipe=False,
             )
             _log_event(
                 request_id,
@@ -2130,6 +2379,22 @@ def _extract_recipe_from_social_preview_images(extraction, request_id=None):
     raise ServiceError('No usable social preview image was available.', status_code=422)
 
 
+# A single recipe photographed across pages is 1-3 images in practice (recipe page +
+# continuation, or page + finished-dish shot). Nothing in the grouping call constrained
+# cluster size, so the model could return ONE cluster spanning every submitted image; the
+# merged text then refined into a single unusable recipe and the whole batch 422'd.
+# Observed 2026-07-25: four separate 8-image batches failed this way on three attempts
+# each, while a 5-image batch from the same user succeeded — deterministic at-cap failure,
+# not nondeterminism.
+_MAX_IMAGES_PER_RECIPE_CLUSTER = max(1, int(os.getenv('MAX_IMAGES_PER_RECIPE_CLUSTER', '3')))
+
+
+def _split_oversized_cluster(items, limit):
+    """Break an oversized cluster into chunks of at most `limit` items. Splits rather than
+    drops, so no submitted image is ever lost."""
+    return [items[i:i + limit] for i in range(0, len(items), limit)]
+
+
 def _group_image_fragments(fragments, request_id=None):
     if not fragments:
         return []
@@ -2149,7 +2414,9 @@ def _group_image_fragments(fragments, request_id=None):
     try:
         response = _openai_client().chat.completions.create(
             model=_OPENAI_VISION_MODEL,
-            temperature=0.1,
+            # Deterministic grouping: identical retries should group identically, so a
+            # re-drive is a genuine retry rather than a fresh roll of the dice.
+            temperature=0,
             messages=[
                 {'role': 'system', 'content': _recipe_image_grouping_prompt()},
                 {'role': 'user', 'content': json.dumps(summary, ensure_ascii=True)},
@@ -2192,7 +2459,39 @@ def _group_image_fragments(fragments, request_id=None):
         if idx not in used:
             clusters.append({'title_hint': fragment.get('title_hint') or '', 'fragments': [fragment]})
 
-    return clusters
+    # NOTE: grouping deliberately does NOT second-guess a single all-images cluster.
+    # A sample of 507 real multi-image batches showed 51% are ONE recipe photographed
+    # across several pages, so "one big cluster" is most often CORRECT. Pre-emptively
+    # splitting it would break the majority case. If the merged extraction turns out to
+    # yield no recipe, the SAVE path falls back to per-image (see
+    # _save_recipe_image_clusters) — a fallback on evidence, not a guess from image count.
+    #
+    # CAP EXEMPTION for that same shape: a SINGLE cluster spanning EVERY image must not be
+    # capped either. 48 historical batches with >3 images resolved to exactly 1 recipe, and
+    # chopping one recipe into 3+3+2 would produce three partial recipes — re-introducing,
+    # one layer down, the very harm merged-first removes. The cap still applies to genuine
+    # multi-cluster results, where an over-large cluster really does indicate over-merging.
+    if len(clusters) == 1 and len(clusters[0].get('fragments') or []) == len(fragments):
+        return clusters
+
+    capped = []
+    for cluster in clusters:
+        frags = list(cluster.get('fragments') or [])
+        if len(frags) <= _MAX_IMAGES_PER_RECIPE_CLUSTER:
+            capped.append(cluster)
+            continue
+        _log_event(
+            request_id,
+            'saved_recipe_image_cluster_capped',
+            cluster_size=len(frags),
+            cap=_MAX_IMAGES_PER_RECIPE_CLUSTER,
+        )
+        for chunk in _split_oversized_cluster(frags, _MAX_IMAGES_PER_RECIPE_CLUSTER):
+            capped.append({
+                'title_hint': cluster.get('title_hint') or '',
+                'fragments': chunk,
+            })
+    return capped
 
 
 def _merge_image_cluster(cluster):
@@ -2223,6 +2522,8 @@ def _merge_image_cluster(cluster):
         'extraction': extraction,
         'prepared_images': prepared_images,
         'image_indexes': [fragment.get('image_index') for fragment in fragments],
+        # Retained so a failed merged save can be retried as individual images.
+        'fragments': fragments,
     }
 
 
@@ -2521,9 +2822,124 @@ def _curl_cffi_fetch(url):
     )
 
 
+# --- Tier 3: residential-egress proxy --------------------------------------
+# Tiers 1 and 2 both lose on the Dotdash Meredith / People Inc. network (Allrecipes,
+# Food & Wine, Serious Eats, Simply Recipes): those hosts block on IP REPUTATION —
+# 402 for tier-1 requests, then 403 for tier-2 curl_cffi — so nothing we spoof from a
+# Lambda datacenter IP can win. The only remaining lever is egressing from a
+# residential IP. Tier 3 therefore re-runs the SAME Chrome-impersonating fetch
+# through a residential proxy: the IP is what changes, but the TLS fingerprint still
+# has to be right, which is why this is curl_cffi and not plain requests (verified —
+# a residential IP with curl's own fingerprint still gets a 403 bot wall).
+# The provider is pluggable via env so the vendor can be swapped without a deploy.
+_FETCH_PROXY_PROVIDER_ENV = 'RECIPE_FETCH_PROXY_PROVIDER'
+_FETCH_PROXY_URL_ENV = 'RECIPE_FETCH_PROXY_URL'
+_FETCH_PROXY_TIMEOUT_ENV = 'RECIPE_FETCH_PROXY_TIMEOUT_SECONDS'
+_APIFY_PROXY_PASSWORD_ENV = 'APIFY_PROXY_PASSWORD'
+_APIFY_PROXY_GROUPS_ENV = 'APIFY_PROXY_GROUPS'
+_APIFY_PROXY_COUNTRY_ENV = 'APIFY_PROXY_COUNTRY'
+_APIFY_PROXY_ENDPOINT = 'proxy.apify.com:8000'
+# Residential egress adds a hop plus real-ISP latency, so tier 3 gets a bigger budget
+# than the 15s direct tiers — but a bounded one. A single web_recipe import can run the
+# whole ladder up to 3x (resolve, then json-ld, then the html fallback), so the ceiling
+# that matters is 3 x (15 + 15 + tier3). _PROXY_FETCH_CACHE collapses those repeats, and
+# 25s keeps even the uncached worst case under the function's 120s timeout.
+_PROXY_FETCH_TIMEOUT_SECONDS = max(1, min(30, int(os.getenv(_FETCH_PROXY_TIMEOUT_ENV, '25'))))
+# Tier 3 is metered (residential proxies bill per GB) and a recipe page is ~500KB, so the
+# 3 ladder runs of one import would otherwise buy the same HTML three times. Short-TTL
+# memo, tier-3 ONLY — tiers 1 and 2 keep their exact current fetch-every-time behavior.
+# The TTL is per-container and short enough that a later import re-fetches fresh.
+_PROXY_FETCH_CACHE = {}
+_PROXY_FETCH_CACHE_TTL_SECONDS = 180
+_PROXY_FETCH_CACHE_MAX = 8
+_APIFY_PROXY_PASSWORD_CACHE = {}
+
+
+def _apify_proxy_password():
+    """Apify proxy password. Prefers the explicit env var; otherwise derives it once
+    from APIFY_TOKEN (the account API exposes it) and memoizes it for the container.
+    Returns '' when it cannot be resolved, which leaves tier 3 dark."""
+    explicit = _safe_text(os.getenv(_APIFY_PROXY_PASSWORD_ENV))
+    if explicit:
+        return explicit
+    if 'password' in _APIFY_PROXY_PASSWORD_CACHE:
+        return _APIFY_PROXY_PASSWORD_CACHE['password']
+    password = ''
+    token = _safe_text(os.getenv(_APIFY_TOKEN_ENV))
+    if token:
+        try:
+            resp = requests.get('https://api.apify.com/v2/users/me',
+                                params={'token': token}, timeout=10)
+            if resp.status_code < 400:
+                data = (resp.json() or {}).get('data') or {}
+                password = _safe_text((data.get('proxy') or {}).get('password'))
+        except Exception:
+            password = ''
+    _APIFY_PROXY_PASSWORD_CACHE['password'] = password
+    return password
+
+
+def _fetch_proxy_endpoint():
+    """Proxy URL for the configured tier-3 provider, or '' when tier 3 is dark (no
+    provider configured — the ladder then ends at tier 2 exactly as it does today)."""
+    override = _safe_text(os.getenv(_FETCH_PROXY_URL_ENV))
+    if override:
+        # Generic escape hatch: any vendor that speaks HTTP proxy (Bright Data,
+        # Oxylabs, Zyte, ScrapingBee proxy mode, ...) needs only this one var set.
+        return override
+    provider = _safe_text(os.getenv(_FETCH_PROXY_PROVIDER_ENV)).lower()
+    if provider == 'apify':
+        password = _apify_proxy_password()
+        if not password:
+            return ''
+        groups = _safe_text(os.getenv(_APIFY_PROXY_GROUPS_ENV)) or 'RESIDENTIAL'
+        country = _safe_text(os.getenv(_APIFY_PROXY_COUNTRY_ENV)) or 'US'
+        username = f'groups-{groups}'
+        if country:
+            username += f',country-{country}'
+        return f'http://{quote(username, safe="-,")}:{quote(password, safe="")}@{_APIFY_PROXY_ENDPOINT}'
+    return ''
+
+
+def _proxy_fetch(url, proxy_url):
+    from curl_cffi import requests as _cffi_requests
+    return _cffi_requests.get(
+        url,
+        impersonate='chrome',
+        timeout=_PROXY_FETCH_TIMEOUT_SECONDS,
+        allow_redirects=True,
+        proxy=proxy_url,
+    )
+
+
+def _proxy_cache_get(url):
+    entry = _PROXY_FETCH_CACHE.get(url)
+    if not entry:
+        return None
+    cached_at, result = entry
+    if (time.time() - cached_at) > _PROXY_FETCH_CACHE_TTL_SECONDS:
+        _PROXY_FETCH_CACHE.pop(url, None)
+        return None
+    return result
+
+
+def _proxy_cache_put(url, result):
+    if len(_PROXY_FETCH_CACHE) >= _PROXY_FETCH_CACHE_MAX:
+        _PROXY_FETCH_CACHE.clear()
+    _PROXY_FETCH_CACHE[url] = (time.time(), result)
+
+
+def _is_upstream_block(exc):
+    """True when the failure is purely the remote site refusing us (every fetch tier
+    hit a bot wall / IP block), as opposed to a fault on our side. Callers use this to
+    keep pure blocks out of the paging error feed while still failing the job."""
+    return bool(isinstance(exc, ServiceError) and (exc.extra or {}).get('upstream_block'))
+
+
 def _fetch_page(url, request_id=None):
     """Layered page fetch: cheap browser-header requests first, then Chrome
-    TLS-impersonation (curl_cffi) only if the first tier looks bot-blocked.
+    TLS-impersonation (curl_cffi) only if the first tier looks bot-blocked, then the
+    same impersonating fetch through a residential proxy if tier 2 is blocked too.
     Returns a _FetchResult or raises a friendly ServiceError."""
     # Social hosts (Instagram/TikTok) get the ORIGINAL minimal headers: the
     # aggressive Referer/Sec-Fetch-Site=cross-site profile makes Instagram
@@ -2540,12 +2956,19 @@ def _fetch_page(url, request_id=None):
     )
     attempts = []
     blocked = False
+    # Did any tier get an actual REFUSAL from the site (a block-signature HTTP status or
+    # a challenge page) as opposed to a transport error? Only a refusal proves the remote
+    # end is deliberately turning us away. If every tier merely errored out (DNS, TLS,
+    # timeout) that could equally be OUR egress broken — an incident we still need paged,
+    # so it must not be laundered into a low-severity blocked_host marker.
+    refused = False
     try:
         r = requests.get(url, timeout=_REQUEST_TIMEOUT_SECONDS, allow_redirects=True, headers=tier1_headers)
         attempts.append({'tier': 'requests', 'status': r.status_code})
         if r.status_code < 400 and not _looks_like_challenge(r.text):
             return _FetchResult(r.url or url, r.status_code, r.text, 'requests')
         blocked = r.status_code in _FETCH_BLOCK_STATUSES or _looks_like_challenge(r.text)
+        refused = refused or blocked
         if not blocked:
             # Non-block 4xx (e.g. 404/410) — genuinely unreachable, don't escalate.
             raise ServiceError(f'Could not reach URL (HTTP {r.status_code}).', status_code=502)
@@ -2562,14 +2985,51 @@ def _fetch_page(url, request_id=None):
                 # Corpus: record which sites required TLS-impersonation to get past
                 # a bot wall (tier-1 requests was blocked, tier-2 curl_cffi won).
                 _log_event(request_id, 'web_fetch_recovered', url=url,
-                           tier1_status=attempts[0]['status'], status=cr.status_code)
+                           tier1_status=attempts[0]['status'], status=cr.status_code,
+                           tier='curl_cffi')
                 return _FetchResult(str(cr.url) or url, cr.status_code, cr.text, 'curl_cffi')
+            refused = refused or (cr.status_code in _FETCH_BLOCK_STATUSES
+                                  or _looks_like_challenge(cr.text))
         except Exception as exc:
             attempts.append({'tier': 'curl_cffi', 'status': f'error: {exc}'})
 
+    # Tier 3: residential-egress proxy — ONLY when tier 2 came back blocked too, and
+    # never for social hosts. Instagram/TikTok have their own extraction path and their
+    # own auth walls; a residential IP does not help them and would just burn metered
+    # bandwidth. `blocked` is already the tier-1/tier-2 block gate, so a tier-1 success
+    # or a non-block 4xx (404/410, which raises above) never reaches here.
+    if blocked and not is_social:
+        cached = _proxy_cache_get(url)
+        if cached is not None:
+            return cached
+        proxy_url = _fetch_proxy_endpoint()
+        if proxy_url:
+            try:
+                pr = _proxy_fetch(url, proxy_url)
+                attempts.append({'tier': 'proxy', 'status': pr.status_code})
+                if pr.status_code < 400 and not _looks_like_challenge(pr.text):
+                    # Corpus: the sites that need a residential IP rather than just a
+                    # browser fingerprint — i.e. the tier-2-lost / tier-3-won population.
+                    _log_event(request_id, 'web_fetch_recovered', url=url,
+                               tier1_status=attempts[0]['status'], status=pr.status_code,
+                               tier='proxy')
+                    result = _FetchResult(str(pr.url) or url, pr.status_code, pr.text, 'proxy')
+                    _proxy_cache_put(url, result)
+                    return result
+                refused = refused or (pr.status_code in _FETCH_BLOCK_STATUSES
+                                      or _looks_like_challenge(pr.text))
+            except Exception as exc:
+                attempts.append({'tier': 'proxy', 'status': f'error: {exc}'})
+
     _log_event(request_id, 'web_fetch_blocked', url=url,
-               tiers_tried=[a['tier'] for a in attempts], statuses=attempts)
-    raise ServiceError('This site is blocking us — try copying the recipe text instead.', status_code=502)
+               tiers_tried=[a['tier'] for a in attempts], statuses=attempts, refused=refused)
+    # `upstream_block` only when the site actually refused us (see `refused` above): that
+    # is the site's decision, not a fault in our backend, and the user already gets the
+    # graceful copy-the-text fallback — so _is_upstream_block lets the job runner skip
+    # paging. An all-transport-error failure leaves the flag off and pages as it does today.
+    raise ServiceError('This site is blocking us — try copying the recipe text instead.',
+                       status_code=502,
+                       extra={'upstream_block': refused, 'blocked_host': host})
 
 
 def _resolve_url(url, request_id=None):
@@ -2999,19 +3459,58 @@ def _extract_first_apify_post(items, fallback_url=''):
         or post.get('owner_username')
         or post.get('username')
     )
+    # The actor already returns direct CDN media links in the same response we pay for.
+    # yt-dlp cannot fetch Instagram media at all any more (IG answers unauthenticated
+    # requests with an empty media response), so this is our only working route to the
+    # audio — and it costs no extra actor run. Prefer audioUrl when present: it is far
+    # smaller than the mp4 and Whisper accepts either.
+    audio_url = _safe_text(post.get('audioUrl') or post.get('audio_url'))
+    video_url = _safe_text(post.get('videoUrl') or post.get('video_url'))
     return {
         'url': url or fallback_url,
         'caption': caption,
         'image_url': image_url,
         'image_urls': _unique_texts([image_url]),
         'author_name': author_name,
+        'audio_url': audio_url,
+        'video_url': video_url,
+        'media_url': audio_url or video_url,
     }
+
+
+# A single saved-recipe job can call the Apify extractor twice for the same URL: once
+# in the provider chain, and again as the `_analyze_extraction` fallback when the caption
+# turned out to be too thin. With a 30s read timeout that would mean paying the timeout
+# twice inside one 120s Lambda. Memoize the attempt (success OR failure) per REQUEST so
+# the second call reuses the first outcome. Keying on request_id — not just the URL —
+# keeps the memo inside one job: a user retrying a minute later still gets a fresh
+# attempt rather than a cached failure from a warm container.
+_APIFY_IG_ATTEMPT_CACHE = {}
+_APIFY_IG_ATTEMPT_CACHE_MAX = 16
+
+
+def _apify_ig_attempt_remember(cache_key, outcome, payload):
+    """Record this request's Apify outcome. No-op when we have no request_id to scope
+    the memo to (a bare URL key could leak across jobs in a warm container)."""
+    if not cache_key[0]:
+        return
+    if len(_APIFY_IG_ATTEMPT_CACHE) >= _APIFY_IG_ATTEMPT_CACHE_MAX:
+        _APIFY_IG_ATTEMPT_CACHE.clear()
+    _APIFY_IG_ATTEMPT_CACHE[cache_key] = (outcome, payload)
 
 
 def _extract_instagram_apify(resolved_url, request_id=None):
     token = _safe_text(os.getenv(_APIFY_TOKEN_ENV))
     if not token:
         raise RuntimeError(f'{_APIFY_TOKEN_ENV} is not set.')
+
+    cache_key = (_safe_text(request_id), _safe_text(resolved_url))
+    cached = _APIFY_IG_ATTEMPT_CACHE.get(cache_key) if cache_key[0] else None
+    if cached is not None:
+        outcome, payload = cached
+        if outcome == 'ok':
+            return payload
+        raise payload
 
     started = time.time()
     endpoint = f'https://api.apify.com/v2/acts/{_APIFY_INSTAGRAM_ACTOR}/run-sync-get-dataset-items'
@@ -3040,7 +3539,7 @@ def _extract_instagram_apify(resolved_url, request_id=None):
             actor=_APIFY_INSTAGRAM_ACTOR,
             latency_ms=int((time.time() - started) * 1000),
         )
-        return {
+        result = {
             'content': content,
             'title': content[:80],
             'image_url': _safe_text(post.get('image_url')),
@@ -3049,7 +3548,10 @@ def _extract_instagram_apify(resolved_url, request_id=None):
             'author_name': post.get('author_name'),
             'caption_field': 'caption',
             'warnings': [],
+            'media_url': _safe_text(post.get('media_url')),
         }
+        _apify_ig_attempt_remember(cache_key, 'ok', result)
+        return result
     except Exception as exc:
         _log_event(
             request_id,
@@ -3059,7 +3561,111 @@ def _extract_instagram_apify(resolved_url, request_id=None):
             latency_ms=int((time.time() - started) * 1000),
             failure_reason=str(exc),
         )
-        raise RuntimeError(f'Apify Instagram extraction failed: {exc}')
+        failure = RuntimeError(f'Apify Instagram extraction failed: {exc}')
+        _apify_ig_attempt_remember(cache_key, 'err', failure)
+        raise failure
+
+
+# --- Web article body extraction --------------------------------------------------
+# The html fallback previously built its content from og:description ALONE, which is a
+# ~130-char marketing blurb. Two consequences, both measured on live data:
+#   1. Pages with no Recipe json-ld (sipnfeel, thepastatable) 422'd, or worse
+#   2. the refiner INVENTED a plausible recipe from the dish name — 50.7% of successful
+#      web html saves had no digit in any ingredient.
+# The recipe text is almost always sitting in the page body we never read. This reads it.
+#
+# Scoped deliberately: only for non-social web hosts, and only in the html fallback,
+# which already runs solely when json-ld found no Recipe node. Social hosts are EXCLUDED
+# because their og:description IS the full post caption and already works (503 such saves
+# in 30 days) — adding a server-side-fetched social page body would inject login-wall
+# junk into content that is currently correct.
+_WEB_SOCIAL_HOSTS = (
+    'facebook.com', 'fb.watch', 'fb.com', 'instagram.com', 'tiktok.com', 'threads.net',
+    'twitter.com', 'x.com', 'pinterest.com', 'pin.it', 'youtube.com', 'youtu.be',
+    'reddit.com', 'snapchat.com', 'linkedin.com', 'tumblr.com',
+)
+# Narrowest-first: a page that marks its article body explicitly is far more reliable
+# than falling back to <body>, which drags in nav, related-posts and comment threads.
+_WEB_ARTICLE_SELECTORS = (
+    '[itemprop="articleBody"]', 'article', 'main', '.entry-content', '.post-content', '#content',
+)
+_WEB_ARTICLE_DROP_TAGS = (
+    'script', 'style', 'noscript', 'nav', 'header', 'footer', 'aside', 'form', 'svg',
+    'button', 'iframe',
+)
+# Cap: measured 127-6081 chars across a 7-page sample, so 6000 binds on the long ones.
+# ~1.5k tokens of extra prompt input on a path that previously sent ~35 — bounded, and
+# only on saves that were already failing or fabricating.
+_WEB_BODY_MAX_CHARS = int(os.getenv('WEB_BODY_MAX_CHARS', '6000'))
+# Below this the body is not worth trusting over the description (example.com yields 127).
+_WEB_BODY_MIN_CHARS = int(os.getenv('WEB_BODY_MIN_CHARS', '200'))
+
+
+# A body with no quantities anywhere cannot support a real recipe — and handing one to
+# the refiner is precisely how fabrication happens. browneyedbaker.com proved this in
+# production: its article body is 6,025 chars of prose and navigation with ZERO quantity
+# tokens (the actual recipe lives in a WP Recipe Maker card that reaches us only as
+# json-ld). Fed that, the refiner invented an ingredient list whose own text admitted
+# "Danish pastry dough (ingredients not explicitly listed)" — strictly worse for the user
+# than the honest 422 it used to return.
+# Measured separation on the sample: sipnfeel 27, thepastatable 12 (both real recipes)
+# vs browneyedbaker 0 and example.com 0. A floor of 3 sits well clear of both clusters.
+_WEB_BODY_MIN_QUANTITIES = int(os.getenv('WEB_BODY_MIN_QUANTITIES', '3'))
+_WEB_QUANTITY_PATTERN = re.compile(
+    r'\b\d+\s*(?:\d*/\d+\s*)?(?:cup|cups|tbsp|tablespoon|tablespoons|tsp|teaspoon|teaspoons'
+    r'|g|gram|grams|kg|oz|ounce|ounces|lb|lbs|pound|pounds|ml|clove|cloves|can|cans'
+    r'|slice|slices|stick|sticks)\b'
+    r'|[\u00bc\u00bd\u00be\u2153\u2154\u215b]\s*(?:cup|tsp|tbsp|lb|oz)',
+    re.I,
+)
+
+
+def _web_body_has_recipe_substance(text):
+    """True when the extracted body carries enough measured quantities to plausibly BE a
+    recipe. Fails closed: on doubt we keep today's og:description behaviour, which may be
+    an honest 422 — a miss the user can act on, unlike an invented recipe."""
+    return len(_WEB_QUANTITY_PATTERN.findall(_safe_text(text))) >= _WEB_BODY_MIN_QUANTITIES
+
+
+def _is_web_social_host(host):
+    host = (host or '').lower()
+    return any(host == h or host.endswith('.' + h) for h in _WEB_SOCIAL_HOSTS)
+
+
+def _extract_web_article_text(soup, max_chars=None):
+    """Readable article text for a recipe web page. Returns '' when nothing usable."""
+    limit = max_chars or _WEB_BODY_MAX_CHARS
+    root = None
+    for selector in _WEB_ARTICLE_SELECTORS:
+        try:
+            found = soup.select(selector)
+        except Exception:
+            found = []
+        if found:
+            # Several <article> tags can match (related-post cards); take the biggest.
+            root = max(found, key=lambda node: len(node.get_text(' ', strip=True)))
+            break
+    if root is None:
+        root = soup.body or soup
+    for tag in root.find_all(_WEB_ARTICLE_DROP_TAGS):
+        tag.decompose()
+    lines = []
+    seen = set()
+    total = 0
+    for raw_line in root.get_text('\n', strip=True).splitlines():
+        line = _safe_text(raw_line)
+        normalized = line.lower()
+        # Keep short lines here (unlike the Instagram snippet's 12-char floor): ingredient
+        # rows are frequently 3-10 chars ("1/2 lb.", "2 eggs") and dropping them would
+        # discard exactly the quantities this change exists to recover.
+        if len(line) < 3 or normalized in seen:
+            continue
+        seen.add(normalized)
+        lines.append(line)
+        total += len(line) + 1
+        if total >= limit:
+            break
+    return '\n'.join(lines).strip()
 
 
 def _extract_html_metadata(resolved_url):
@@ -3077,6 +3683,30 @@ def _extract_html_metadata(resolved_url):
             ('Page text', visible_text),
             ('Title', title),
         ]) or content
+    elif not _is_web_social_host(host):
+        # Non-social web page: read the article body instead of trusting a marketing
+        # blurb. The description is kept FIRST and the body added as context, so a page
+        # whose body extraction comes back thin degrades to exactly today's behaviour.
+        body_text = _extract_web_article_text(soup)
+        if len(body_text) >= _WEB_BODY_MIN_CHARS and _web_body_has_recipe_substance(body_text):
+            merged = _merge_recipe_source_chunks([
+                ('Meta description', _strip_social_prefixes(description)),
+                ('Page text', body_text),
+                ('Title', title),
+            ])
+            if merged:
+                _log_event(None, 'web_body_text_extracted', host=host,
+                           description_chars=len(_safe_text(description)),
+                           body_chars=len(body_text), merged_chars=len(merged),
+                           capped=len(body_text) >= _WEB_BODY_MAX_CHARS)
+                content = merged
+        elif body_text:
+            # Body found but too thin on quantities to trust. This is the step-2
+            # population — a page whose recipe is NOT in its prose — so log it by host
+            # to size that cohort without escalating anything yet.
+            _log_event(None, 'web_body_text_rejected', host=host,
+                       body_chars=len(body_text),
+                       quantities=len(_WEB_QUANTITY_PATTERN.findall(body_text)))
     if not content:
         raise ServiceError('HTML metadata did not include source text.', status_code=502)
     image_urls = _unique_texts([
@@ -3165,16 +3795,48 @@ def _parse_instructions(value):
     return []
 
 
-def _extract_json_ld_recipe(resolved_url):
-    soup = _fetch_html_soup(resolved_url)
-    recipe_node = None
+def _json_ld_recipe_richness(node):
+    """How much actual recipe content a Recipe-typed node carries."""
+    ingredients = node.get('recipeIngredient')
+    ingredient_count = len(ingredients) if isinstance(ingredients, list) else 0
+    return ingredient_count + len(_parse_instructions(node.get('recipeInstructions')))
+
+
+def _select_richest_recipe_node(soup):
+    """Pick the Recipe node with the MOST content, not the first one encountered.
+
+    Recipe blogs commonly emit several ld+json blocks, and the first Recipe-typed node is
+    often a STUB — name and description only, no ingredients or steps — with the real
+    recipe in a later block. poulef.com/banana-bread-brownies-2 is the confirmed case:
+    three Recipe nodes, the first with 0 ingredients / 0 instructions and the next two
+    with 13 / 11. First-match-wins read the stub, produced title-plus-description content,
+    and the refiner correctly said there was no recipe — so a perfectly good recipe blog
+    422'd on the user.
+
+    Ties keep the earliest node, so single-Recipe pages are completely unaffected. If no
+    node has any content we still return the first bare node, preserving today's behaviour
+    (and today's 502) for genuinely empty pages.
+    """
+    best = None
+    best_score = -1
+    first = None
     for block in _parse_json_ld_blocks(soup):
         for node in _iter_json_nodes(block):
-            if isinstance(node, dict) and 'Recipe' in _node_types(node):
-                recipe_node = node
-                break
-        if recipe_node:
-            break
+            if not (isinstance(node, dict) and 'Recipe' in _node_types(node)):
+                continue
+            if first is None:
+                first = node
+            score = _json_ld_recipe_richness(node)
+            if score > best_score:
+                best, best_score = node, score
+    if best is not None and best_score > 0:
+        return best
+    return first
+
+
+def _extract_json_ld_recipe(resolved_url):
+    soup = _fetch_html_soup(resolved_url)
+    recipe_node = _select_richest_recipe_node(soup)
     if not recipe_node:
         raise ServiceError('No Recipe JSON-LD was found on the page.', status_code=502)
 
@@ -3228,6 +3890,7 @@ def _extract_json_ld_recipe(resolved_url):
 def _run_provider_pipeline(normalized_url, resolved_url, platform, providers, request_id=None):
     attempts = []
     warnings = []
+    block_exc = None
     started = time.time()
     for provider_name, provider in providers:
         provider_started = time.time()
@@ -3247,6 +3910,9 @@ def _run_provider_pipeline(normalized_url, resolved_url, platform, providers, re
                 'author_name': result.get('author_name'),
                 'caption_field': result.get('caption_field') or '',
                 'warnings': merged_warnings,
+                # Direct CDN media link when the provider supplied one (Apify does).
+                # The audio fallback prefers it over yt-dlp, which is dead for Instagram.
+                'media_url': _safe_text(result.get('media_url')),
             }
             if not response['content']:
                 raise ServiceError(f'{provider_name} returned empty content.', status_code=502)
@@ -3267,6 +3933,8 @@ def _run_provider_pipeline(normalized_url, resolved_url, platform, providers, re
             )
             return response
         except Exception as exc:
+            if block_exc is None and _is_upstream_block(exc):
+                block_exc = exc
             attempts.append({
                 'source': provider_name,
                 'ok': False,
@@ -3284,6 +3952,15 @@ def _run_provider_pipeline(normalized_url, resolved_url, platform, providers, re
         failure_reason=' | '.join([attempt.get('error') or attempt.get('source') for attempt in attempts]),
         attempts=attempts,
     )
+    if block_exc is not None:
+        # A provider lost because the site refused every fetch tier (the block gate in
+        # _fetch_page), not because extraction is broken. That is an upstream decision
+        # with nothing for us to fix, so it must not page — re-raise with the flag
+        # intact and let the job runner emit the low-severity blocked_host marker.
+        raise ServiceError(str(block_exc), status_code=502,
+                           extra={'upstream_block': True,
+                                  'blocked_host': (block_exc.extra or {}).get('blocked_host'),
+                                  'warnings': warnings})
     _report_backend_error('extract_url', code='all_providers_failed',
                           error=f"{platform}: " + ' | '.join([attempt.get('error') or attempt.get('source') for attempt in attempts]))
     raise ServiceError(f'Could not extract content from this {platform} URL.', status_code=502, extra={'warnings': warnings})
@@ -3309,7 +3986,10 @@ def _extract_content(url, request_id=None):
         ],
         'instagram': [
             ('yt-dlp', _extract_ytdlp),
-            ('apify', _extract_instagram_apify),
+            # Pass request_id so this attempt shares the per-request Apify memo with the
+            # `_analyze_extraction` fallback (one timeout per job, not two) and so its
+            # success/failure events are attributable to the job in the logs.
+            ('apify', lambda u: _extract_instagram_apify(u, request_id=request_id)),
             ('html', _extract_html_metadata),
         ],
         'web_recipe': [
@@ -3320,8 +4000,148 @@ def _extract_content(url, request_id=None):
     return _run_provider_pipeline(normalized_url, resolved_url, platform, providers[platform], request_id=request_id)
 
 
-def _recipe_is_incomplete(recipe_text):
-    return _safe_text(recipe_text) == 'Not enough recipe information.'
+def _recipe_completeness_score(structured):
+    """Sortable richness of a refine result, most significant first.
+
+    The ladder used to keep whatever a later rung produced, so a thinner roll could
+    overwrite a richer earlier one. Comparing scores lets a rung REPLACE the incumbent
+    only when it is genuinely better."""
+    if not isinstance(structured, dict):
+        return (0, 0, 0)
+    ingredients = [item for item in (structured.get('ingredients') or []) if _safe_text(item)]
+    instructions = [item for item in (structured.get('instructions') or []) if _safe_text(item)]
+    return (1 if (ingredients and instructions) else 0, len(instructions), len(ingredients))
+
+
+def _recipe_is_incomplete(recipe_text, structured=None):
+    """Should the recovery ladder keep going?
+
+    Completeness used to be an exact-string match on the model's refusal sentinel. That
+    made any output that was not literally 'Not enough recipe information.' count as a
+    finished recipe - including a full ingredient list with an empty Instructions section
+    (82.5% of all defective saves) and a title-only result manufactured by slide-OCR off a
+    video cover frame (a further 15.8%). Both stopped the ladder before Apify, OCR or audio
+    transcription ever ran, which is why audio was reached only ~159 times against ~1,050
+    saves a day. Measured cost of stopping early: those requests finish in ~7s, i.e. with
+    ~22s of gateway headroom unused.
+
+    A result is usable only if the user could cook from it: at least one ingredient AND at
+    least one instruction. Anything less keeps the ladder climbing.
+
+    `structured=None` reproduces the old sentinel-only behaviour byte-for-byte, so any
+    caller that has no structured recipe to hand is unaffected."""
+    if _safe_text(recipe_text) == 'Not enough recipe information.':
+        return True
+    if structured is None:
+        return False
+    return _recipe_completeness_score(structured)[0] == 0
+
+
+# --- Sync-request time budget for the audio fallback -------------------------------
+# Phase-1 added an Apify media download + Whisper round-trip to the Instagram fallback.
+# Measured: the transcription leg alone runs 3.7-5.0s, and end-to-end a reel that took
+# 14.2s before phase-1 now takes 20.8-25.7s. API Gateway's integration timeout is 30,000ms
+# on every saved-recipes route (verified across all 29 integrations), so a slow sync save
+# can cross the ceiling and 504/503 — losing the very recoveries phase-1 added.
+#
+# ASYNC invocations are exempt: a job worker has the Lambda's 120s and no gateway in front
+# of it, so it must always attempt the audio leg. The budget applies ONLY to a synchronous
+# HTTP request, where blowing the ceiling turns a would-be 422 into a 503 and a would-be
+# recovery into nothing at all.
+#
+# A skipped attempt is NOT a lost recovery: the job is self-heal captured (payload_s3_key +
+# input_refs + ttl), and scripts/redrive_failed_saves.py speaks the async path — so an
+# operator sweep recovers budget victims out of band. The distinct event below is what
+# makes that sweep targetable, and what lets us price the budget.
+_SYNC_AUDIO_BUDGET_SECONDS = float(os.getenv('SYNC_AUDIO_BUDGET_SECONDS', '18'))
+# Off by default: a saved recipe shows a REAL photo or a title emoji, never an invented one.
+# Kept as a flag rather than deleting the generator so the behaviour is a one-line decision
+# and the meal-plan path (which still generates) is unaffected.
+GENERATE_RECIPE_IMAGES = os.getenv('GENERATE_RECIPE_IMAGES', 'false').strip().lower() == 'true'
+# Set by the handler wrapper. None => not a synchronous HTTP request (async task, warmup,
+# or a direct invoke), in which case no budget is enforced.
+_SYNC_REQUEST_STARTED_AT = None
+
+
+def _mark_sync_request_start(is_sync):
+    """Record when a synchronous HTTP request began, so deep-stack code can tell how much
+    of the gateway's 30s has already been spent."""
+    global _SYNC_REQUEST_STARTED_AT
+    _SYNC_REQUEST_STARTED_AT = time.time() if is_sync else None
+
+
+def _sync_elapsed_seconds():
+    if _SYNC_REQUEST_STARTED_AT is None:
+        return None
+    return time.time() - _SYNC_REQUEST_STARTED_AT
+
+
+def _audio_budget_exhausted():
+    """DEPRECATED — superseded by the deadline-aware _rung_fits('audio').
+
+    This measured elapsed time against a fixed constant (15s in prod) rather than against
+    what was actually left of the gateway window. That was fine while the ladder usually
+    quit at rung 0, but once the completeness fix let it climb, the earlier rungs routinely
+    spent 15s on their own, so this fired on nearly every video save and audio never ran.
+    The visible result was TikTok and Instagram recipes with ingredients (from the caption)
+    and ZERO steps, because for a talking video the steps only exist in the transcript.
+
+    Kept as a no-op rather than deleted so the constant and this note stay together as the
+    record of why a fixed-constant budget cannot work here.
+    """
+    return False
+
+
+# --- Deadline-aware rung budgeting -------------------------------------------------
+# The audio budget above guards ONE rung against a constant measured from request start.
+# That was adequate while the ladder usually quit at rung 0; once the completeness fix let
+# it climb, the earlier rungs (Apify, slide OCR, preview OCR — each a fetch plus a refine)
+# began consuming the budget themselves, and the request blew the 29s gateway ceiling
+# BEFORE audio was ever considered. Measured after that fix, same clock window as the day
+# before: p90 11.4s -> 24.1s, requests over 29s 1.4% -> 6.2%. Skipping audio no longer
+# protects the ceiling, because audio is not where the time goes.
+#
+# So the budget has to be a DEADLINE, checked before EVERY rung, expressed as time
+# REMAINING rather than time spent: is there enough left to run this rung and still
+# return? Async invocations have no gateway in front of them and are unaffected.
+_GATEWAY_CEILING_SECONDS = float(os.getenv('GATEWAY_CEILING_SECONDS', '29'))
+# Headroom kept back for the work that must still happen after a rung returns: persisting
+# the row, image mirroring, availability overlay and serialization. Measured at 1.5-4s.
+_RESERVE_AFTER_LADDER_SECONDS = float(os.getenv('RESERVE_AFTER_LADDER_SECONDS', '5'))
+# What each rung typically costs, so we can ask "will this fit?" rather than "have we
+# already overrun?". Conservative p75-ish figures from production timings.
+_RUNG_COST_SECONDS = {
+    'apify': 6.0,        # Apify fetch + refine
+    'slide_ocr': 4.0,    # Rekognition over carousel slides + refine
+    'preview_ocr': 7.0,  # VLM preview read + refine
+    'audio': 10.0,       # media download + Whisper + refine
+    'merged': 4.0,       # one more refine over already-fetched content
+}
+
+
+class _DeadlineSkip(Exception):
+    """Raised to skip a rung that will not fit before the gateway ceiling. Caught by the
+    rung's existing `except Exception` so the ladder continues rather than aborting."""
+
+
+def _sync_time_remaining():
+    """Seconds left before the gateway gives up on this sync request. None when async."""
+    elapsed = _sync_elapsed_seconds()
+    if elapsed is None:
+        return None
+    return _GATEWAY_CEILING_SECONDS - elapsed
+
+
+def _rung_fits(rung):
+    """Should we attempt `rung`? True whenever there is no gateway in front of us, or the
+    rung's expected cost plus the post-ladder reserve still fits in the time remaining.
+
+    Returns (fits, remaining, needed) so the caller can log why it skipped."""
+    remaining = _sync_time_remaining()
+    if remaining is None:
+        return True, None, None
+    needed = _RUNG_COST_SECONDS.get(rung, 5.0) + _RESERVE_AFTER_LADDER_SECONDS
+    return remaining >= needed, remaining, needed
 
 
 def _audio_fallback_supported(platform):
@@ -3351,11 +4171,90 @@ def _choose_downloaded_media_file(temp_dir, info):
     raise RuntimeError('Audio download finished, but no media file was found.')
 
 
+# Whisper invents fluent text from silence or from music-only audio — the classic
+# failure is a confident transcript in an unrelated language. verbose_json gives us
+# no_speech_prob and a detected language, which together catch it cheaply.
+_NO_SPEECH_PROB_MAX = float(os.getenv('TRANSCRIPT_NO_SPEECH_PROB_MAX', '0.6'))
+_TRANSCRIPT_EXPECTED_LANGUAGES = {'english'}
+# Quantity/measure signal and imperative cooking verbs. A real spoken recipe has at
+# least one of each; marketing narration ("if summer had a signature salmon dinner")
+# has neither, and must NOT be handed to the refiner as if it were a recipe.
+_QUANTITY_PATTERN = re.compile(
+    # NOTE the trailing `s?` — spoken recipes say "200 grams" / "10 ounces", and a bare
+    # \b after the singular unit rejects every plural. That false-negative would block
+    # genuine recoveries, so plurals are matched explicitly.
+    r'\b\d+\s*(?:cup|tbsp|tablespoon|tsp|teaspoon|oz|ounce|lb|pound|gram|g|kg|ml|liter|litre'
+    r'|clove|can|slice|minute|min|hour|degree)s?\b'
+    r'|\b\d{2,3}\s*(?:f|c|°)\b'
+    r'|\b(?:half|quarter|third)\s+(?:a\s+)?cup\b'
+    r'|\b(?:one|two|three|four|five|six|eight|ten|twelve)\s+'
+    r'(?:cup|tbsp|tablespoon|tsp|teaspoon|oz|ounce|lb|pound|gram|clove|can|slice)s?\b',
+    re.I,
+)
+_IMPERATIVE_PATTERN = re.compile(
+    r'\b(?:add|mix|stir|bake|boil|blend|chop|combine|cook|fold|fry|grill|heat|knead|marinate'
+    r'|mash|melt|pour|preheat|roast|saute|sauté|season|simmer|slice|whisk|toss|drain|layer|top)\b',
+    re.I,
+)
+
+
+def _transcript_looks_hallucinated(segments, language):
+    """True when Whisper most likely transcribed silence/music rather than speech."""
+    lang = _safe_text(language).lower()
+    if lang and _TRANSCRIPT_EXPECTED_LANGUAGES and lang not in _TRANSCRIPT_EXPECTED_LANGUAGES:
+        return True, f'unexpected transcript language: {lang}'
+    probs = [
+        seg.get('no_speech_prob')
+        for seg in (segments or [])
+        if isinstance(seg, dict) and isinstance(seg.get('no_speech_prob'), (int, float))
+    ]
+    if probs and (sum(probs) / len(probs)) > _NO_SPEECH_PROB_MAX:
+        return True, f'no_speech_prob {sum(probs) / len(probs):.2f} over {_NO_SPEECH_PROB_MAX}'
+    return False, ''
+
+
+def _transcript_has_recipe_signal(transcript):
+    """True when the transcript actually carries a recipe: at least one quantity AND at
+    least one imperative cooking step. Narration that merely describes a dish fails this
+    and is treated as 'no recipe found' — the refiner would otherwise invent a method
+    from the dish name, which is worse for the user than an honest miss."""
+    text = _safe_text(transcript)
+    if not text:
+        return False
+    return bool(_QUANTITY_PATTERN.search(text)) and bool(_IMPERATIVE_PATTERN.search(text))
+
+
+def _download_media_to(temp_dir, media_url):
+    """Stream a direct CDN media link to disk. Bounded so a surprise large asset can't
+    blow the Lambda's /tmp or Whisper's 25MB upload ceiling."""
+    limit = int(os.getenv('TRANSCRIBE_MEDIA_MAX_BYTES', str(24 * 1024 * 1024)))
+    path = temp_dir / 'apify_media.mp4'
+    total = 0
+    with requests.get(media_url, stream=True, timeout=_REQUEST_TIMEOUT_SECONDS) as resp:
+        resp.raise_for_status()
+        with path.open('wb') as handle:
+            for chunk in resp.iter_content(chunk_size=262144):
+                if not chunk:
+                    continue
+                total += len(chunk)
+                if total > limit:
+                    raise RuntimeError(f'Media exceeded {limit} bytes; refusing to transcribe.')
+                handle.write(chunk)
+    if not total:
+        raise RuntimeError('Media download was empty.')
+    return path
+
+
 def _transcribe_audio_from_url(resolved_url, request_id=None, source_context=None):
     if not os.getenv('OPENAI_API_KEY'):
         raise RuntimeError('OPENAI_API_KEY is not set.')
 
     started = time.time()
+    # Prefer the direct CDN link the Apify actor already handed us. yt-dlp cannot fetch
+    # Instagram media any more (empty media response since ~07-15), so for Instagram this
+    # is the only route that works; other platforms keep the yt-dlp path unchanged.
+    media_url = _safe_text((source_context or {}).get('media_url'))
+    media_source = 'apify_media' if media_url else 'yt-dlp'
     try:
         client = OpenAI(
             api_key=os.getenv('OPENAI_API_KEY'),
@@ -3364,20 +4263,47 @@ def _transcribe_audio_from_url(resolved_url, request_id=None, source_context=Non
         )
         with tempfile.TemporaryDirectory() as temp_dir_name:
             temp_dir = Path(temp_dir_name)
-            info = _extract_ytdlp_info(
-                resolved_url,
-                download=True,
-                outtmpl=str(temp_dir / '%(id)s.%(ext)s'),
-            )
-            media_path = _choose_downloaded_media_file(temp_dir, info)
+            if media_url:
+                # Whisper accepts mp4/m4a directly, so no ffmpeg (there is no ffmpeg
+                # binary in the deployment package and no layer providing one).
+                media_path = _download_media_to(temp_dir, media_url)
+            else:
+                info = _extract_ytdlp_info(
+                    resolved_url,
+                    download=True,
+                    outtmpl=str(temp_dir / '%(id)s.%(ext)s'),
+                )
+                media_path = _choose_downloaded_media_file(temp_dir, info)
             with media_path.open('rb') as media_file:
                 response = client.audio.transcriptions.create(
                     model=_DEFAULT_TRANSCRIPTION_MODEL,
                     file=media_file,
+                    response_format='verbose_json',
                 )
-        transcript = _safe_text(getattr(response, 'text', response))
+        transcript = _safe_text(getattr(response, 'text', ''))
+        segments = getattr(response, 'segments', None) or []
+        if isinstance(segments, list):
+            segments = [seg if isinstance(seg, dict) else getattr(seg, '__dict__', {}) for seg in segments]
+        language = _safe_text(getattr(response, 'language', ''))
         if not transcript:
             raise RuntimeError('Audio transcription returned empty text.')
+        # The two gates below are SCOPED TO THE APIFY CDN MEDIA PATH on purpose.
+        # They were designed against Instagram audio-only reels, where the audio route
+        # has ZERO successes today — so there a gate can only ever turn a 422 into a
+        # better-reasoned 422. The yt-dlp path is a different story: it carries ~108
+        # SUCCESSFUL TikTok transcriptions a day, and both gates have a real
+        # false-negative surface there (non-English recipes fail GATE 1; quantity-free
+        # method narration fails GATE 2 — 26% of social saves have no digit in their
+        # ingredient list at all). Applying a rule inferred from one broken path across
+        # a healthy one is exactly what the 07-25 empty-instructions guard did.
+        if media_source == 'apify_media':
+            # GATE 1 — did we transcribe actual speech, or hallucinate over silence/music?
+            hallucinated, why = _transcript_looks_hallucinated(segments, language)
+            if hallucinated:
+                raise RuntimeError(f'Audio transcript rejected ({why}).')
+            # GATE 2 — is there a recipe in the speech, or just narration about a dish?
+            if not _transcript_has_recipe_signal(transcript):
+                raise RuntimeError('Audio transcript has no recipe signal (no quantities and/or no steps).')
         _log_event(
             request_id,
             'audio_transcription_success',
@@ -3385,6 +4311,7 @@ def _transcribe_audio_from_url(resolved_url, request_id=None, source_context=Non
             resolved_url=resolved_url,
             transcription_model=_DEFAULT_TRANSCRIPTION_MODEL,
             latency_ms=int((time.time() - started) * 1000),
+            media_source=media_source,
         )
         return {
             'audio_transcript': transcript,
@@ -3400,6 +4327,7 @@ def _transcribe_audio_from_url(resolved_url, request_id=None, source_context=Non
             transcription_model=_DEFAULT_TRANSCRIPTION_MODEL,
             latency_ms=int((time.time() - started) * 1000),
             failure_reason=str(exc),
+            media_source=media_source,
         )
         raise RuntimeError(f'Audio transcription failed: {exc}')
 
@@ -3605,7 +4533,42 @@ def _refine_recipe_structured(content, request_id=None, source_context=None):
     return recipe, model
 
 
+# A caption this short cannot contain a recipe. Below this, asking a model to "extract the
+# recipe" is asking it to invent one, and it obliges: a real save built 7 ingredients and 8
+# steps out of the caption "#quickrecipes".
+_MIN_GROUNDING_CHARS = int(os.getenv('MIN_RECIPE_GROUNDING_CHARS', '200'))
+# Words that indicate the text actually describes cooking rather than just naming a dish.
+_RECIPE_SIGNAL_RE = re.compile(
+    r'\b(ingredient|cup|cups|tbsp|tsp|tablespoon|teaspoon|gram|grams|\d+\s*(g|kg|ml|oz|lb)\b'
+    r'|preheat|bake|boil|simmer|saut|fry|mix|stir|whisk|blend|chop|dice|marinate|season'
+    r'|step\s*\d|instructions|directions|recipe:)', re.I)
+
+
+def _content_can_support_a_recipe(content):
+    """Is there enough real source material here to EXTRACT a recipe, rather than invent one?
+
+    The pipeline had no such test. `_recipe_is_incomplete` asks whether the OUTPUT has
+    ingredients and steps — never whether they came from the input — so a hallucination
+    passed every check and logged recipe_refine_success. Roughly 14% of video saves over the
+    last 30 days were full recipes generated from a caption too short to contain one, which
+    is what a user reported: a jerk chicken reel captioned only "#JerkChicken" came back with
+    invented ingredients (including a tomato that was never in the video) and invented steps.
+
+    A wrong recipe is worse than no recipe — silently so, because it looks right.
+    """
+    text = _safe_text(content)
+    if len(text) >= _MIN_GROUNDING_CHARS:
+        return True
+    # Short but explicitly recipe-shaped (a terse ingredient list) is still real content.
+    return bool(_RECIPE_SIGNAL_RE.search(text))
+
+
 def _recipe_response_from_content(content, request_id=None, source_context=None):
+    if not _content_can_support_a_recipe(content):
+        _log_event(request_id, 'recipe_refine_refused_ungrounded',
+                   content_chars=len(_safe_text(content)),
+                   preview=_safe_text(content)[:80])
+        return {'recipe': 'Not enough recipe information.', 'model': None}, None
     recipe, model = _refine_recipe_structured(content, request_id=request_id, source_context=source_context)
     return {
         'recipe': _format_recipe_text(recipe),
@@ -3632,6 +4595,10 @@ def _overlay_extraction_fallback(extraction, fallback_result, merged_content=Non
         extraction['author_name'] = fallback_result.get('author_name')
     if _safe_text(fallback_result.get('caption_field')):
         extraction['caption_field'] = fallback_result.get('caption_field')
+    # Keep any media link the fallback discovered — the html provider has none, so this
+    # is how an Apify-sourced media URL reaches the audio step when html won the chain.
+    if _safe_text(fallback_result.get('media_url')) and not _safe_text(extraction.get('media_url')):
+        extraction['media_url'] = fallback_result.get('media_url')
 
 
 def _analyze_extraction(extraction, request_id=None):
@@ -3647,13 +4614,46 @@ def _analyze_extraction(extraction, request_id=None):
         'transcription_model': '',
         'recipe_source_used': 'content',
     }
-    if not _recipe_is_incomplete(response.get('recipe')):
+    if not _recipe_is_incomplete(response.get('recipe'), structured_recipe):
         return result, structured_recipe
+
+    # Keep the best result any rung has produced. Rungs below may return something
+    # THINNER than what we already have; without this the last roll wins and a 9-ingredient
+    # result can be replaced by a 5-ingredient one.
+    best_result = dict(result)
+    best_structured = structured_recipe
+    best_score = _recipe_completeness_score(structured_recipe)
+
+    def _keep_if_better(candidate_result, candidate_structured, source_used, candidate_warnings):
+        """Promote a rung's output to 'best so far' only if it beats the incumbent."""
+        nonlocal best_result, best_structured, best_score
+        score = _recipe_completeness_score(candidate_structured)
+        if score <= best_score:
+            return False
+        best_result = {**result, **candidate_result}
+        best_result['recipe_source_used'] = source_used
+        best_result['warnings'] = list(candidate_warnings)
+        best_structured = candidate_structured
+        best_score = score
+        return True
 
     warnings = list(extraction.get('warnings') or [])
     preview_fallback = None
     transcript_result = None
-    if extraction.get('platform') == 'instagram':
+    # Only worth re-fetching from Apify if the chain did NOT already extract via Apify.
+    # When it did, this fallback re-fetches the identical caption, merges it into itself
+    # and re-refines — adding zero new information while handing the model a second,
+    # unconstrained roll. On reels that deliberately withhold the method ("comment FULL
+    # RECIPE below") that second roll fabricates a plausible-looking method from the dish
+    # title, which is worse than an honest "couldn't find a recipe". Skipping keeps the
+    # fallback for the case it was built for: the chain fell back to the thin html
+    # caption, so Apify genuinely supplies text we don't have yet.
+    already_extracted_via_apify = 'apify' in _safe_text(extraction.get('source')).lower()
+    apify_fits, _rem, _need = _rung_fits('apify')
+    if not apify_fits:
+        _log_event(request_id, 'rung_skipped_deadline', rung='apify',
+                   remaining_seconds=round(_rem, 2), needed_seconds=round(_need, 2))
+    if extraction.get('platform') == 'instagram' and not already_extracted_via_apify and apify_fits:
         try:
             apify_fallback = _extract_instagram_apify(extraction['resolved_url'], request_id=request_id)
             merged_apify_content = _merge_recipe_source_chunks([
@@ -3669,23 +4669,30 @@ def _analyze_extraction(extraction, request_id=None):
             warnings.append(
                 'Caption text was insufficient, so Apify Instagram extraction was used as a fallback.'
             )
-            result.update(refined_with_apify)
-            result['recipe_source_used'] = 'content+apify'
-            result['warnings'] = list(warnings)
-            structured_recipe = structured_with_apify
-            if not _recipe_is_incomplete(refined_with_apify.get('recipe')):
+            # This rung used to overwrite `result` unconditionally, BEFORE testing the new
+            # roll - so a worse Apify roll replaced a better caption one. Promote only if better.
+            if _keep_if_better(refined_with_apify, structured_with_apify, 'content+apify', warnings):
+                structured_recipe = structured_with_apify
+            if not _recipe_is_incomplete(refined_with_apify.get('recipe'), structured_with_apify):
+                result.update(refined_with_apify)
+                result['recipe_source_used'] = 'content+apify'
+                result['warnings'] = list(warnings)
                 return result, structured_with_apify
         except Exception as exc:
             warnings.append(str(exc))
 
     if not _audio_fallback_supported(extraction.get('platform')):
-        result['warnings'] = warnings
-        return result, structured_recipe
+        best_result['warnings'] = warnings
+        return best_result, best_structured
 
     # Fast slide-OCR fallback (Rekognition) — for photo slideshows whose recipe
     # lives in the slide images, not the caption. Runs BEFORE the slower VLM
     # preview path below; only when we actually have carousel image URLs.
-    if extraction.get('image_urls'):
+    slide_fits, _rem, _need = _rung_fits('slide_ocr')
+    if extraction.get('image_urls') and not slide_fits:
+        _log_event(request_id, 'rung_skipped_deadline', rung='slide_ocr',
+                   remaining_seconds=round(_rem, 2), needed_seconds=round(_need, 2))
+    if extraction.get('image_urls') and slide_fits:
         try:
             slide_ocr_text = _extract_recipe_text_via_rekognition(
                 extraction.get('image_urls'), request_id=request_id
@@ -3700,17 +4707,29 @@ def _analyze_extraction(extraction, request_id=None):
                     request_id=request_id,
                     source_context={**extraction, 'content': merged_ocr_content},
                 )
-                if not _recipe_is_incomplete(refined_with_ocr.get('recipe')):
+                ocr_warnings = warnings + [
+                    'Caption text was insufficient, so slide-image OCR was used as a fallback.'
+                ]
+                # This rung is meant for photo slideshows, but it fires on any post that has
+                # image_urls - for a VIDEO that is the single cover frame, and OCR of a cover
+                # frame yields a title and nothing else. Under the old sentinel-only test that
+                # title-only result counted as complete and returned here, so audio never ran.
+                _keep_if_better(refined_with_ocr, structured_with_ocr, 'content+slide_ocr', ocr_warnings)
+                if not _recipe_is_incomplete(refined_with_ocr.get('recipe'), structured_with_ocr):
                     result.update(refined_with_ocr)
                     result['recipe_source_used'] = 'content+slide_ocr'
-                    result['warnings'] = warnings + [
-                        'Caption text was insufficient, so slide-image OCR was used as a fallback.'
-                    ]
+                    result['warnings'] = ocr_warnings
                     return result, structured_with_ocr
         except Exception as exc:
             warnings.append(str(exc))
 
+    preview_fits, _rem, _need = _rung_fits('preview_ocr')
+    if not preview_fits:
+        _log_event(request_id, 'rung_skipped_deadline', rung='preview_ocr',
+                   remaining_seconds=round(_rem, 2), needed_seconds=round(_need, 2))
     try:
+        if not preview_fits:
+            raise _DeadlineSkip('preview_ocr')
         preview_fallback = _extract_recipe_from_social_preview_images(extraction, request_id=request_id)
         merged_preview_content = _merge_recipe_source_chunks([
             ('Caption or description', extraction.get('content')),
@@ -3721,17 +4740,36 @@ def _analyze_extraction(extraction, request_id=None):
             request_id=request_id,
             source_context={**extraction, 'content': merged_preview_content},
         )
-        if not _recipe_is_incomplete(refined_with_preview.get('recipe')):
+        preview_warnings = warnings + [
+            'Caption text was insufficient, so preview-image OCR was used as a fallback.'
+        ]
+        _keep_if_better(refined_with_preview, structured_with_preview, 'content+image_ocr', preview_warnings)
+        if not _recipe_is_incomplete(refined_with_preview.get('recipe'), structured_with_preview):
             result.update(refined_with_preview)
             result['recipe_source_used'] = 'content+image_ocr'
-            result['warnings'] = warnings + [
-                'Caption text was insufficient, so preview-image OCR was used as a fallback.'
-            ]
+            result['warnings'] = preview_warnings
             return result, structured_with_preview
     except Exception as exc:
         warnings.append(str(exc))
 
     try:
+        _audio_fits, _rem, _need = _rung_fits('audio')
+        if not _audio_fits or _audio_budget_exhausted():
+            # Out of gateway headroom. Skip the audio leg so the request returns an honest
+            # result instead of being cut off mid-flight by the 30s integration timeout.
+            elapsed = _sync_elapsed_seconds()
+            _log_event(
+                request_id,
+                'audio_skipped_time_budget',
+                platform=extraction.get('platform'),
+                resolved_url=extraction.get('resolved_url'),
+                elapsed_seconds=round(elapsed, 2) if elapsed is not None else None,
+                budget_seconds=_SYNC_AUDIO_BUDGET_SECONDS,
+            )
+            best_result['warnings'] = warnings + [
+                'Audio transcription was skipped because the request ran out of time.'
+            ]
+            return best_result, best_structured
         transcript_result = _transcribe_audio_from_url(
             extraction['resolved_url'],
             request_id=request_id,
@@ -3746,8 +4784,8 @@ def _analyze_extraction(extraction, request_id=None):
             'Caption text was insufficient, so audio transcription was used as a fallback.'
         ]
     except Exception as exc:
-        result['warnings'] = warnings + [str(exc)]
-        return result, structured_recipe
+        best_result['warnings'] = warnings + [str(exc)]
+        return best_result, best_structured
 
     try:
         refined_with_audio, structured_with_audio = _recipe_response_from_content(
@@ -3755,12 +4793,14 @@ def _analyze_extraction(extraction, request_id=None):
             request_id=request_id,
             source_context={**extraction, 'content': merged_content},
         )
-        result.update(refined_with_audio)
-        if not _recipe_is_incomplete(refined_with_audio.get('recipe')):
+        # Also an UNCONDITIONAL overwrite before the check, like the Apify rung above.
+        _keep_if_better(refined_with_audio, structured_with_audio, 'content+audio', warnings)
+        if not _recipe_is_incomplete(refined_with_audio.get('recipe'), structured_with_audio):
+            result.update(refined_with_audio)
             return result, structured_with_audio
     except Exception as exc:
-        result['warnings'] = list(result.get('warnings') or []) + [str(exc)]
-        return result, structured_recipe
+        best_result['warnings'] = list(best_result.get('warnings') or []) + [str(exc)]
+        return best_result, best_structured
 
     if preview_fallback and transcript_result:
         try:
@@ -3774,16 +4814,21 @@ def _analyze_extraction(extraction, request_id=None):
                 request_id=request_id,
                 source_context={**extraction, 'content': merged_all_content},
             )
-            result.update(refined_with_all)
-            result['recipe_source_used'] = 'content+image_ocr+audio'
-            result['warnings'] = warnings + [
+            all_warnings = warnings + [
                 'Caption text was insufficient, so preview-image OCR and audio transcription were used as fallbacks.'
             ]
-            return result, structured_with_all
+            _keep_if_better(refined_with_all, structured_with_all, 'content+image_ocr+audio', all_warnings)
+            if not _recipe_is_incomplete(refined_with_all.get('recipe'), structured_with_all):
+                result.update(refined_with_all)
+                result['recipe_source_used'] = 'content+image_ocr+audio'
+                result['warnings'] = all_warnings
+                return result, structured_with_all
         except Exception as exc:
-            result['warnings'] = list(result.get('warnings') or []) + [str(exc)]
-            return result, structured_recipe
-    return result, structured_with_audio
+            best_result['warnings'] = list(best_result.get('warnings') or []) + [str(exc)]
+            return best_result, best_structured
+    # Ladder exhausted with nothing complete: return the RICHEST result any rung produced,
+    # not simply the last one. Previously the final roll won even when it was thinner.
+    return best_result, best_structured
 
 
 def _update_saved_recipe_image_fields(conn, owner, recipe_id, image_fields):
@@ -3811,6 +4856,143 @@ def _update_saved_recipe_image_fields(conn, owner, recipe_id, image_fields):
     # Migration dual-write: mirror the enriched image fields into shared_saved_recipes
     # (re-upsert the row) so generated images survive the read cutover. Non-blocking.
     _dual_write_saved_recipe_to_shared(conn, owner, recipe_id)
+
+
+def _invoke_saved_recipe_repair_async(owner, recipe_id, url, request_id=None):
+    """Hand an unreadable save to the background repair agent.
+
+    The sync save is bounded by the gateway's 29s, which is why audio transcription gets
+    skipped and why a recipe can end up with nothing real in it. This runs with the Lambda's
+    full timeout and no user waiting, so it can afford the leg that actually recovers the
+    steps for a talking video.
+    """
+    function_name = _safe_text(os.getenv('AWS_LAMBDA_FUNCTION_NAME'))
+    if not function_name or not _safe_text(url):
+        return False
+    try:
+        boto3.client('lambda').invoke(
+            FunctionName=function_name,
+            InvocationType='Event',
+            Payload=json.dumps({
+                'async_task': _ASYNC_TASK_REPAIR_SAVED_RECIPE,
+                'owner': owner, 'recipe_id': recipe_id, 'url': url,
+            }).encode('utf-8'),
+        )
+        _log_event(request_id, 'saved_recipe_repair_enqueued', owner=owner, recipe_id=recipe_id)
+        return True
+    except Exception as exc:
+        _log_event(request_id, 'saved_recipe_repair_enqueue_failed',
+                   owner=owner, recipe_id=recipe_id, failure_reason=str(exc)[:160])
+        return False
+
+
+def _repair_saved_recipe(owner, recipe_id, url, request_id=None):
+    """Re-extract one recipe properly and write it back only if it is genuinely better.
+
+    Never downgrades: a repair that comes back no richer than what is stored leaves the row
+    alone and marks it failed, so a user is never worse off for having been repaired. The
+    grounding test applies here too — if the second pass still has nothing real to work from,
+    the recipe stays empty rather than being filled with a plausible guess.
+    """
+    conn = _mysql_conn()
+    try:
+        row = _fetch_saved_recipe_by_id(conn, owner, recipe_id)
+        if not row:
+            return {'error': 'recipe not found'}
+        current = _serialize_row(row)
+        before = (len(current.get('ingredients') or []), len(current.get('instructions') or []))
+
+        # No sync deadline here: let the full ladder run, audio included.
+        _mark_sync_request_start(False)
+        extraction = _extract_content(url, request_id=request_id)
+        response, structured = _analyze_extraction(extraction, request_id=request_id)
+        ing = (structured or {}).get('ingredients') or []
+        ins = (structured or {}).get('instructions') or []
+        after = (len(ing), len(ins))
+
+        # Counts only, deliberately.
+        #
+        # Replacing a FABRICATED recipe with a grounded one of equal size is the right thing in
+        # principle, and there is a real case for it: a recipe invented from a 22-character
+        # caption keeps the invention because 4/5 is not "better" than 4/5. But deciding
+        # "was the stored one fabricated?" reliably needs provenance we do not record at save
+        # time, and two attempts to infer it from stored text got it wrong — once deleting
+        # recipes that had just been rebuilt successfully. Until provenance is recorded
+        # explicitly, this stays on counts, where it cannot lose content.
+        better = (after[0] > before[0] or after[1] > before[1]
+                  or (before == (0, 0) and after != (0, 0)))
+        if not better:
+            # The second pass, with audio and no deadline, still found nothing real. That is a
+            # verdict: this post genuinely does not contain its recipe (here, a reel captioned
+            # only "#JerkChicken" whose transcript has no recipe signal either).
+            #
+            # If what is stored was FABRICATED, clear it. Leaving invented ingredients on a
+            # recipe we now know is ungrounded is the exact harm the user reported — a phantom
+            # tomato they would have shopped for. Keep the title, link and image so the save is
+            # still theirs, and say plainly that we could not read it.
+            # Only a SECOND pass that also produced nothing proves the post lacks its recipe.
+            #
+            # This used to test `extraction['content']` alone — the caption — but
+            # _analyze_extraction legitimately builds the recipe from caption PLUS the audio
+            # transcript. So a recipe correctly recovered from speech was judged "ungrounded"
+            # on the caption and WIPED. That destroyed real content on rows whose re-extraction
+            # had just returned a full recipe. If the second pass produced anything, keep it.
+            fabricated = (after == (0, 0)
+                          and not _content_can_support_a_recipe(extraction.get('content')))
+            table = _saved_recipes_table(owner)
+            with conn.cursor() as cur:
+                if fabricated:
+                    cur.execute(
+                        f"""UPDATE `{table}` SET ingredients = %s, instructions = %s, notes = %s,
+                                status = 'failed' WHERE _id = %s AND _owner = %s""",
+                        (json.dumps([]), json.dumps([]),
+                         json.dumps(["This post doesn't include its recipe — the caption and the "
+                                     "audio don't list ingredients or steps. Open the original to "
+                                     "watch it, or send us a link that has the recipe written out."]),
+                         recipe_id, owner))
+                elif before == (0, 0):
+                    # Genuinely nothing, before or after — an honest failure.
+                    cur.execute(f"UPDATE `{table}` SET status = 'failed' WHERE _id = %s AND _owner = %s",
+                                (recipe_id, owner))
+                else:
+                    # The repair found nothing NEW, but the row still holds a real recipe.
+                    # Marking that 'failed' hides a perfectly good saved recipe from the user
+                    # over a background job they never asked for. Leave it usable.
+                    cur.execute(f"UPDATE `{table}` SET status = 'ready' WHERE _id = %s AND _owner = %s",
+                                (recipe_id, owner))
+            conn.commit()
+            _dual_write_saved_recipe_to_shared(conn, owner, recipe_id, request_id=request_id)
+            _log_event(request_id, 'saved_recipe_repair_no_improvement',
+                       owner=owner, recipe_id=recipe_id, before=str(before), after=str(after))
+            return {'repaired': False, 'before': before, 'after': after}
+
+        # Merge per FIELD rather than replacing wholesale. A repair can come back with more
+        # ingredients but fewer steps (seen: 9/8 -> 10/7); overwriting on the strength of the
+        # improved field alone silently drops the other one. Keep whichever list is richer.
+        keep_ing = ing if len(ing) > before[0] else (current.get('ingredients') or [])
+        keep_ins = ins if len(ins) > before[1] else (current.get('instructions') or [])
+        table = _saved_recipes_table(owner)
+        with conn.cursor() as cur:
+            cur.execute(
+                f"""UPDATE `{table}` SET title = %s, ingredients = %s, instructions = %s,
+                        notes = %s, extraction_source = %s, status = 'ready'
+                    WHERE _id = %s AND _owner = %s""",
+                (structured.get('title') or current.get('title') or 'Recipe',
+                 json.dumps(keep_ing), json.dumps(keep_ins),
+                 json.dumps(structured.get('notes') or []),
+                 _append_extraction_source(current.get('extraction_source'), 'repair'),
+                 recipe_id, owner))
+        conn.commit()
+        _dual_write_saved_recipe_to_shared(conn, owner, recipe_id, request_id=request_id)
+        _log_event(request_id, 'saved_recipe_repaired', owner=owner, recipe_id=recipe_id,
+                   before=str(before), after=str(after),
+                   source_used=response.get('recipe_source_used'))
+        return {'repaired': True, 'before': before, 'after': after}
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
 
 
 def _invoke_saved_recipe_image_generation_async(owner, recipe_id, request_id=None):
@@ -3879,6 +5061,110 @@ def _invoke_saved_recipe_text_refinement_async(owner, recipe_id, content, reques
         return False
 
 
+def _invoke_personalize_warm(owner, recipe_ids, request_id=None):
+    """Self-invoke to compute + cache the recipes deferred past the sync cap.
+    Mirrors the other async self-invoke helpers; never raises (background best-effort)."""
+    function_name = _safe_text(os.getenv('AWS_LAMBDA_FUNCTION_NAME'))
+    if not function_name:
+        _log_event(request_id, 'saved_personalize_warm_invoke_skipped', owner=owner,
+                   failure_reason='AWS_LAMBDA_FUNCTION_NAME is not available')
+        return False
+    try:
+        boto3.client('lambda').invoke(
+            FunctionName=function_name,
+            InvocationType='Event',
+            Payload=json.dumps({
+                'async_task': _ASYNC_TASK_PERSONALIZE_WARM,
+                'owner': owner,
+                'recipe_ids': recipe_ids,
+                'request_id': request_id,
+            }).encode('utf-8'),
+        )
+        _log_event(request_id, 'saved_personalize_warm_invoked', owner=owner,
+                   count=len(recipe_ids or []))
+        return True
+    except Exception as exc:
+        _log_event(request_id, 'saved_personalize_warm_invoke_failed', owner=owner,
+                   failure_reason=str(exc))
+        return False
+
+
+def _handle_personalize_warm_task(event, request_id=None):
+    """Background task: compute availability for the deferred recipe_ids and persist to the
+    cache table so subsequent personalize polls/opens hit the cache. Never re-fires warm."""
+    owner = _safe_text((event or {}).get('owner'))
+    recipe_ids = [
+        _safe_text(rid) for rid in ((event or {}).get('recipe_ids') or []) if _safe_text(rid)
+    ]
+    if not owner or not recipe_ids:
+        return {'statusCode': 200, 'body': 'warm-noop'}
+    conn = _mysql_conn()
+    try:
+        _ensure_recipe_personalization_tables(conn)
+        kitchen_context = _build_kitchen_match_context(conn, owner)
+        current_version = int((kitchen_context or {}).get('kitchen_version') or 0)
+        cached = _get_cached_recipe_availability(conn, owner, recipe_ids,
+                                                 min_kitchen_version=current_version)
+        todo_ids = [rid for rid in recipe_ids if rid not in cached]
+        if not todo_ids:
+            _log_event(request_id, 'saved_personalize_warm', owner=owner, warmed=0)
+            return {'statusCode': 200, 'body': 'warm'}
+        # Load the recipe rows using the SAME read path _personalize_saved_recipes uses
+        # (respect READ_SHARED_SAVED_RECIPES + table existence identically).
+        table = _saved_recipes_table(owner)
+        use_shared = os.getenv('READ_SHARED_SAVED_RECIPES', '').strip().lower() == 'true'
+        if not use_shared:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT COUNT(*) AS n FROM information_schema.tables
+                    WHERE table_schema = DATABASE() AND table_name = %s
+                """, [table])
+                if cur.fetchone()['n'] == 0:
+                    _log_event(request_id, 'saved_personalize_warm', owner=owner, warmed=0)
+                    return {'statusCode': 200, 'body': 'warm'}
+            _ensure_saved_recipes_table(conn, owner)
+        with conn.cursor() as cur:
+            if use_shared:
+                cur.execute(
+                    f"""SELECT {_drift_safe_select(conn, 'shared_saved_recipes')}
+                        FROM `shared_saved_recipes`
+                        WHERE {_household_owner_filter(conn, owner)[0]}
+                        ORDER BY COALESCE(_updatedDate, _createdDate) DESC""",
+                    _household_owner_filter(conn, owner)[1],
+                )
+            else:
+                cur.execute(
+                    f"""SELECT {_drift_safe_select(conn, table)}
+                        FROM `{table}`
+                        ORDER BY COALESCE(_updatedDate, _createdDate) DESC""",
+                )
+            rows = cur.fetchall() or []
+        todo_set = set(todo_ids)
+        recipes = [r for r in (_serialize_row(row) for row in rows)
+                   if r.get('id') in todo_set]
+        warmed = 0
+        for start in range(0, len(recipes), _PERSONALIZE_WARM_CHUNK):
+            batch = recipes[start:start + _PERSONALIZE_WARM_CHUNK]
+            if not batch:
+                continue
+            computed = _compute_saved_recipe_availability_batch(
+                batch, kitchen_context, request_id=request_id) or {}
+            # _compute_* does NOT persist; write the cache ourselves so warm actually helps.
+            overlay_rows = [
+                _build_owner_recipe_availability_record(owner, 'saved', rid, avail)
+                for rid, avail in computed.items() if rid and avail
+            ]
+            _persist_owner_recipe_availability_rows(conn, overlay_rows)
+            warmed += len(overlay_rows)
+        _log_event(request_id, 'saved_personalize_warm', owner=owner, warmed=warmed)
+        return {'statusCode': 200, 'body': 'warm'}
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
 def _handle_async_saved_recipe_text_task(event, request_id=None):
     owner = _safe_text(event.get('owner'))
     recipe_id = _safe_text(event.get('recipe_id'))
@@ -3898,8 +5184,12 @@ def _handle_async_saved_recipe_text_task(event, request_id=None):
                 cur.execute(f"UPDATE `{table}` SET status = 'failed' WHERE _id = %s AND _owner = %s", (recipe_id, owner))
             conn.commit()
             _log_event(request_id, 'saved_recipe_async_text_failed', owner=owner, recipe_id=recipe_id, reason='not_enough_info')
-            _report_backend_error('save_recipe_text', owner_id=owner, code='not_enough_info',
-                                  error='extraction returned Not enough recipe information.', job_id=recipe_id)
+            # The pasted text simply had no recipe in it. That is an upstream CONTENT
+            # outcome the user already sees, not a fault in our backend — so record a
+            # low-severity marker instead of paging, mirroring the blocked_host pattern.
+            # Genuine extraction crashes still reach _report_backend_error elsewhere.
+            _log_event(request_id, 'not_enough_info', owner=owner, recipe_id=recipe_id,
+                       severity='low', source='save_recipe_text')
             return {'statusCode': 200}
         table = _saved_recipes_table(owner)
         with conn.cursor() as cur:
@@ -3919,8 +5209,10 @@ def _handle_async_saved_recipe_text_task(event, request_id=None):
                 ),
             )
         conn.commit()
-        # Generate AI image
-        _invoke_saved_recipe_image_generation_async(owner, recipe_id, request_id=request_id)
+        # Saved recipes show a real photo or a title emoji, never an invented one. Skip the
+        # invoke entirely rather than paying for a Lambda that returns immediately.
+        if GENERATE_RECIPE_IMAGES:
+            _invoke_saved_recipe_image_generation_async(owner, recipe_id, request_id=request_id)
         # Compute kitchen availability
         row = _fetch_saved_recipe_by_id(conn, owner, recipe_id)
         if row:
@@ -3960,6 +5252,20 @@ def _handle_async_saved_recipe_text_task(event, request_id=None):
 
 
 def _refresh_saved_recipe_generated_image(conn, owner, recipe_id, request_id=None):
+    """Attach a hero image to a saved recipe — from its SOURCE, never invented.
+
+    This used to synthesise a photorealistic food photo whenever a save had no image of its
+    own. That is every text-based save: Use What I Have recipes, and Explore agent recipes.
+    The result was 1,602 recipes across 483 users carrying a picture of a dish nobody cooked,
+    of food that was never photographed — and it reads as fake, because it is.
+
+    A recipe with no real photo now gets no photo, and the app draws a title-derived emoji
+    instead, exactly as Use What I Have already does on its own screen.
+    """
+    if not GENERATE_RECIPE_IMAGES:
+        _log_event(request_id, 'saved_recipe_image_generation_disabled',
+                   owner=owner, recipe_id=recipe_id)
+        return None
     row = _fetch_saved_recipe_by_id(conn, owner, recipe_id)
     if not row:
         _log_event(
@@ -4065,14 +5371,20 @@ def _fetch_saved_recipe_by_id(conn, owner, item_id):
 
 
 def _fetch_saved_recipe_by_hash(conn, owner, resolved_url_hash):
+    """Accepts a single hash or a list of candidate hashes (canonical + legacy raw)."""
+    hashes = resolved_url_hash if isinstance(resolved_url_hash, (list, tuple)) else [resolved_url_hash]
+    hashes = [h for h in hashes if h]
+    if not hashes:
+        return None
     table = _saved_recipes_table(owner)
+    placeholders = ', '.join(['%s'] * len(hashes))
     with conn.cursor() as cur:
         cur.execute(
             f"""SELECT {_drift_safe_select(conn, table)}
                 FROM `{table}`
-                WHERE resolved_url_hash = %s
+                WHERE resolved_url_hash IN ({placeholders})
                 LIMIT 1""",
-            [resolved_url_hash]
+            list(hashes)
         )
         return cur.fetchone()
 
@@ -4099,8 +5411,11 @@ def _read_own_saved_recipe_rows(conn, owner, limit, before):
         if use_shared:
             from_table = 'shared_saved_recipes'
             from_ref = '`shared_saved_recipes`'
-            where_parts.append("owner_id = %s")
-            params.append(owner)
+            # Household-aware: show every member's saved recipes, not just the acting
+            # user's. Mutations remain per-owner (see _household_owner_filter).
+            owner_sql, owner_params = _household_owner_filter(conn, owner)
+            where_parts.append(owner_sql)
+            params.extend(owner_params)
         else:
             from_table = table
             from_ref = f'`{table}`'
@@ -4117,6 +5432,10 @@ def _read_own_saved_recipe_rows(conn, owner, limit, before):
             params,
         )
         rows = cur.fetchall() or []
+    if use_shared:
+        # The same recipe saved by two members would otherwise appear twice; prefer the
+        # acting user's own copy so tapping it opens an editable row.
+        rows = _dedupe_household_rows(rows, owner)
     has_more = len(rows) > limit
     return rows[:limit], has_more
 
@@ -4300,9 +5619,9 @@ def _personalize_saved_recipes(owner, request_id=None, recipe_ids=None):
                 cur.execute(
                     f"""SELECT {_drift_safe_select(conn, 'shared_saved_recipes')}
                         FROM `shared_saved_recipes`
-                        WHERE owner_id = %s
+                        WHERE {_household_owner_filter(conn, owner)[0]}
                         ORDER BY COALESCE(_updatedDate, _createdDate) DESC""",
-                    [owner],
+                    _household_owner_filter(conn, owner)[1],
                 )
             else:
                 cur.execute(
@@ -4336,6 +5655,11 @@ def _personalize_saved_recipes(owner, request_id=None, recipe_ids=None):
         _log_event(request_id, 'saved_personalize_availability', owner=owner,
                    total=len(all_ids), from_cache=len(cached_map),
                    computed=len(computed_map), deferred=max(0, len(pending) - len(to_compute)))
+        # Warm the recipes deferred past the sync cap in a background self-invoke so the
+        # next poll/open hits the cache. Non-fatal: never breaks the sync response.
+        remaining_ids = [r.get('id') for r in pending[len(to_compute):] if r.get('id')]
+        if _PERSONALIZE_ASYNC_WARM and remaining_ids:
+            _invoke_personalize_warm(owner, remaining_ids[:_PERSONALIZE_WARM_MAX], request_id=request_id)
         personalization_list = []
         overlay_rows = []
         for serialized in serialized_rows:
@@ -4427,11 +5751,16 @@ def _lookup_explore_recipe(conn, explore_id=None, match_url=None):
             candidate = _safe_text(match_url)
             if not candidate:
                 return None
+            # Match the raw candidate AND its canonical Instagram identity, so the same
+            # reel arriving with a different ?igsh= share token still hits the curated
+            # row. Existing conditions are kept verbatim so curated rows hashed the old
+            # way keep matching.
             cur.execute(
                 f"SELECT {_EXPLORE_SELECT_COLS} FROM explore_recipes "
-                "WHERE status='ready' AND (source_url=%s OR resolved_url=%s OR resolved_url_hash=%s) "
+                "WHERE status='ready' AND (source_url=%s OR resolved_url=%s "
+                "OR resolved_url_hash=%s OR resolved_url_hash=%s) "
                 "LIMIT 1",
-                (candidate, candidate, _sha256(candidate)),
+                (candidate, candidate, _sha256(candidate), _resolved_url_hash(candidate)),
             )
             return cur.fetchone()
     except Exception:
@@ -4526,8 +5855,13 @@ def _explore_shortcircuit_extraction(conn, url, request_id=None):
 
 
 def _save_saved_recipe_record(conn, owner, extraction, request_id=None, prepared_images=None):
-    resolved_url_hash = _sha256(extraction['resolved_url'])
-    existing = _fetch_saved_recipe_by_hash(conn, owner, resolved_url_hash)
+    # Write the canonical-identity hash, but LOOK UP both it and the legacy raw-URL hash
+    # so reels saved before canonicalization still dedupe instead of duplicating.
+    # For non-Instagram URLs the canonical key is the URL itself, so both are identical
+    # and nothing about existing behaviour changes.
+    resolved_url_hash = _resolved_url_hash(extraction['resolved_url'])
+    existing = _fetch_saved_recipe_by_hash(
+        conn, owner, _resolved_url_hash_candidates(extraction['resolved_url']))
     if existing:
         existing = _ensure_owned_saved_recipe_image(conn, owner, existing, request_id=request_id)
         _ensure_recipe_personalization_tables(conn)
@@ -4569,8 +5903,38 @@ def _save_saved_recipe_record(conn, owner, extraction, request_id=None, prepared
             extraction,
             request_id=request_id,
         )
-    if recipe_response['recipe'] == 'Not enough recipe information.':
-        raise ServiceError('Not enough recipe information.', status_code=422)
+    # Nothing usable in the source. Do NOT invent a recipe, and do NOT throw the save away
+    # either: keep what is genuinely known (title, link, image), mark it honestly, and hand it
+    # to the repair agent, which can spend minutes on audio transcription that a 29s request
+    # cannot. The user keeps their save and gets the real recipe shortly after, instead of
+    # either losing it or being handed a confident fabrication.
+    ungrounded = recipe_response['recipe'] == 'Not enough recipe information.'
+
+    # A save can also come back GROUNDED but incomplete: a video whose caption lists the
+    # ingredients while the method is only ever spoken aloud. Those pass the grounding check,
+    # save as 'ready' with zero instructions, and nothing ever revisits them — 49 of them
+    # accumulated in a single day while only 4 saves reached the repair agent. A recipe with
+    # ingredients and no steps is exactly what the repair agent is for: it can afford the
+    # audio transcription the 29s sync path skips.
+    _ins = (structured_recipe or {}).get('instructions') or []
+    _ing = (structured_recipe or {}).get('ingredients') or []
+    incomplete_video = (
+        not ungrounded
+        and extraction.get('platform') in {'tiktok', 'instagram'}
+        and len(_ins) == 0
+        and len(_ing) > 0
+    )
+
+    if ungrounded:
+        _log_event(request_id, 'saved_recipe_queued_for_repair',
+                   platform=extraction.get('platform'),
+                   resolved_url=extraction.get('resolved_url'))
+        structured_recipe = {
+            'title': _safe_text(extraction.get('title')) or _safe_text(structured_recipe and structured_recipe.get('title')) or 'Recipe',
+            'ingredients': [], 'instructions': [],
+            'notes': ["We couldn't read the full recipe from this post yet — we're still working on it."],
+        }
+        recipe_response = {'recipe': _format_recipe_text(structured_recipe), 'model': None}
 
     recipe_id = str(uuid.uuid4())
     manual_platform = extraction['platform'] in {'text', 'image'}
@@ -4581,6 +5945,14 @@ def _save_saved_recipe_record(conn, owner, extraction, request_id=None, prepared
             prepared_images or [],
             request_id=request_id,
         )
+        # A text save can carry an attribution image: the photo already being shown for this
+        # recipe in Explore. There are no uploaded bytes for it (nothing was scraped — the
+        # caller handed us content it already had), so without this the save loses a perfectly
+        # good real photo and falls back to an emoji. The feed already renders this same
+        # remote URL, so referencing it here is consistent rather than novel.
+        hinted = _safe_text(extraction.get('image_url'))
+        if hinted.lower().startswith(('http://', 'https://')) and hinted not in (source_image_urls or []):
+            source_image_urls = [hinted] + list(source_image_urls or [])
         image_fields = _build_source_backed_saved_recipe_image_fields(source_image_urls=source_image_urls)
     else:
         image_fields = _prepare_saved_recipe_image_fields(
@@ -4599,7 +5971,7 @@ def _save_saved_recipe_record(conn, owner, extraction, request_id=None, prepared
                         title, image_url, image_urls, source_image_url, source_image_urls, image_storage_key,
                         ingredients, instructions, notes, raw_caption, raw_content,
                         extraction_source, author_name, caption_field, status
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'ready')""",
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
                 (
                     recipe_id,
                     owner,
@@ -4621,9 +5993,21 @@ def _save_saved_recipe_record(conn, owner, extraction, request_id=None, prepared
                     extraction['source'],
                     extraction.get('author_name'),
                     extraction.get('caption_field') or None,
+                    'repairing' if ungrounded else 'ready',
                 )
             )
         conn.commit()
+        if ungrounded or incomplete_video:
+            # Hand it to the background repair agent, which is not bound by the gateway's 29s
+            # and can afford the audio transcription this save could not.
+            if incomplete_video:
+                _log_event(request_id, 'saved_recipe_queued_for_repair_incomplete',
+                           platform=extraction.get('platform'),
+                           ingredients=len(_ing),
+                           resolved_url=extraction.get('resolved_url'))
+            _invoke_saved_recipe_repair_async(owner, recipe_id,
+                                              extraction.get('resolved_url') or extraction.get('url'),
+                                              request_id=request_id)
     except pymysql.err.IntegrityError as exc:
         # 1062 = another save of the same URL committed between our hash pre-check
         # and this INSERT (double-tap / client retry — the pre-check-to-insert gap
@@ -4671,6 +6055,9 @@ def _save_saved_recipe_record(conn, owner, extraction, request_id=None, prepared
         structured_recipe['title'] or extraction.get('title'),
         structured_recipe['ingredients'],
         request_id=request_id,
+        # Prestructured/claim path carries the snapshot's meal_category → reuse it (skip LLM).
+        # None for normal saves → classify as before.
+        provided_category=extraction.get('meal_category'),
     )
     # Migration dual-write to shared_saved_recipes (flag-gated, non-blocking).
     _dual_write_saved_recipe_to_shared(conn, owner, recipe_id, request_id=request_id)
@@ -4746,26 +6133,68 @@ def _build_saved_recipe_batch_job_response(owner, job, recipes=None, results=Non
 def _process_saved_recipe_image_batch(conn, owner, image_submissions, request_id=None):
     clusters, partial_errors = _extract_recipe_clusters_from_images(image_submissions, request_id=request_id)
     results = []
+
+    def _save_cluster(cluster):
+        result, _ = _save_saved_recipe_record(
+            conn,
+            owner,
+            cluster['extraction'],
+            request_id=request_id,
+            prepared_images=cluster.get('prepared_images') or [],
+        )
+        return {
+            'recipe_id': ((result or {}).get('recipe') or {}).get('id'),
+            'deduped': bool((result or {}).get('deduped')),
+            'image_indexes': list(cluster.get('image_indexes') or []),
+        }
+
     for cluster in clusters:
         try:
-            result, _ = _save_saved_recipe_record(
-                conn,
-                owner,
-                cluster['extraction'],
-                request_id=request_id,
-                prepared_images=cluster.get('prepared_images') or [],
-            )
-            results.append({
-                'recipe_id': ((result or {}).get('recipe') or {}).get('id'),
-                'deduped': bool((result or {}).get('deduped')),
-                'image_indexes': list(cluster.get('image_indexes') or []),
-            })
+            results.append(_save_cluster(cluster))
+            continue
         except ServiceError as exc:
-            partial_errors.append({
-                'image_indexes': cluster.get('image_indexes') or [],
-                'error': str(exc),
-                'status_code': exc.status_code,
-            })
+            fragments = list(cluster.get('fragments') or [])
+            # MERGED-FIRST, PER-IMAGE ON FAILURE. The merged attempt above is what a
+            # one-recipe-across-pages batch needs (51% of real multi-image batches), so it
+            # always runs first. Only once it has actually failed do we treat the grouping
+            # as wrong and retry the images individually — a fallback on evidence rather
+            # than a guess from image count. Losing the whole batch to one combined 422 is
+            # the failure this exists to prevent.
+            if len(fragments) < 2:
+                partial_errors.append({
+                    'image_indexes': cluster.get('image_indexes') or [],
+                    'error': str(exc),
+                    'status_code': exc.status_code,
+                })
+                continue
+            _log_event(
+                request_id,
+                'saved_recipe_image_merged_failed_per_image_fallback',
+                image_count=len(fragments),
+                image_indexes=cluster.get('image_indexes') or [],
+                failure_reason=str(exc)[:200],
+            )
+            recovered_any = False
+            for fragment in fragments:
+                single = _merge_image_cluster({
+                    'title_hint': fragment.get('title_hint') or '',
+                    'fragments': [fragment],
+                })
+                try:
+                    results.append(_save_cluster(single))
+                    recovered_any = True
+                except ServiceError as inner:
+                    partial_errors.append({
+                        'image_indexes': single.get('image_indexes') or [],
+                        'error': str(inner),
+                        'status_code': inner.status_code,
+                    })
+            _log_event(
+                request_id,
+                'saved_recipe_image_per_image_fallback_complete',
+                image_count=len(fragments),
+                recovered=recovered_any,
+            )
     if not results:
         first_error = partial_errors[0] if partial_errors else {'error': 'Not enough recipe information.', 'status_code': 422}
         raise ServiceError(
@@ -4794,6 +6223,9 @@ def _enqueue_saved_recipe_batch_job(owner, submission, request_id=None, event=No
         'created_at': now,
         'updated_at': now,
         'payload_s3_key': payload_key,
+        # Recorded at enqueue so a failure sweep knows how to replay the input without
+        # having to fetch and sniff the payload first.
+        'submission_kind': _safe_text(submission.get('kind')),
     }
     _put_saved_recipe_batch_job(job)
     function_name = _safe_text(os.getenv('AWS_LAMBDA_FUNCTION_NAME'))
@@ -4859,6 +6291,7 @@ def _enqueue_saved_recipe_url_job(owner, url, request_id=None, event=None):
         'updated_at': now,
         'payload_s3_key': payload_key,
         'source_url': url,
+        'submission_kind': 'url',
     }
     _put_saved_recipe_batch_job(job)
     function_name = _safe_text(os.getenv('AWS_LAMBDA_FUNCTION_NAME'))
@@ -5010,7 +6443,11 @@ def _post_saved_recipe(owner, body, request_id=None):
             response = _build_saved_recipe_post_response(owner, [result])
             response_result_count = 1
         elif submission['kind'] == 'content':
-            extraction = _build_text_recipe_extraction(submission['content'])
+            extraction = _build_text_recipe_extraction(
+                submission['content'],
+                source_url=submission.get('source_url'),
+                image_url=submission.get('image_url'),
+            )
             resolved_url_hash = _sha256(extraction['resolved_url'])
             existing = _fetch_saved_recipe_by_hash(conn, owner, resolved_url_hash)
             if existing:
@@ -5046,14 +6483,23 @@ def _post_saved_recipe(owner, body, request_id=None):
                             f"""INSERT INTO `{table}` (
                                     _id, _owner, source_type, source_url, resolved_url, resolved_url_hash,
                                     title, ingredients, instructions, notes, raw_caption, raw_content,
-                                    extraction_source, status
-                                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'processing')""",
+                                    extraction_source, image_url, image_urls, source_image_url,
+                                    source_image_urls, status
+                                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'processing')""",
                             (
                                 recipe_id, owner, extraction['platform'],
                                 extraction['url'], extraction['resolved_url'], resolved_url_hash,
                                 placeholder_title,
                                 json.dumps(raw_ingredients), json.dumps([]), json.dumps([]),
                                 extraction['caption'], extraction['content'], extraction['source'],
+                                # Keep the caller's photo. This row is written directly rather
+                                # than through _save_saved_recipe_record, so the image columns
+                                # have to be carried here too — omitting them is what dropped
+                                # the real Explore photo and left the recipe showing an emoji.
+                                _text_hero_image(extraction),
+                                json.dumps([_text_hero_image(extraction)] if _text_hero_image(extraction) else []),
+                                _text_hero_image(extraction),
+                                json.dumps([_text_hero_image(extraction)] if _text_hero_image(extraction) else []),
                             ),
                         )
                     conn.commit()
@@ -5299,6 +6745,49 @@ def _handle_async_saved_recipe_image_task(event, request_id):
         pass
 
 
+# Bounded auto-retry for TRANSIENT failures only. A provider 5xx, a timeout or a
+# throttle is worth retrying — the same input may well succeed seconds later. A content
+# 4xx ("not a recipe", "not a recipe link") is NOT: the input has not changed, so a retry
+# just re-fails and burns another LLM/provider call. Those wait for a fix plus a sweep,
+# which is what the re-drive runbook is for.
+_TRANSIENT_RETRY_ATTEMPTS = max(0, int(os.getenv('TRANSIENT_RETRY_ATTEMPTS', '2')))
+_TRANSIENT_RETRY_BASE_SECONDS = float(os.getenv('TRANSIENT_RETRY_BASE_SECONDS', '2'))
+_TRANSIENT_ERROR_MARKERS = (
+    'timed out', 'timeout', 'throttl', 'rate limit', 'too many requests',
+    'connection reset', 'connection aborted', 'temporarily unavailable',
+    'service unavailable', 'bad gateway', 'internal server error',
+)
+
+
+def _is_transient_failure(exc):
+    """True when the failure looks like infrastructure, not content."""
+    if isinstance(exc, ServiceError):
+        # Upstream refusing us (bot wall) is not transient — a retry hits the same wall.
+        if _is_upstream_block(exc):
+            return False
+        if exc.status_code and exc.status_code < 500:
+            return False
+        return True
+    text = str(exc).lower()
+    return any(marker in text for marker in _TRANSIENT_ERROR_MARKERS)
+
+
+def _run_with_transient_retry(operation, request_id=None, label=''):
+    """Run `operation`, retrying only transient failures with linear backoff."""
+    attempt = 0
+    while True:
+        try:
+            return operation()
+        except Exception as exc:
+            if attempt >= _TRANSIENT_RETRY_ATTEMPTS or not _is_transient_failure(exc):
+                raise
+            attempt += 1
+            delay = _TRANSIENT_RETRY_BASE_SECONDS * attempt
+            _log_event(request_id, 'transient_retry', label=label, attempt=attempt,
+                       delay_seconds=delay, failure_reason=str(exc)[:200])
+            time.sleep(delay)
+
+
 def _handle_async_saved_recipe_url_task(event, request_id):
     """Background worker for slow URL saves. Runs the same extraction+save the sync path
     ran (so image gen, availability, household fan-out all still happen via
@@ -5322,7 +6811,11 @@ def _handle_async_saved_recipe_url_task(event, request_id):
             raise ServiceError('URL job payload is missing url.', status_code=400)
         extraction = _explore_shortcircuit_extraction(conn, url, request_id=request_id)
         if extraction is None:
-            extraction = _extract_content(url, request_id=request_id)
+            # Transient-only retry: a provider 5xx/timeout/throttle gets 2 more goes with
+            # backoff; a content 422 raises straight through and waits for a fix + sweep.
+            extraction = _run_with_transient_retry(
+                lambda: _extract_content(url, request_id=request_id),
+                request_id=request_id, label='extract_content')
         result, _ = _save_saved_recipe_record(conn, owner, extraction, request_id=request_id)
         recipe_id = ((result or {}).get('recipe') or {}).get('id')
         entry = {'recipe_id': recipe_id, 'deduped': bool((result or {}).get('deduped'))}
@@ -5373,8 +6866,18 @@ def _handle_async_saved_recipe_url_task(event, request_id):
         # 4xx (e.g. 422 "not a recipe") is an expected user outcome the client surfaces,
         # not a backend fault — don't page. Only 5xx pages, matching the sync handler.
         if exc.status_code >= 500:
-            _report_backend_error('save_recipe_url', owner_id=owner, code='url_job_failed',
-                                  error=exc, job_id=job_id)
+            if _is_upstream_block(exc):
+                # Every fetch tier (including the residential proxy) was refused by the
+                # site. The job still fails and the user still gets the graceful
+                # copy-the-text fallback, but there is no backend defect to action — so
+                # record a low-severity marker instead of paging the errors feed. Genuine
+                # failures (extraction crashes, our own 5xx) fall through and page as before.
+                _log_event(request_id, 'blocked_host', owner=owner, job_id=job_id,
+                           host=(exc.extra or {}).get('blocked_host'),
+                           severity='low', failure_reason=str(exc))
+            else:
+                _report_backend_error('save_recipe_url', owner_id=owner, code='url_job_failed',
+                                      error=exc, job_id=job_id)
         return {
             'ok': False,
             'owner': owner,
@@ -5751,7 +7254,674 @@ def _set_recipe_categories(owner, recipe_id, body, request_id=None):
     return _success({'ok': True, 'recipe_id': rid, 'category_ids': final_ids})
 
 
-def handler(event, context):
+# ============================================================================
+# RECIPE SHARING (additive) — shareable links for any recipe.
+# Create a denormalized snapshot -> share_id; resolve it as JSON (in-app) or a
+# beautiful on-brand HTML landing page (browser/social); claim it into an
+# owner's saved recipes by reusing the exact save path (_save_saved_recipe_record).
+# Isolated: no existing route/DTO touched; reuses _mysql_conn/_success/_error.
+# ============================================================================
+import secrets as _secrets
+import string as _string
+
+_SHARE_LINKS_TABLE = 'shared_recipe_links'
+_SHARE_ID_ALPHABET = _string.ascii_letters + _string.digits  # base62
+_SHARE_ID_LENGTH = 8
+# App Store link for the "Get Trepo" button — REPLACE the id before GA.
+_TREPO_APP_STORE_URL = 'https://apps.apple.com/app/id6764135986'
+# Fallback web host if the request context has no domainName (e.g. direct invoke).
+_SHARE_WEB_HOST = 'https://7tn3gvwvh7.execute-api.us-east-1.amazonaws.com'
+
+
+def _ensure_shared_recipe_links_table(conn):
+    with conn.cursor() as cur:
+        cur.execute(f"""
+            CREATE TABLE IF NOT EXISTS `{_SHARE_LINKS_TABLE}` (
+                share_id VARCHAR(16) PRIMARY KEY,
+                sharer_owner_id VARCHAR(36) NOT NULL,
+                sharer_name VARCHAR(255) NULL,
+                title VARCHAR(255) NOT NULL,
+                image_url VARCHAR(1000) NULL,
+                ingredients JSON NULL,
+                instructions JSON NULL,
+                notes JSON NULL,
+                meal_category VARCHAR(16) NULL,
+                source_type VARCHAR(32) NULL,
+                source_id VARCHAR(128) NULL,
+                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                claim_count INT NOT NULL DEFAULT 0,
+                view_count INT NOT NULL DEFAULT 0,
+                KEY idx_sharer (sharer_owner_id),
+                KEY idx_created (created_at)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        """)
+    conn.commit()
+    # Nullable Branch deep link for this share, minted on create when Branch is on.
+    # The web card uses it as the "Save in Trepo" button target; NULL -> the card
+    # falls back to the trepo:// scheme + App Store buttons. Added post-hoc (guarded)
+    # so pre-existing tables gain the column too.
+    _ensure_column(conn, _SHARE_LINKS_TABLE, 'branch_url', 'branch_url VARCHAR(1000) NULL')
+    # Recipe emoji (iOS sends it; derived from the title if absent). The web card renders it
+    # as the hero when there's no image, matching the app's emoji hero. Guarded add.
+    _ensure_column(conn, _SHARE_LINKS_TABLE, 'emoji', 'emoji VARCHAR(16) NULL')
+
+
+def _ensure_shared_recipe_claims_table(conn):
+    """One row per (share_id, owner) claim so repeat claims are idempotent and
+    claim_count only increments on the first claim by a given owner."""
+    with conn.cursor() as cur:
+        cur.execute(f"""
+            CREATE TABLE IF NOT EXISTS `shared_recipe_claims` (
+                share_id VARCHAR(16) NOT NULL,
+                owner_id VARCHAR(36) NOT NULL,
+                saved_recipe_id VARCHAR(36) NULL,
+                claimed_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (share_id, owner_id),
+                KEY idx_owner (owner_id)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        """)
+    conn.commit()
+
+
+def _generate_share_id(conn):
+    """8-char URL-safe base62 id with collision-retry against the links table."""
+    for _ in range(8):
+        candidate = ''.join(_secrets.choice(_SHARE_ID_ALPHABET) for _ in range(_SHARE_ID_LENGTH))
+        with conn.cursor() as cur:
+            cur.execute(f"SELECT 1 FROM `{_SHARE_LINKS_TABLE}` WHERE share_id = %s LIMIT 1", [candidate])
+            if not cur.fetchone():
+                return candidate
+    raise ServiceError('Could not allocate a share id.', status_code=500)
+
+
+def _resolve_sharer_name(conn, owner):
+    """First name from new_users; None if unknown (never raises)."""
+    safe = _safe_owner_token(owner)
+    if not safe:
+        return None
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT first_name FROM new_users WHERE user_id = %s LIMIT 1", [safe])
+            row = cur.fetchone() or {}
+        name = _safe_text(row.get('first_name'))
+        return name or None
+    except Exception:
+        return None
+
+
+def _share_web_url(share_id, event=None):
+    base = _base_url_from_event(event) or _SHARE_WEB_HOST
+    return f"{base}/r/{share_id}"
+
+
+_BRANCH_URL_ENDPOINT = 'https://api2.branch.io/v1/url'
+
+
+def _mint_branch_link(share_id, title, image_url, landing_url):
+    """Mint a Branch.io deep link for a shared recipe.
+
+    Returns the Branch URL string, or None on ANY failure (missing key, non-200,
+    timeout, network/parse error) — this must NEVER break share-create; the caller
+    falls back to the landing URL. Uses stdlib urllib (no new deps) and only the
+    PUBLIC branch_key (which also ships in the app), never the Branch secret.
+    """
+    import urllib.request
+
+    branch_key = os.getenv('BRANCH_KEY', '').strip()
+    if not branch_key:
+        return None
+
+    data = {
+        'share_id': str(share_id),
+        '$deeplink_path': f'r/{share_id}',
+        '$canonical_identifier': f'recipe/{share_id}',
+        '$og_title': title,
+        '$og_description': 'A recipe shared with you on Trepo',
+        '$desktop_url': landing_url,
+        '$fallback_url': landing_url,
+        '$ios_url': 'https://apps.apple.com/app/id6764135986',
+        '$ios_deeplink_path': f'r/{share_id}',
+        '$uri_redirect_mode': 1,
+    }
+    if image_url:
+        data['$og_image_url'] = image_url
+
+    body = {
+        'branch_key': branch_key,
+        'channel': 'trepo-share',
+        'feature': 'recipe-share',
+        'campaign': 'recipe-sharing',
+        'data': data,
+    }
+
+    try:
+        raw = json.dumps(body).encode('utf-8')
+        req = urllib.request.Request(
+            _BRANCH_URL_ENDPOINT,
+            data=raw,
+            method='POST',
+            headers={'Content-Type': 'application/json'},
+        )
+        with urllib.request.urlopen(req, timeout=3) as resp:
+            if resp.getcode() != 200:
+                return None
+            parsed = json.loads(resp.read().decode('utf-8'))
+        url = parsed.get('url')
+        return url if isinstance(url, str) and url else None
+    except Exception as exc:  # noqa: BLE001 — mint must never break share-create
+        try:
+            _log_event(None, 'branch_mint_failed', share_id=str(share_id), error=str(exc)[:200])
+        except Exception:
+            pass
+        return None
+
+
+# Food-keyword → emoji, first match wins (specific before general). Used only when the
+# share payload has no emoji (iOS now sends the recipe's emoji); 🍽️ is the safe fallback.
+_RECIPE_EMOJI_KEYWORDS = [
+    ('pizza', '🍕'), ('taco', '🌮'), ('burrito', '🌯'), ('quesadilla', '🌮'),
+    ('sushi', '🍣'), ('ramen', '🍜'), ('noodle', '🍜'), ('spaghetti', '🍝'), ('pasta', '🍝'),
+    ('curry', '🍛'), ('fried rice', '🍚'), ('rice', '🍚'), ('soup', '🍲'), ('stew', '🍲'),
+    ('salad', '🥗'), ('sandwich', '🥪'), ('wrap', '🌯'), ('burger', '🍔'), ('fries', '🍟'),
+    ('omelet', '🍳'), ('egg', '🍳'), ('pancake', '🥞'), ('waffle', '🧇'), ('bacon', '🥓'),
+    ('steak', '🥩'), ('beef', '🥩'), ('chicken', '🍗'), ('turkey', '🍗'), ('pork', '🥓'),
+    ('lamb', '🍖'), ('bbq', '🍖'), ('grill', '🍖'), ('meat', '🍖'),
+    ('shrimp', '🍤'), ('prawn', '🍤'), ('salmon', '🐟'), ('fish', '🐟'), ('dumpling', '🥟'),
+    ('bagel', '🥯'), ('croissant', '🥐'), ('pretzel', '🥨'), ('toast', '🍞'), ('bread', '🍞'),
+    ('cheese', '🧀'), ('cookie', '🍪'), ('cupcake', '🧁'), ('cake', '🍰'), ('pie', '🥧'),
+    ('donut', '🍩'), ('doughnut', '🍩'), ('chocolate', '🍫'), ('candy', '🍬'),
+    ('ice cream', '🍨'), ('popcorn', '🍿'), ('potato', '🥔'), ('corn', '🌽'),
+    ('broccoli', '🥦'), ('avocado', '🥑'), ('tomato', '🍅'), ('mushroom', '🍄'),
+    ('apple', '🍎'), ('banana', '🍌'), ('strawberr', '🍓'), ('grape', '🍇'),
+    ('orange', '🍊'), ('lemon', '🍋'), ('peach', '🍑'), ('cherr', '🍒'),
+    ('watermelon', '🍉'), ('pineapple', '🍍'), ('mango', '🥭'),
+    ('smoothie', '🥤'), ('juice', '🧃'), ('coffee', '☕'), ('tea', '🍵'),
+    ('oat', '🥣'), ('cereal', '🥣'), ('yogurt', '🥣'), ('parfait', '🥣'), ('bean', '🫘'),
+]
+
+
+def _derive_recipe_emoji(title):
+    """Best-effort single food emoji from the recipe title; 🍽️ fallback. Only used when the
+    share payload carries no emoji."""
+    t = (title or '').lower()
+    for keyword, emoji in _RECIPE_EMOJI_KEYWORDS:
+        if keyword in t:
+            return emoji
+    return '🍽️'
+
+
+def _create_shared_recipe_link(owner, body, request_id=None):
+    """POST /share/recipe/{owner} — insert a denormalized snapshot (survives the
+    sharer editing/deleting the source). Returns 201 {share_id, app_url, web_url}."""
+    payload = body or {}
+    title = _safe_text(payload.get('title'))
+    if not title:
+        return _error(400, 'title is required')
+    ingredients = _clean_string_list(payload.get('ingredients') or [])
+    instructions = _clean_string_list(payload.get('instructions') or [])
+    notes = _clean_string_list(payload.get('notes') or [])
+    image_url = _safe_text(payload.get('image_url')) or None
+    meal_category = _safe_text(payload.get('meal_category')) or None
+    source_type = _safe_text(payload.get('source_type')) or None
+    source_id = _safe_text(payload.get('source_id')) or None
+    # Emoji: prefer what iOS sends; else derive from the title (never empty -> 🍽️ fallback).
+    emoji = (_safe_text(payload.get('emoji')) or _derive_recipe_emoji(title))[:16]
+    event = payload.get('_event')
+
+    conn = _mysql_conn()
+    _ensure_shared_recipe_links_table(conn)
+    sharer_name = _resolve_sharer_name(conn, owner)
+    share_id = _generate_share_id(conn)
+    with conn.cursor() as cur:
+        cur.execute(
+            f"""INSERT INTO `{_SHARE_LINKS_TABLE}` (
+                    share_id, sharer_owner_id, sharer_name, title, image_url, emoji,
+                    ingredients, instructions, notes, meal_category, source_type, source_id
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+            (
+                share_id, owner, sharer_name, title[:255], image_url, emoji,
+                json.dumps(ingredients), json.dumps(instructions), json.dumps(notes),
+                meal_category, source_type, source_id,
+            )
+        )
+    conn.commit()
+    _log_event(request_id, 'recipe_share_created', owner=owner, share_id=share_id,
+               source_type=source_type or '', title=title[:80])
+
+    # web_url is ALWAYS our own recipe card — so the shared/copied link lands on the
+    # card first (shows the recipe), never the raw Branch link (which auto-bounces a
+    # browser to the App Store before the recipe is ever seen). When Branch is on and
+    # mints a link, we STORE it on the row instead; the card renders it as the tap
+    # target of the "Save in Trepo" button, where Branch does the proper has-app-open
+    # vs App-Store+deferred logic. branch_url stays NULL when the flag is off or the
+    # mint fails -> the card falls back to the trepo:// scheme + App Store buttons.
+    web_url = _share_web_url(share_id, event)
+    branch_url = None
+    if str(os.getenv('SHARE_LINKS_USE_BRANCH', '')).strip().lower() in ('1', 'true', 'yes', 'on'):
+        branch_url = _mint_branch_link(share_id, title, image_url, web_url)
+    if branch_url:
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"UPDATE `{_SHARE_LINKS_TABLE}` SET branch_url = %s WHERE share_id = %s",
+                    [branch_url, share_id],
+                )
+            conn.commit()
+        except Exception as exc:  # noqa: BLE001 — never fail share-create on this
+            _log_event(request_id, 'branch_url_store_failed', share_id=share_id, error=str(exc)[:200])
+
+    return _success({
+        'share_id': share_id,
+        'app_url': f'trepo://r/{share_id}',
+        'web_url': web_url,
+    }, status=201)
+
+
+def _fetch_shared_recipe_link(conn, share_id):
+    with conn.cursor() as cur:
+        cur.execute(f"SELECT * FROM `{_SHARE_LINKS_TABLE}` WHERE share_id = %s LIMIT 1", [share_id])
+        return cur.fetchone()
+
+
+def _shared_link_snapshot_json(row):
+    return {
+        'share_id': _safe_text(row.get('share_id')),
+        'sharer_name': _safe_text(row.get('sharer_name')) or None,
+        'recipe': {
+            'title': _safe_text(row.get('title')),
+            'image_url': _safe_text(row.get('image_url')) or None,
+            'emoji': _safe_text(row.get('emoji')) or None,
+            'ingredients': _clean_string_list(_parse_json_field(row.get('ingredients')) or []),
+            'instructions': _clean_string_list(_parse_json_field(row.get('instructions')) or []),
+            'notes': _clean_string_list(_parse_json_field(row.get('notes')) or []),
+            'meal_category': _safe_text(row.get('meal_category')) or None,
+            'source_type': _safe_text(row.get('source_type')) or None,
+        },
+    }
+
+
+def _wants_json_share(event):
+    qsp = (event or {}).get('queryStringParameters') or {}
+    if _safe_text(qsp.get('format')).lower() == 'json':
+        return True
+    accept = ''
+    for k, v in ((event or {}).get('headers') or {}).items():
+        if k.lower() == 'accept':
+            accept = _safe_text(v).lower()
+            break
+    if 'application/json' in accept:
+        return True
+    return False
+
+
+def _resolve_shared_recipe(share_id, event, request_id=None):
+    """GET /r/{share_id} — content-negotiated. JSON (Accept: application/json or
+    ?format=json) returns the snapshot; anything else returns the HTML landing
+    page. Increments view_count. 404 if the share_id is unknown."""
+    conn = _mysql_conn()
+    _ensure_shared_recipe_links_table(conn)
+    row = _fetch_shared_recipe_link(conn, share_id)
+    want_json = _wants_json_share(event)
+    if not row:
+        if want_json:
+            return _error(404, 'Shared recipe not found')
+        return _shared_recipe_not_found_html()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(f"UPDATE `{_SHARE_LINKS_TABLE}` SET view_count = view_count + 1 WHERE share_id = %s", [share_id])
+        conn.commit()
+    except Exception:
+        pass
+    _log_event(request_id, 'recipe_share_viewed', share_id=share_id, mode='json' if want_json else 'html')
+    if want_json:
+        return _success(_shared_link_snapshot_json(row), status=200)
+    return _render_shared_recipe_html(row)
+
+
+def _claim_shared_recipe(share_id, owner, request_id=None):
+    """POST /share/recipe/{share_id}/claim/{owner} — copy the snapshot into the
+    owner's saved recipes using the SAME save path as a normal save
+    (_save_saved_recipe_record via the prestructured/explore short-circuit).
+    Idempotent per (share_id, owner): a repeat claim returns the existing saved
+    recipe and does NOT re-increment claim_count. Returns 200 {saved_recipe_id,
+    already_saved}."""
+    conn = _mysql_conn()
+    _ensure_shared_recipe_links_table(conn)
+    _ensure_shared_recipe_claims_table(conn)
+    row = _fetch_shared_recipe_link(conn, share_id)
+    if not row:
+        return _error(404, 'Shared recipe not found')
+
+    # Idempotency: has this owner already claimed this share_id?
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT saved_recipe_id FROM `shared_recipe_claims` WHERE share_id = %s AND owner_id = %s LIMIT 1",
+            [share_id, owner],
+        )
+        prior = cur.fetchone()
+
+    _ensure_saved_recipes_table(conn, owner)
+    extraction = _shared_link_claim_extraction(share_id, row)
+    result, _status = _save_saved_recipe_record(conn, owner, extraction, request_id=request_id)
+    saved_recipe_id = _safe_text((result.get('recipe') or {}).get('id'))
+    already_saved = bool(result.get('deduped')) or prior is not None
+
+    if prior is None:
+        # First claim by this owner → record it + bump claim_count once.
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "INSERT INTO `shared_recipe_claims` (share_id, owner_id, saved_recipe_id) VALUES (%s, %s, %s)",
+                    [share_id, owner, saved_recipe_id or None],
+                )
+                cur.execute(
+                    f"UPDATE `{_SHARE_LINKS_TABLE}` SET claim_count = claim_count + 1 WHERE share_id = %s",
+                    [share_id],
+                )
+            conn.commit()
+        except pymysql.err.IntegrityError:
+            # Concurrent double-claim by the same owner — the other insert won the
+            # PK race; treat as already-saved (don't double-count).
+            conn.rollback()
+            already_saved = True
+
+    _log_event(request_id, 'recipe_share_claimed', share_id=share_id, owner=owner,
+               already_saved=already_saved, saved_recipe_id=saved_recipe_id)
+    return _success({'saved_recipe_id': saved_recipe_id, 'already_saved': already_saved}, status=200)
+
+
+def _shared_link_claim_extraction(share_id, row):
+    """Build a pre-structured extraction (same shape as the explore short-circuit)
+    from a shared_recipe_links snapshot so claim reuses _save_saved_recipe_record.
+    The synthetic per-share resolved_url gives free idempotency via the existing
+    resolved_url_hash unique index (a re-claim dedupes to the same saved recipe)."""
+    structured = {
+        'title': _safe_text(row.get('title')),
+        'ingredients': _clean_string_list(_parse_json_field(row.get('ingredients')) or []),
+        'instructions': _clean_string_list(_parse_json_field(row.get('instructions')) or []),
+        'notes': _clean_string_list(_parse_json_field(row.get('notes')) or []),
+    }
+    image_url = _safe_text(row.get('image_url'))
+    dedup_url = f'https://trepo.ai/shared/{share_id}'
+    content = _format_recipe_text(structured)
+    return {
+        'url': dedup_url,
+        'resolved_url': dedup_url,
+        'platform': 'explore',        # non-manual → mirrors image; skips generation
+        'content': content,
+        'caption': content,
+        'title': structured['title'],
+        'image_url': image_url,
+        'image_urls': [image_url] if image_url else [],
+        'source': 'shared_link',
+        'author_name': None,          # de-attribution — never carry creator fields
+        'caption_field': 'shared',
+        'warnings': [],
+        'prestructured': structured,
+        # Reuse the snapshot's stored meal_category so the claim's save skips the classify LLM.
+        'meal_category': _safe_text(row.get('meal_category')) or None,
+    }
+
+
+def _share_html_escape(value):
+    return (
+        _safe_text(value)
+        .replace('&', '&amp;')
+        .replace('<', '&lt;')
+        .replace('>', '&gt;')
+        .replace('"', '&quot;')
+        .replace("'", '&#39;')
+    )
+
+
+_SHARED_RECIPE_HTML_TEMPLATE = """<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>__TITLE__ — shared on Trepo</title>
+<meta property="og:type" content="website">
+<meta property="og:title" content="__OG_TITLE__">
+<meta property="og:description" content="A recipe shared with you on Trepo">
+<meta property="og:image" content="__OG_IMAGE__">
+<meta property="og:url" content="__WEB_URL__">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="__OG_TITLE__">
+<meta name="twitter:description" content="A recipe shared with you on Trepo">
+<meta name="twitter:image" content="__OG_IMAGE__">
+<style>
+:root{--cream:#F5E9D8;--ink:#1A1A1A;--thyme:#296065;}
+*{box-sizing:border-box;margin:0;padding:0;}
+html,body{background:var(--cream);color:var(--ink);
+  font-family:ui-rounded,"SF Pro Rounded",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,system-ui,sans-serif;
+  -webkit-font-smoothing:antialiased;}
+body{padding:24px 18px 48px;display:flex;justify-content:center;}
+.wrap{width:100%;max-width:520px;}
+.brand{font-weight:900;font-size:20px;letter-spacing:-0.5px;text-transform:lowercase;margin-bottom:18px;}
+.brand .dot{color:var(--thyme);}
+.card{background:#fff;border:2px solid var(--ink);border-radius:20px;
+  box-shadow:4px 4px 0 var(--ink);overflow:hidden;}
+.hero{width:100%;aspect-ratio:16/10;object-fit:cover;display:block;border-bottom:2px solid var(--ink);background:#e7d8c2;}
+.hero-emoji{width:100%;aspect-ratio:16/10;display:flex;align-items:center;justify-content:center;font-size:80px;line-height:1;border-bottom:2px solid var(--ink);background:#e7d8c2;}
+.pad{padding:22px 20px;}
+.eyebrow{display:inline-block;background:var(--thyme);color:var(--cream);font-weight:800;
+  font-size:11px;letter-spacing:1.5px;text-transform:uppercase;padding:5px 10px;border-radius:8px;
+  border:2px solid var(--ink);box-shadow:2px 2px 0 var(--ink);margin-bottom:14px;}
+h1{font-weight:900;font-size:28px;line-height:1.1;letter-spacing:-0.5px;margin-bottom:8px;}
+.sharedby{font-weight:700;font-size:15px;color:var(--ink);opacity:.75;margin-bottom:4px;}
+.sectlabel{font-weight:800;font-size:12px;letter-spacing:1.5px;text-transform:uppercase;
+  color:var(--thyme);margin:0 0 10px;}
+ul.ings{list-style:none;margin:0 0 6px;}
+ul.ings li{font-weight:600;font-size:15px;line-height:1.35;padding:8px 0;border-bottom:1.5px dashed rgba(26,26,26,.18);}
+ul.ings li:last-child{border-bottom:0;}
+.more{font-weight:700;font-size:14px;color:var(--ink);opacity:.6;margin-top:8px;}
+.sect{margin-top:22px;}
+ol.steps{list-style:none;margin:0;counter-reset:step;}
+ol.steps li{position:relative;font-weight:600;font-size:15px;line-height:1.4;padding:9px 0 9px 40px;
+  border-bottom:1.5px dashed rgba(26,26,26,.18);counter-increment:step;}
+ol.steps li:last-child{border-bottom:0;}
+ol.steps li::before{content:counter(step);position:absolute;left:0;top:8px;width:26px;height:26px;
+  background:var(--thyme);color:var(--cream);font-weight:900;font-size:13px;border-radius:50%;
+  border:2px solid var(--ink);display:flex;align-items:center;justify-content:center;}
+ul.notes{list-style:none;margin:0;}
+ul.notes li{font-weight:600;font-size:14px;line-height:1.4;padding:10px 12px;margin-bottom:8px;
+  background:#FFF4CC;border:2px solid var(--ink);border-radius:12px;box-shadow:2px 2px 0 var(--ink);}
+ul.notes li:last-child{margin-bottom:0;}
+.btns{margin-top:26px;display:flex;flex-direction:column;gap:12px;}
+.btn{display:block;text-align:center;text-decoration:none;font-weight:900;font-size:17px;
+  padding:16px 18px;border-radius:14px;border:2px solid var(--ink);box-shadow:4px 4px 0 var(--ink);
+  transition:transform .05s ease,box-shadow .05s ease;}
+.btn:active{transform:translate(2px,2px);box-shadow:2px 2px 0 var(--ink);}
+.btn-primary{background:var(--thyme);color:var(--cream);}
+.btn-secondary{background:#fff;color:var(--ink);}
+.foot{text-align:center;font-weight:600;font-size:12px;opacity:.5;margin-top:22px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="brand">trepo<span class="dot">.</span></div>
+  <div class="card">
+    __HERO__
+    <div class="pad">
+      <span class="eyebrow">Shared with you</span>
+      <h1>__TITLE__</h1>
+      <div class="sharedby">Shared by __SHARER__</div>
+      __INGREDIENTS_BLOCK__
+      __INSTRUCTIONS_BLOCK__
+      __NOTES_BLOCK__
+      <div class="btns">__BTNS_BLOCK__</div>
+      <div class="foot">Save recipes from anywhere. Cook what you have.</div>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+  // Dependency-free deferred deep link: stash the share token on the clipboard
+  // BEFORE bouncing to the App Store; the app reads it on first launch.
+  var el = document.getElementById('get-trepo');
+  if(!el) return;
+  el.addEventListener('click', function(){
+    try{
+      if(navigator.clipboard && navigator.clipboard.writeText){
+        navigator.clipboard.writeText('trepo-share:__SHARE_ID__');
+      }
+    }catch(e){}
+    // Let the default navigation to the App Store proceed.
+  });
+})();
+(function(){
+  // "Save in Trepo": try the DIRECT app scheme first (reliable has-app open -> resolves +
+  // saves the recipe). If the app doesn't take over within ~1.2s (no app installed), the page
+  // is still foregrounded, so fall back to the Branch link (App Store + Branch deferred). The
+  // has-app case backgrounds the page, delaying this timer, so the fallback does not fire.
+  var s = document.getElementById('save-in-trepo');
+  if(!s) return;
+  s.addEventListener('click', function(ev){
+    ev.preventDefault();
+    var scheme = s.getAttribute('href');
+    var fallback = s.getAttribute('data-fallback');
+    var ts = Date.now();
+    window.location = scheme;
+    setTimeout(function(){
+      if(Date.now() - ts < 1500 && fallback){ window.location = fallback; }
+    }, 1200);
+  });
+})();
+</script>
+</body>
+</html>"""
+
+
+def _render_shared_recipe_html(row):
+    share_id = _safe_text(row.get('share_id'))
+    title = _safe_text(row.get('title')) or 'A recipe'
+    sharer = _safe_text(row.get('sharer_name')) or 'a friend'
+    image_url = _safe_text(row.get('image_url'))
+    ingredients = _clean_string_list(_parse_json_field(row.get('ingredients')) or [])
+    instructions = _clean_string_list(_parse_json_field(row.get('instructions')) or [])
+    notes = _clean_string_list(_parse_json_field(row.get('notes')) or [])
+
+    emoji = _safe_text(row.get('emoji'))
+    if image_url:
+        hero = f'<img class="hero" src="{_share_html_escape(image_url)}" alt="{_share_html_escape(title)}">'
+    elif emoji:
+        # No photo but we have the recipe emoji — render a big centered emoji hero (matches the
+        # app's emoji hero), reusing the .hero box dims + border/bg.
+        hero = f'<div class="hero-emoji" role="img" aria-label="{_share_html_escape(title)}">{_share_html_escape(emoji)}</div>'
+    else:
+        hero = ''
+
+    # Full recipe on the shared web card — ALL ingredients (no truncation), the steps, and
+    # any notes — so a recipient sees the whole thing before they open/get the app.
+    if ingredients:
+        items = ''.join(f'<li>{_share_html_escape(i)}</li>' for i in ingredients)
+        ingredients_block = f'<div class="sect"><div class="sectlabel">Ingredients</div><ul class="ings">{items}</ul></div>'
+    else:
+        ingredients_block = ''
+
+    if instructions:
+        steps = ''.join(f'<li>{_share_html_escape(s)}</li>' for s in instructions)
+        instructions_block = f'<div class="sect"><div class="sectlabel">Steps</div><ol class="steps">{steps}</ol></div>'
+    else:
+        instructions_block = ''
+
+    if notes:
+        note_items = ''.join(f'<li>{_share_html_escape(n)}</li>' for n in notes)
+        notes_block = f'<div class="sect"><div class="sectlabel">Notes</div><ul class="notes">{note_items}</ul></div>'
+    else:
+        notes_block = ''
+
+    # Buttons. When a Branch link was minted for this share, show ONE primary CTA whose
+    # href is the Branch link — a TAP on it triggers Branch's proper has-app-open (opens
+    # the app to the recipe) or App-Store+deferred (recipe waiting after install). This
+    # is reliable precisely because it's a tap from this page, not a pasted address-bar
+    # URL. Fallback (no branch_url): the trepo:// scheme opener + an App Store link that
+    # stashes the deferred share token on the clipboard (existing #get-trepo JS below).
+    branch_url = _safe_text(row.get('branch_url'))
+    if branch_url:
+        # "Save in Trepo" opens the app via the DIRECT trepo:// scheme first — a reliable
+        # has-app open that resolves + saves the recipe (Branch's has-app open was the flaky
+        # part: it opened the app but didn't reliably pass the share). Branch is kept ONLY as
+        # the no-app fallback (App-Store + deferred), fired by the timeout JS below when the app
+        # doesn't take over. share_id-based scheme; branch_url carried in data-fallback.
+        btns_block = (
+            f'<a class="btn btn-primary" id="save-in-trepo" '
+            f'href="trepo://r/{_share_html_escape(share_id)}" '
+            f'data-fallback="{_share_html_escape(branch_url)}">Save in Trepo</a>'
+        )
+    else:
+        btns_block = (
+            f'<a class="btn btn-primary" href="trepo://r/{_share_html_escape(share_id)}">Open in Trepo</a>'
+            f'<a class="btn btn-secondary" id="get-trepo" href="{_share_html_escape(_TREPO_APP_STORE_URL)}">'
+            "Get Trepo — it's free</a>"
+        )
+
+    html = _SHARED_RECIPE_HTML_TEMPLATE
+    replacements = {
+        '__TITLE__': _share_html_escape(title),
+        '__OG_TITLE__': _share_html_escape(title),
+        '__OG_IMAGE__': _share_html_escape(image_url),
+        '__WEB_URL__': _share_html_escape(_share_web_url(share_id)),
+        '__SHARER__': _share_html_escape(sharer),
+        '__HERO__': hero,
+        '__INGREDIENTS_BLOCK__': ingredients_block,
+        '__INSTRUCTIONS_BLOCK__': instructions_block,
+        '__NOTES_BLOCK__': notes_block,
+        '__BTNS_BLOCK__': btns_block,
+        '__SHARE_ID__': _share_html_escape(share_id),
+    }
+    for token, value in replacements.items():
+        html = html.replace(token, value)
+    return {
+        'statusCode': 200,
+        'headers': {'Content-Type': 'text/html; charset=utf-8', 'Access-Control-Allow-Origin': '*'},
+        'body': html,
+    }
+
+
+def _shared_recipe_not_found_html():
+    body = ("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">"
+            "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
+            "<title>Recipe not found — Trepo</title>"
+            "<style>body{background:#F5E9D8;color:#1A1A1A;font-family:ui-rounded,-apple-system,system-ui,sans-serif;"
+            "display:flex;min-height:100vh;align-items:center;justify-content:center;text-align:center;padding:24px;margin:0}"
+            "h1{font-weight:900;font-size:26px;margin:0 0 10px}p{font-weight:600;opacity:.7;margin:0 0 22px}"
+            "a{display:inline-block;font-weight:900;background:#296065;color:#F5E9D8;text-decoration:none;"
+            "padding:14px 20px;border-radius:14px;border:2px solid #1A1A1A;box-shadow:4px 4px 0 #1A1A1A}</style></head>"
+            "<body><div><h1>This recipe link expired</h1>"
+            "<p>The shared recipe couldn't be found.</p>"
+            f"<a href=\"{_TREPO_APP_STORE_URL}\">Get Trepo — it's free</a></div></body></html>")
+    return {
+        'statusCode': 404,
+        'headers': {'Content-Type': 'text/html; charset=utf-8', 'Access-Control-Allow-Origin': '*'},
+        'body': body,
+    }
+
+
+def _match_share_route(raw_path):
+    """Right-anchored match so a stage prefix in rawPath doesn't break routing.
+    Returns (kind, params) or (None, None). Kinds:
+      'claim'  -> {'share_id','owner'}   for /share/recipe/{share_id}/claim/{owner}
+      'create' -> {'owner'}              for /share/recipe/{owner}
+      'resolve'-> {'share_id'}           for /r/{share_id}
+    """
+    segs = [s for s in _safe_text(raw_path).split('/') if s]
+    if len(segs) >= 5 and segs[-5] == 'share' and segs[-4] == 'recipe' and segs[-2] == 'claim':
+        return 'claim', {'share_id': segs[-3], 'owner': segs[-1]}
+    if len(segs) >= 3 and segs[-3] == 'share' and segs[-2] == 'recipe':
+        return 'create', {'owner': segs[-1]}
+    if len(segs) >= 2 and segs[-2] == 'r':
+        return 'resolve', {'share_id': segs[-1]}
+    return None, None
+
+
+def _handler_impl(event, context):
+    # Keep-warm ping — MUST be the first branch: return instantly with NO auth, NO DB, NO work.
+    # An EventBridge rule fires this every few minutes to hold a container hot so a user's Save
+    # / claim tap doesn't eat the ~3s cold start (this function has no provisioned concurrency
+    # and is low-traffic). Zero side effects.
+    if isinstance(event, dict) and (event.get('warmup') is True or event.get('source') == 'keepwarm'):
+        return {'statusCode': 200, 'body': '{"ok":true,"warm":true}'}
     from trepo_auth import require_owner
     _denied = require_owner(event)
     if _denied is not None:
@@ -5767,8 +7937,15 @@ def handler(event, context):
         return _handle_async_saved_recipe_batch_task(event, request_id=request_id)
     if (event or {}).get('async_task') == _ASYNC_TASK_PROCESS_SAVED_RECIPE_URL:
         return _handle_async_saved_recipe_url_task(event, request_id=request_id)
+    if (event or {}).get('async_task') == _ASYNC_TASK_REPAIR_SAVED_RECIPE:
+        return _repair_saved_recipe(_safe_text(event.get('owner')),
+                                    _safe_text(event.get('recipe_id')),
+                                    _safe_text(event.get('url')),
+                                    request_id=request_id)
     if (event or {}).get('async_task') == _ASYNC_TASK_REFINE_SAVED_RECIPE_TEXT:
         return _handle_async_saved_recipe_text_task(event, request_id=request_id)
+    if (event or {}).get('async_task') == _ASYNC_TASK_PERSONALIZE_WARM:
+        return _handle_personalize_warm_task(event, request_id=request_id)
 
     http_method = event.get('requestContext', {}).get('http', {}).get('method', '')
     path_params = event.get('pathParameters') or {}
@@ -5780,6 +7957,27 @@ def handler(event, context):
     try:
         if http_method == 'OPTIONS':
             return {'statusCode': 200, 'headers': _cors_headers(), 'body': ''}
+
+        # --- Recipe sharing (additive; right-anchored so a stage prefix is OK) ---
+        share_kind, share_params = _match_share_route(raw_path)
+        if share_kind == 'resolve':
+            if http_method != 'GET':
+                return _error(405, f'Method {http_method} not allowed')
+            return _resolve_shared_recipe(share_params['share_id'], event, request_id=request_id)
+        if share_kind == 'claim':
+            if http_method != 'POST':
+                return _error(405, f'Method {http_method} not allowed')
+            if not share_params['owner']:
+                return _error(400, 'Missing owner parameter')
+            return _claim_shared_recipe(share_params['share_id'], share_params['owner'], request_id=request_id)
+        if share_kind == 'create':
+            if http_method != 'POST':
+                return _error(405, f'Method {http_method} not allowed')
+            if not share_params['owner']:
+                return _error(400, 'Missing owner parameter')
+            body = _parse_json_body(event)
+            body['_event'] = event
+            return _create_shared_recipe_link(share_params['owner'], body, request_id=request_id)
 
         if raw_path in _EXTRACT_CONTENT_PATHS:
             if http_method != 'POST':
@@ -5856,3 +8054,87 @@ def handler(event, context):
         import traceback
         traceback.print_exc()
         return _error(500, str(exc))
+
+
+# --- Tail-latency instrumentation (log-only, zero behaviour change) -----------------
+# Sporadic 32-40s sync requests hit the API Gateway 29s ceiling and 504 with NOTHING in
+# the logs to explain them: the gateway gives up while the Lambda is still running, so no
+# existing code path ever reports the outcome. `request_start` proves the request arrived
+# and pins the API GW request id; `request_end` sits in a finally block so the duration is
+# recorded even when the gateway has already hung up on the caller, and even when the
+# handler raises.
+#
+# Fail-soft BY CONSTRUCTION: every logging statement is individually wrapped, so a bug in
+# instrumentation can never turn a working request into a 500. The handler's return value
+# and any exception pass through completely untouched.
+
+
+def _request_log_fields(event):
+    ctx = (event or {}).get('requestContext') or {}
+    http = ctx.get('http') or {}
+    async_task = _safe_text((event or {}).get('async_task'))
+    return {
+        'path': _safe_text((event or {}).get('rawPath') or http.get('path')),
+        'route': _safe_text((event or {}).get('routeKey') or ctx.get('resourcePath')),
+        'method': _safe_text(http.get('method')),
+        'apigw_request_id': _safe_text(ctx.get('requestId')),
+        'invocation': f'async_task:{async_task}' if async_task else 'http',
+    }
+
+
+def handler(event, context):
+    # Keep-warm pings are excluded deliberately: they fire every few minutes, carry no
+    # user-visible latency, and must stay instant with zero side effects.
+    if isinstance(event, dict) and (event.get('warmup') is True or event.get('source') == 'keepwarm'):
+        return _handler_impl(event, context)
+
+    started = time.time()
+    fields = {}
+    try:
+        fields = _request_log_fields(event)
+        _log_event(fields.get('apigw_request_id'), 'request_start', **fields)
+    except Exception:
+        pass
+
+    # Arm the audio time budget for SYNC HTTP requests only. An async_task invocation runs
+    # behind a job with no gateway in front of it and must never be budget-limited.
+    try:
+        _mark_sync_request_start(
+            fields.get('invocation') == 'http' and not _safe_text((event or {}).get('async_task'))
+        )
+    except Exception:
+        pass
+
+    outcome = 'exception'
+    status_code = None
+    try:
+        result = _handler_impl(event, context)
+        outcome = 'returned'
+        if isinstance(result, dict):
+            status_code = result.get('statusCode')
+        return result
+    finally:
+        try:
+            remaining_ms = None
+            get_remaining = getattr(context, 'get_remaining_time_in_millis', None)
+            if callable(get_remaining):
+                remaining_ms = get_remaining()
+            _log_event(
+                fields.get('apigw_request_id'),
+                'request_end',
+                duration_ms=int((time.time() - started) * 1000),
+                outcome=outcome,
+                status_code=status_code,
+                # How close we came to the Lambda timeout. A small value here on a 504 is
+                # the difference between "we were slow" and "we were still working".
+                remaining_ms=remaining_ms,
+                **fields,
+            )
+        except Exception:
+            pass
+        # Clear it: containers are reused, and a stale start time would make the NEXT
+        # request think it had already burned its budget.
+        try:
+            _mark_sync_request_start(False)
+        except Exception:
+            pass
