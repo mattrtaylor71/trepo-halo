@@ -65,6 +65,21 @@ _VALID_INSTAGRAM_HOSTS = {
     'www.instagram.com',
     'm.instagram.com',
 }
+# Facebook was accepted by the social-domain allowlist but never had a platform of its
+# own, so every FB link fell through to the 'web_recipe' ladder (json-ld -> html) and got
+# saved from og:title alone. That is why FB titles read "4M views · 80K reactions | ...".
+# Measured over 7 days: 304 FB attempts, 49 usable (16.1%) vs 87-93% everywhere else.
+_VALID_FACEBOOK_HOSTS = {
+    'facebook.com',
+    'www.facebook.com',
+    'm.facebook.com',
+    'web.facebook.com',
+    'mobile.facebook.com',
+    'fb.watch',
+    'www.fb.watch',
+    'fb.com',
+    'www.fb.com',
+}
 _EXTRACT_CONTENT_PATHS = {'/extract-caption', '/extract-content'}
 _RECIPE_FROM_CONTENT_PATHS = {'/recipe-from-caption', '/recipe-from-content'}
 _ANALYZE_URL_PATHS = {'/analyze-tiktok', '/analyze-url'}
@@ -133,6 +148,7 @@ _CONVERTIBLE_PHONE_EXTENSIONS = {'heic', 'heif', 'avif'}
 _SAVED_RECIPE_SELECT_FIELDS = """_id, _owner, source_type, source_url, resolved_url, title, image_url, image_urls,
                        source_image_url, source_image_urls, image_storage_key,
                        ingredients, instructions, notes, raw_caption, raw_content, extraction_source,
+                       recipe_source_used,
                        author_name, caption_field, status, meal_category, _createdDate, _updatedDate"""
 # Canonical field order the readers expect (parsed from the list above). Per-owner
 # saved_recipes tables drifted over time — ~5185 of 7643 predate columns like
@@ -537,15 +553,16 @@ def _dual_write_saved_recipe_to_shared(conn, owner, recipe_id, request_id=None):
                         owner_id, _id, _owner, source_type, source_url, resolved_url, resolved_url_hash,
                         title, image_url, image_urls, source_image_url, source_image_urls, image_storage_key,
                         ingredients, instructions, notes, raw_caption, raw_content,
-                        extraction_source, author_name, caption_field, status, meal_category,
+                        extraction_source, recipe_source_used, author_name, caption_field, status, meal_category,
                         _createdDate, _updatedDate
-                    ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,COALESCE(%s,NOW()),%s)
+                    ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,COALESCE(%s,NOW()),%s)
                     ON DUPLICATE KEY UPDATE
                         title=VALUES(title), image_url=VALUES(image_url), image_urls=VALUES(image_urls),
                         source_image_url=VALUES(source_image_url), source_image_urls=VALUES(source_image_urls),
                         image_storage_key=VALUES(image_storage_key), ingredients=VALUES(ingredients),
                         instructions=VALUES(instructions), notes=VALUES(notes), raw_caption=VALUES(raw_caption),
                         raw_content=VALUES(raw_content), extraction_source=VALUES(extraction_source),
+                        recipe_source_used=COALESCE(VALUES(recipe_source_used), recipe_source_used),
                         author_name=VALUES(author_name), caption_field=VALUES(caption_field),
                         status=VALUES(status), meal_category=VALUES(meal_category),
                         _createdDate=VALUES(_createdDate), _updatedDate=VALUES(_updatedDate)""",
@@ -555,7 +572,8 @@ def _dual_write_saved_recipe_to_shared(conn, owner, recipe_id, request_id=None):
                     _j(row.get('image_urls')), row.get('source_image_url'), _j(row.get('source_image_urls')),
                     row.get('image_storage_key'), _j(row.get('ingredients')), _j(row.get('instructions')),
                     _j(row.get('notes')), row.get('raw_caption'), row.get('raw_content'),
-                    row.get('extraction_source'), row.get('author_name'), row.get('caption_field'),
+                    row.get('extraction_source'), row.get('recipe_source_used'),
+                    row.get('author_name'), row.get('caption_field'),
                     row.get('status') or 'ready', row.get('meal_category'),
                     ts.get('_createdDate'), ts.get('_updatedDate'),
                 ),
@@ -788,6 +806,17 @@ def _ensure_saved_recipes_table(conn, owner):
     _ensure_column(conn, table, 'image_storage_key', "`image_storage_key` VARCHAR(1000) NULL AFTER `source_image_urls`")
     # Meal-category grouping in "My Recipes" (breakfast/lunch/dinner/snacks/other).
     _ensure_column(conn, table, 'meal_category', "`meal_category` VARCHAR(16) NULL AFTER `status`")
+    # WHICH source text the recipe was actually built from: content, content+audio,
+    # content+slide_ocr, content+image_ocr(+audio), or explore.
+    #
+    # The pipeline has always computed this and then discarded it, which is what made the
+    # repair agent dangerous. Repair judged "was this fabricated?" by re-testing the CAPTION,
+    # while `_analyze_extraction` legitimately builds from caption PLUS audio transcript — so
+    # a recipe correctly recovered from speech looked ungrounded and got wiped. That cost 8
+    # rows once and 3 again the same day, 3 of them unrecoverable. Recording the fact removes
+    # the guess.
+    _ensure_column(conn, table, 'recipe_source_used',
+                   "`recipe_source_used` VARCHAR(48) NULL AFTER `extraction_source`")
 
 
 # Same 4-value taxonomy the recipe generator uses for "Use What I Have", so saved
@@ -3089,6 +3118,65 @@ def _recover_instagram_content_url(resolved_url, raw_url=None, normalized_url=No
     return resolved_url  # genuine profile/login/etc. — _detect_platform will 400 it
 
 
+# Facebook content paths, taken from the shapes actually observed in 30 days of saves
+# rather than guessed: /reel/<id> (503), /<user>/videos/<id> (18), /<user>/posts/<id> (7),
+# /groups/<id>/... (6). Share-sheet links (/share/r/, /share/v/, /share/p/) are short-links
+# that only reveal their real path after redirect resolution, so they are accepted here too
+# — same resolve-then-validate contract Instagram uses.
+_FACEBOOK_CONTENT_MARKERS = (
+    '/reel/', '/reels/', '/videos/', '/video/', '/posts/', '/share/', '/watch',
+    '/groups/', '/permalink.php', '/story.php', '/video.php', '/photo.php', '/media/',
+)
+# Hosts whose every path is a content short-link, so there is nothing to validate.
+_FACEBOOK_SHORTLINK_HOSTS = {'fb.watch', 'www.fb.watch', 'fb.com', 'www.fb.com'}
+# Query keys that identify a post even when the path alone does not (watch/?v=, story.php).
+_FACEBOOK_CONTENT_QUERY_KEYS = ('v', 'video_id', 'story_fbid', 'fbid')
+
+
+def _facebook_path_is_content(host, path, query):
+    """True when this Facebook URL points at a specific post/video rather than a
+    profile, a login wall, or the feed."""
+    if host in _FACEBOOK_SHORTLINK_HOSTS:
+        return True
+    if any(marker in path for marker in _FACEBOOK_CONTENT_MARKERS):
+        return True
+    keys = parse_qs(query or '')
+    return any(keys.get(key) for key in _FACEBOOK_CONTENT_QUERY_KEYS)
+
+
+def _recover_facebook_content_url(resolved_url, raw_url=None, normalized_url=None, request_id=None):
+    """Facebook login-wall-redirects a share link from datacenter IPs exactly the way
+    Instagram does: resolved_url becomes /login/?next=<url-encoded real target>. Measured
+    at 19 of 554 FB saves in 30 days, and the recovered targets are real content
+    (story.php?story_fbid=... / photo.php?fbid=...). Recover the target from `next` so the
+    gate passes and yt-dlp gets a URL it can actually extract."""
+    parsed = urlparse(resolved_url)
+    host = (parsed.netloc or '').lower()
+    if not (host in _VALID_FACEBOOK_HOSTS or host.endswith('.facebook.com')):
+        return resolved_url
+    if _facebook_path_is_content(host, (parsed.path or '').lower(), parsed.query):
+        return resolved_url  # already a content URL — nothing to recover
+
+    next_param = None
+    qs = parse_qs(parsed.query or '')
+    if qs.get('next'):
+        next_param = unquote(qs['next'][0])
+    for candidate in (next_param, normalized_url, raw_url):
+        text = _safe_text(candidate)
+        if not text or '://' not in text:
+            continue
+        cand = urlparse(text)
+        cand_host = (cand.netloc or '').lower()
+        if not (cand_host in _VALID_FACEBOOK_HOSTS or cand_host.endswith('.facebook.com')):
+            continue
+        if _facebook_path_is_content(cand_host, (cand.path or '').lower(), cand.query):
+            _log_event(request_id, 'facebook_login_wall_fallback',
+                       raw_url=raw_url, resolved_url=resolved_url,
+                       next_param=next_param, canonical_url=text)
+            return text
+    return resolved_url  # genuine profile/login/etc. — _detect_platform will 400 it
+
+
 def _detect_platform(url, raw_url=None, request_id=None):
     parsed = urlparse(url)
     host = (parsed.netloc or '').lower()
@@ -3108,6 +3196,20 @@ def _detect_platform(url, raw_url=None, request_id=None):
             reason='non_content_path',
         )
         raise ServiceError('Share a link to a specific Instagram post or reel.', status_code=400)
+    if host in _VALID_FACEBOOK_HOSTS or host.endswith('.facebook.com'):
+        if _facebook_path_is_content(host, path, parsed.query):
+            return 'facebook'
+        # Non-content Facebook URL (profile / login wall we could not recover / marketplace).
+        # Previously these fell through to 'web_recipe' and were saved from og:title, i.e. a
+        # view-count string dressed up as a recipe. Failing fast is honest and cheap.
+        _log_event(
+            request_id,
+            'facebook_url_rejected',
+            raw_url=raw_url,
+            resolved_url=url,
+            reason='non_content_path',
+        )
+        raise ServiceError('Share a link to a specific Facebook video, reel or post.', status_code=400)
     return 'web_recipe'
 
 
@@ -3973,6 +4075,9 @@ def _extract_content(url, request_id=None):
     # real reel/post isn't mis-rejected and Apify gets the canonical content URL.
     resolved_url = _recover_instagram_content_url(
         resolved_url, raw_url=url, normalized_url=normalized_url, request_id=request_id)
+    # Same login-wall recovery for Facebook, for the same reason (see the helper).
+    resolved_url = _recover_facebook_content_url(
+        resolved_url, raw_url=url, normalized_url=normalized_url, request_id=request_id)
     platform = _detect_platform(resolved_url, raw_url=url, request_id=request_id)
     providers = {
         'tiktok': [
@@ -3990,6 +4095,18 @@ def _extract_content(url, request_id=None):
             # `_analyze_extraction` fallback (one timeout per job, not two) and so its
             # success/failure events are attributable to the job in the logs.
             ('apify', lambda u: _extract_instagram_apify(u, request_id=request_id)),
+            ('html', _extract_html_metadata),
+        ],
+        # Facebook: yt-dlp is the ONLY provider that reads the real caption. Verified
+        # against live production URLs (yt-dlp 2026.07.04): FacebookReelIE matches
+        # facebook.com/reel/<id> — the shape 503 of 554 FB saves resolve to — and FacebookIE
+        # covers /<user>/videos/, /<user>/posts/ and story.php. It also follows /share/r/
+        # links itself. Apify is deliberately absent: the configured actor is
+        # apify~instagram-scraper, which cannot read Facebook at all.
+        # html stays as the last rung so a yt-dlp miss degrades to exactly today's behaviour
+        # rather than to a hard failure.
+        'facebook': [
+            ('yt-dlp', _extract_ytdlp),
             ('html', _extract_html_metadata),
         ],
         'web_recipe': [
@@ -4145,7 +4262,16 @@ def _rung_fits(rung):
 
 
 def _audio_fallback_supported(platform):
-    return platform in {'tiktok', 'instagram'}
+    """Despite the name this gates the whole VIDEO half of the ladder — slide OCR, preview
+    OCR and audio transcription all sit behind the single early return in
+    `_analyze_extraction`. So a platform listed here must support all three.
+
+    Facebook qualifies, verified against live production URLs rather than assumed:
+      - audio:   yt-dlp downloaded a real m4a (51KB) from facebook.com/reel/<id>, which is
+                 what `_transcribe_audio_from_url` needs on the non-Apify path.
+      - OCR:     yt-dlp returns `thumbnail`/`thumbnails`, so image_urls is populated.
+    """
+    return platform in {'tiktok', 'instagram', 'facebook'}
 
 
 def _choose_downloaded_media_file(temp_dir, info):
@@ -4975,12 +5101,17 @@ def _repair_saved_recipe(owner, recipe_id, url, request_id=None):
         with conn.cursor() as cur:
             cur.execute(
                 f"""UPDATE `{table}` SET title = %s, ingredients = %s, instructions = %s,
-                        notes = %s, extraction_source = %s, status = 'ready'
+                        notes = %s, extraction_source = %s, recipe_source_used = %s,
+                        status = 'ready'
                     WHERE _id = %s AND _owner = %s""",
                 (structured.get('title') or current.get('title') or 'Recipe',
                  json.dumps(keep_ing), json.dumps(keep_ins),
                  json.dumps(structured.get('notes') or []),
                  _append_extraction_source(current.get('extraction_source'), 'repair'),
+                 # Record what THIS pass actually read. A repair that succeeded off the audio
+                 # transcript must not later be re-judged against the caption alone — that
+                 # exact inference is what wiped real recipes.
+                 _safe_text(response.get('recipe_source_used')) or None,
                  recipe_id, owner))
         conn.commit()
         _dual_write_saved_recipe_to_shared(conn, owner, recipe_id, request_id=request_id)
@@ -5897,7 +6028,10 @@ def _save_saved_recipe_record(conn, owner, extraction, request_id=None, prepared
             'instructions': _clean_string_list(prestructured.get('instructions') or []),
             'notes': _clean_string_list(prestructured.get('notes') or []),
         }
-        recipe_response = {'recipe': _format_recipe_text(structured_recipe), 'model': 'explore'}
+        # Explore recipes arrive already structured from a real web page, so they are grounded
+        # by construction and never went through the refine step that computes a source.
+        recipe_response = {'recipe': _format_recipe_text(structured_recipe), 'model': 'explore',
+                           'recipe_source_used': 'explore'}
     else:
         recipe_response, structured_recipe = _analyze_extraction(
             extraction,
@@ -5918,11 +6052,35 @@ def _save_saved_recipe_record(conn, owner, extraction, request_id=None, prepared
     # audio transcription the 29s sync path skips.
     _ins = (structured_recipe or {}).get('instructions') or []
     _ing = (structured_recipe or {}).get('ingredients') or []
+    # Widened 2026-08-04. The old condition was platform in {tiktok, instagram} AND
+    # ingredients > 0 AND instructions == 0, which left two measured gaps (7-day window,
+    # 5,223 saves, 782 broken, only 230 ever touched by repair):
+    #   * 28 saves 'ready' with ZERO ingredients AND zero steps — excluded by `_ing > 0`.
+    #   * every Facebook save — excluded by the platform set.
+    # Both are now covered. Deliberately still EXCLUDED:
+    #   * manual saves (text/image/explore): there is no source URL to re-extract from, and
+    #     `_invoke_saved_recipe_repair_async` would no-op on the empty url anyway.
+    #   * 'web_recipe' rows that already hold ingredients. Repair re-runs the SAME two
+    #     providers (json-ld, html) with no OCR/audio rung, so it cannot learn anything new,
+    #     and `_repair_saved_recipe`'s anti-fabrication branch can WIPE a row whose second
+    #     pass comes back empty. Queueing ~93 such rows a week to be re-derived by an
+    #     identical code path is pure downgrade risk for zero expected gain.
+    _repairable_platform = extraction.get('platform') not in {'text', 'image', 'explore'}
+    # Video platforms get the full ladder on repair (slide OCR, preview OCR, audio), so a
+    # missing method section is genuinely recoverable there.
     incomplete_video = (
         not ungrounded
-        and extraction.get('platform') in {'tiktok', 'instagram'}
+        and _audio_fallback_supported(extraction.get('platform'))
         and len(_ins) == 0
-        and len(_ing) > 0
+    )
+    # A save with NOTHING in it has nothing to lose: `before == (0, 0)` means the repair
+    # agent's "strictly richer" gate can only improve it or mark it honestly failed, never
+    # wipe real content. Worth a pass on any URL-backed platform.
+    empty_ready = (
+        not ungrounded
+        and _repairable_platform
+        and len(_ins) == 0
+        and len(_ing) == 0
     )
 
     if ungrounded:
@@ -5970,8 +6128,8 @@ def _save_saved_recipe_record(conn, owner, extraction, request_id=None, prepared
                         _id, _owner, source_type, source_url, resolved_url, resolved_url_hash,
                         title, image_url, image_urls, source_image_url, source_image_urls, image_storage_key,
                         ingredients, instructions, notes, raw_caption, raw_content,
-                        extraction_source, author_name, caption_field, status
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                        extraction_source, recipe_source_used, author_name, caption_field, status
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
                 (
                     recipe_id,
                     owner,
@@ -5991,19 +6149,33 @@ def _save_saved_recipe_record(conn, owner, extraction, request_id=None, prepared
                     extraction['caption'],
                     extraction['content'],
                     extraction['source'],
+                    # Ungrounded saves record NOTHING rather than a source, so "we refused to
+                    # invent this" is distinguishable from "we never looked" (a pre-migration
+                    # row, which is also NULL but for a different reason — those are resolved
+                    # by extraction_source instead).
+                    (None if ungrounded else
+                     _safe_text(recipe_response.get('recipe_source_used')) or None),
                     extraction.get('author_name'),
                     extraction.get('caption_field') or None,
                     'repairing' if ungrounded else 'ready',
                 )
             )
         conn.commit()
-        if ungrounded or incomplete_video:
+        if ungrounded or incomplete_video or empty_ready:
             # Hand it to the background repair agent, which is not bound by the gateway's 29s
             # and can afford the audio transcription this save could not.
-            if incomplete_video:
+            #
+            # No retry loop is possible here: this is the ONLY enqueue site in the module and
+            # it sits on the save path, which `_repair_saved_recipe` never re-enters (it does
+            # a bare UPDATE). One save therefore buys at most one repair, forever. There is
+            # also no historical scan — eligibility is evaluated per-save, so widening the
+            # condition cannot queue a backlog of old rows on any request.
+            if incomplete_video or empty_ready:
                 _log_event(request_id, 'saved_recipe_queued_for_repair_incomplete',
                            platform=extraction.get('platform'),
                            ingredients=len(_ing),
+                           instructions=len(_ins),
+                           reason='empty_ready' if empty_ready else 'no_instructions',
                            resolved_url=extraction.get('resolved_url'))
             _invoke_saved_recipe_repair_async(owner, recipe_id,
                                               extraction.get('resolved_url') or extraction.get('url'),
