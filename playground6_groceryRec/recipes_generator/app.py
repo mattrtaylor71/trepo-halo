@@ -906,6 +906,26 @@ def _dedupe_recipes(recipes):
     return output
 
 
+def _merge_recipe_sets(*batches):
+    """Concatenate recipe batches, earliest first, one entry per TITLE.
+
+    Deliberately stricter than `_dedupe_recipes`, whose key is (title, ingredients) — two
+    versions of the same dish with different ingredient lists survive that and both reach the
+    client, where `Recipe.id` is the title and duplicate ids make SwiftUI drop rows. Here the
+    first occurrence wins, so a recipe the user is already looking at is never replaced by a
+    later re-roll of the same dish.
+    """
+    seen, output = set(), []
+    for batch in batches:
+        for recipe in batch or []:
+            title = str((recipe or {}).get('title') or '').strip().lower()
+            if not title or title in seen:
+                continue
+            seen.add(title)
+            output.append(recipe)
+    return output
+
+
 def _normalize_recipe_meal_category(value):
     normalized = str(value or '').strip().lower()
     if normalized in RECIPE_MEAL_CATEGORIES:
@@ -1566,19 +1586,34 @@ def _publish_partial_recipes(conn, target_owners, kitchen_only, need_grocery):
     it just never received one.
 
     Best-effort: a failure here must not fail the generation that is still in flight.
+
+    A section is only written when this call actually HAS recipes for it. It used to write
+    both columns unconditionally, guarded only by "skip if BOTH are empty" — which does not
+    protect a column when the other one is full. The mid-flight call below publishes the new
+    kitchen batch with an empty need_grocery, so every grocery recipe the user was already
+    reading was deleted from under them and did not come back until the final write ~15s
+    later. Passing an empty (or None) section now means "leave that column alone".
     """
     try:
         kitchen_list, need_list = _build_recipes(kitchen_only or [], need_grocery or [])
         if not kitchen_list and not need_list:
             return
+        assignments, values = [], []
+        if kitchen_list:
+            assignments.append('kitchen_only = %s')
+            values.append(json.dumps(kitchen_list))
+        if need_list:
+            assignments.append('need_grocery = %s')
+            values.append(json.dumps(need_list))
+        assignments.append('_updatedDate = NOW()')
         with conn.cursor() as cur:
             for target_owner in target_owners:
                 table = _recipes_table(target_owner)
                 cur.execute(f"""
                     UPDATE `{table}`
-                    SET kitchen_only = %s, need_grocery = %s, _updatedDate = NOW()
+                    SET {', '.join(assignments)}
                     WHERE _id = 'current'
-                """, (json.dumps(kitchen_list), json.dumps(need_list)))
+                """, tuple(values))
         conn.commit()
         for target_owner in target_owners:
             _dual_write_recipes_to_shared(conn, target_owner)
@@ -2402,16 +2437,20 @@ def handler(event, context):
         }
         _first_titles = [str((r or {}).get('title') or '').strip() for r in
                          (first_out.get('kitchen_only') or []) + (first_out.get('need_grocery') or [])]
+        # Kept, not just published. These are the recipes the user starts reading, and the
+        # final set is built on top of them below rather than replacing them.
+        _teaser_kitchen, _teaser_need = [], []
         try:
             with ThreadPoolExecutor(max_workers=2) as _fp:
                 _fk = _fp.submit(_normalize_recipe_batch, (first_out.get('kitchen_only') or []),
                                  'kitchen_only', kitchen_context, owner, 0, 'recipes_generator_first_kitchen')
                 _fn = _fp.submit(_normalize_recipe_batch, (first_out.get('need_grocery') or []),
                                  'need_grocery', kitchen_context, owner, 0, 'recipes_generator_first_need')
-                _publish_partial_recipes(conn, target_owners,
-                                         _dedupe_recipes(_fk.result()),
-                                         _dedupe_recipes(_fn.result()))
+                _teaser_kitchen = _dedupe_recipes(_fk.result())
+                _teaser_need = _dedupe_recipes(_fn.result())
+                _publish_partial_recipes(conn, target_owners, _teaser_kitchen, _teaser_need)
         except Exception as _exc:
+            _teaser_kitchen, _teaser_need = [], []
             print(json.dumps({'evt': 'recipes_first_batch_failed', 'error': str(_exc)[:160]}))
 
         # The remainder, excluding what we already showed so the set does not repeat itself.
@@ -2456,12 +2495,19 @@ def handler(event, context):
             # whatever exists while status is 'regenerating' — it was simply never given
             # anything until the very end, so a dietary change looked like minutes of nothing.
             new_kitchen = _fut_new_kitchen.result()
+            # Teaser FIRST, then the new batch. The second generation was told to exclude the
+            # teaser titles, so the two sets are disjoint and the final list used to contain
+            # none of the recipes the user had been reading for the last half-minute — they
+            # were swapped out wholesale for ten different dishes. Building on top of them
+            # instead means the set only ever grows: what is on screen stays on screen.
+            # `None` for the grocery section leaves that column untouched rather than
+            # emptying it (see _publish_partial_recipes).
             _publish_partial_recipes(conn, target_owners,
-                                     _dedupe_recipes(new_kitchen)[:10], [])
+                                     _merge_recipe_sets(_teaser_kitchen, new_kitchen)[:10], None)
             new_need = _fut_new_need.result()
 
-        kitchen_only = _dedupe_recipes(new_kitchen)[:10]
-        need_grocery = _dedupe_recipes(new_need)[:10]
+        kitchen_only = _merge_recipe_sets(_teaser_kitchen, new_kitchen)[:10]
+        need_grocery = _merge_recipe_sets(_teaser_need, new_need)[:10]
         if len(kitchen_only) < 10 or len(need_grocery) < 10:
             _report_backend_error('generate', owner_id=owner, code='incomplete_set',
                                   error=f'kitchen_only={len(kitchen_only)} need_grocery={len(need_grocery)} has_existing={has_existing_recipes}')
