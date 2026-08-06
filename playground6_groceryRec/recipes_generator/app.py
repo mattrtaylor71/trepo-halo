@@ -906,6 +906,56 @@ def _dedupe_recipes(recipes):
     return output
 
 
+def _parse_recipe_json(raw):
+    """A recipes column as a list, whatever the driver handed back."""
+    if isinstance(raw, list):
+        return raw
+    if not raw:
+        return []
+    try:
+        value = json.loads(raw) if isinstance(raw, (str, bytes, bytearray)) else raw
+        return value if isinstance(value, list) else []
+    except Exception:
+        return []
+
+
+def _published_titles(conn, owner):
+    """Lower-cased titles currently ON SCREEN for this owner, both sections."""
+    titles = set()
+    try:
+        for raw in _load_current_recipes(conn, owner):
+            for recipe in _parse_recipe_json(raw):
+                title = str((recipe or {}).get('title') or '').strip().lower()
+                if title:
+                    titles.add(title)
+    except Exception as exc:
+        print(json.dumps({'evt': 'published_titles_failed', 'error': str(exc)[:160]}))
+    return titles
+
+
+def _episode_survivors(conn, owner, pre_episode_titles):
+    """Recipes published during THIS episode, whichever invocation wrote them.
+
+    Anything in the row that was NOT there when this run started arrived while the user was
+    watching — the teaser, or a partial from a sibling run for another member of the same
+    household. The final write must build on those rather than replace them.
+
+    Scoped to the episode on purpose: recipes that predate the run ARE replaceable, which is
+    what makes a dietary-preference change actually take effect.
+    """
+    try:
+        kitchen_raw, need_raw = _load_current_recipes(conn, owner)
+    except Exception as exc:
+        print(json.dumps({'evt': 'episode_survivors_failed', 'error': str(exc)[:160]}))
+        return [], []
+
+    def fresh(raw):
+        return [r for r in _parse_recipe_json(raw)
+                if str((r or {}).get('title') or '').strip().lower() not in pre_episode_titles]
+
+    return fresh(kitchen_raw), fresh(need_raw)
+
+
 def _merge_recipe_sets(*batches):
     """Concatenate recipe batches, earliest first, one entry per TITLE.
 
@@ -2394,6 +2444,13 @@ def handler(event, context):
             print(f'[recipes_generator] Not enough kitchen items owner={owner} count={len(ingredients)} min={MIN_KITCHEN_ITEMS}')
             return
 
+        # Freeze what was on screen BEFORE this episode. Everything in this set is "old" and
+        # may be replaced; anything that appears in the row LATER arrived while the user was
+        # watching and has to survive to the final write. The in-memory teaser merge could not
+        # do this — it only ever knew about its own invocation, so a partial written by a
+        # sibling run (same household, different owner) was still overwritten wholesale.
+        _pre_episode_titles = _published_titles(conn, owner)
+
         # The current (old) recipes are about to be replaced by the full regeneration below and
         # are not referenced anywhere after this point, so we SKIP the expensive availability +
         # substitution matching on them. That matching was ~half of the regen's per-recipe
@@ -2448,7 +2505,13 @@ def handler(event, context):
                                  'need_grocery', kitchen_context, owner, 0, 'recipes_generator_first_need')
                 _teaser_kitchen = _dedupe_recipes(_fk.result())
                 _teaser_need = _dedupe_recipes(_fn.result())
-                _publish_partial_recipes(conn, target_owners, _teaser_kitchen, _teaser_need)
+                # Build on anything a sibling run already published this episode, rather than
+                # overwriting it. Without this, two members of one household each land a
+                # teaser and the second erases the first before either finishes.
+                _s_k, _s_g = _episode_survivors(conn, owner, _pre_episode_titles)
+                _publish_partial_recipes(conn, target_owners,
+                                         _merge_recipe_sets(_s_k, _teaser_kitchen),
+                                         _merge_recipe_sets(_s_g, _teaser_need))
         except Exception as _exc:
             _teaser_kitchen, _teaser_need = [], []
             print(json.dumps({'evt': 'recipes_first_batch_failed', 'error': str(_exc)[:160]}))
@@ -2502,12 +2565,17 @@ def handler(event, context):
             # instead means the set only ever grows: what is on screen stays on screen.
             # `None` for the grocery section leaves that column untouched rather than
             # emptying it (see _publish_partial_recipes).
+            _surv_kitchen, _ = _episode_survivors(conn, owner, _pre_episode_titles)
             _publish_partial_recipes(conn, target_owners,
-                                     _merge_recipe_sets(_teaser_kitchen, new_kitchen)[:10], None)
+                                     _merge_recipe_sets(_surv_kitchen, _teaser_kitchen,
+                                                        new_kitchen)[:10], None)
             new_need = _fut_new_need.result()
 
-        kitchen_only = _merge_recipe_sets(_teaser_kitchen, new_kitchen)[:10]
-        need_grocery = _merge_recipe_sets(_teaser_need, new_need)[:10]
+        # Re-read rather than reuse the value from above: a sibling run may have published
+        # since, and the whole point is that whatever is on screen at THIS moment survives.
+        _surv_kitchen, _surv_need = _episode_survivors(conn, owner, _pre_episode_titles)
+        kitchen_only = _merge_recipe_sets(_surv_kitchen, _teaser_kitchen, new_kitchen)[:10]
+        need_grocery = _merge_recipe_sets(_surv_need, _teaser_need, new_need)[:10]
         if len(kitchen_only) < 10 or len(need_grocery) < 10:
             _report_backend_error('generate', owner_id=owner, code='incomplete_set',
                                   error=f'kitchen_only={len(kitchen_only)} need_grocery={len(need_grocery)} has_existing={has_existing_recipes}')
