@@ -7,6 +7,8 @@ import boto3
 import uuid
 import base64
 import urllib.request
+import threading
+import concurrent.futures
 try:
     import pymysql
 except ImportError as exc:
@@ -136,6 +138,26 @@ def _invoke_recipes_generator(owner):
     except Exception as e:
         print(f"[WARN] Recipes generator invoke failed: {e}")
         _report_backend_error('invoke_recipes_generator', owner_id=owner, code='invoke_failed', error=e)
+
+
+def _invoke_explore_personalizer(owner):
+    """Fire-and-forget rebuild of this person's Explore feed after a preferences change.
+
+    Runs on the recipes-generator function (which already holds the preference reader and
+    the dietary safety filter) under a separate event flag, so it does not drag the whole
+    UseWhatIHave regeneration along with it. Best-effort: a failure here must never fail
+    the preferences save, which is the thing the user actually asked for."""
+    arn = os.getenv('RECIPES_GENERATOR_ARN')
+    if not arn:
+        return
+    try:
+        boto3.client('lambda').invoke(
+            FunctionName=arn,
+            InvocationType='Event',
+            Payload=json.dumps({'owner': owner, 'explore_personalize': True}),
+        )
+    except Exception as e:
+        print(f"[WARN] Explore personalizer invoke failed: {e}")
 
 
 def _invoke_kitchen_analysis_generator(owner, points_delta=0):
@@ -306,26 +328,14 @@ def _openai_client():
 
 
 _conn = None
+_thread_state = threading.local()
 
 
-def _mysql_conn():
-    """Create or reuse MySQL connection."""
-    global _conn
-    if _conn is not None:
-        try:
-            _conn.ping(reconnect=True)
-            return _conn
-        except Exception:
-            try:
-                _conn.close()
-            except Exception:
-                pass
-            _conn = None
-
+def _new_mysql_conn():
     if pymysql is None:
         raise RuntimeError(f"pymysql import failed: {_PYMYSQL_IMPORT_ERROR}")
     config = _get_db_config()
-    _conn = pymysql.connect(
+    return pymysql.connect(
         host=config['host'],
         port=config['port'],
         user=config['user'],
@@ -337,7 +347,53 @@ def _mysql_conn():
         read_timeout=int(os.getenv('DB_READ_TIMEOUT_SECONDS', '30')),
         write_timeout=int(os.getenv('DB_WRITE_TIMEOUT_SECONDS', '30')),
     )
+
+
+def _still_alive(conn):
+    try:
+        conn.ping(reconnect=True)
+        return True
+    except Exception:
+        try:
+            conn.close()
+        except Exception:
+            pass
+        return False
+
+
+def _mysql_conn():
+    """Create or reuse MySQL connection.
+
+    A pymysql connection is a single socket and is NOT safe to share across threads —
+    concurrent queries interleave on the wire and corrupt each other's result sets.
+    Worker threads (the text-add create fan-out) therefore get their own connection,
+    which the worker must close via _close_thread_mysql_conn() before it exits. The
+    main thread keeps the warm module-global connection, unchanged.
+    """
+    if threading.current_thread() is not threading.main_thread():
+        conn = getattr(_thread_state, 'conn', None)
+        if conn is not None and _still_alive(conn):
+            return conn
+        _thread_state.conn = _new_mysql_conn()
+        return _thread_state.conn
+
+    global _conn
+    if _conn is not None and _still_alive(_conn):
+        return _conn
+    _conn = _new_mysql_conn()
     return _conn
+
+
+def _close_thread_mysql_conn():
+    """Close this worker thread's connection. No-op on the main thread / if unused."""
+    conn = getattr(_thread_state, 'conn', None)
+    if conn is None:
+        return
+    _thread_state.conn = None
+    try:
+        conn.close()
+    except Exception:
+        pass
 
 
 def json_serial(obj):
@@ -500,6 +556,141 @@ def _mark_recipe_refresh_needed_for_owners(conn, owners):
     conn.commit()
 
 
+# --- Dietary preferences (household-scoped hard constraints on recipe generation) ---------
+_DIETARY_PREFS_TABLE = 'user_dietary_preferences'
+_DIETARY_PREF_KEYS = ('allergies', 'diets', 'religious', 'health', 'custom')
+
+
+def _resolve_household_owner_id(conn, owner):
+    """Map an acting identity (a member's user_id) to the shared HOUSEHOLD owner_id that keys
+    the ONE dietary-prefs record, so ALL household members share one prefs record regardless of
+    who set it. Falls back to `owner` itself for a solo user (not in new_users) / an id already
+    at the owner_id level — single-user case is identity-preserving."""
+    safe = _sanitize_user_id(owner)
+    if not safe:
+        return safe
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT owner_id FROM new_users WHERE user_id = %s LIMIT 1", [safe])
+            row = cur.fetchone() or {}
+        hh = row.get('owner_id') or row.get('OWNER_ID')
+        return _sanitize_user_id(hh) if hh else safe
+    except Exception:
+        return safe
+
+
+def _ensure_dietary_prefs_table(conn):
+    with conn.cursor() as cur:
+        cur.execute(f"""
+            CREATE TABLE IF NOT EXISTS `{_DIETARY_PREFS_TABLE}` (
+                owner_id VARCHAR(36) PRIMARY KEY,
+                allergies JSON, diets JSON, religious JSON, health JSON, custom JSON,
+                _createdDate DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                _updatedDate DATETIME DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        """)
+    conn.commit()
+
+
+def _dietary_prefs_row(conn, owner):
+    """Return (prefs_dict, updated_at_iso_or_None) for the owner; empty lists if no row."""
+    prefs = {k: [] for k in _DIETARY_PREF_KEYS}
+    updated_at = None
+    with conn.cursor() as cur:
+        cur.execute(f"SELECT allergies, diets, religious, health, custom, _createdDate, _updatedDate "
+                    f"FROM `{_DIETARY_PREFS_TABLE}` WHERE owner_id = %s LIMIT 1", [owner])
+        row = cur.fetchone()
+    if row:
+        for k in _DIETARY_PREF_KEYS:
+            v = row.get(k)
+            if isinstance(v, str):
+                try:
+                    v = json.loads(v)
+                except Exception:
+                    v = []
+            prefs[k] = [str(x).strip() for x in (v or []) if str(x).strip()]
+        # _updatedDate is NULL on the first INSERT (ON UPDATE only fires on later updates), so
+        # fall back to _createdDate — the row was last changed at creation.
+        ud = row.get('_updatedDate') or row.get('_createdDate')
+        if ud is not None:
+            updated_at = ud.isoformat() if hasattr(ud, 'isoformat') else str(ud)
+    return prefs, updated_at
+
+
+def _get_dietary_preferences(owner):
+    """GET /dietary-preferences/{owner} -> {owner, allergies, diets, religious, health, custom, updated_at}.
+    Prefs are household-shared, so read under the resolved household owner_id."""
+    conn = _mysql_conn()
+    _ensure_dietary_prefs_table(conn)
+    household = _resolve_household_owner_id(conn, owner)
+    prefs, updated_at = _dietary_prefs_row(conn, household)
+    return _success_response({'owner': owner, **prefs, 'updated_at': updated_at})
+
+
+def _put_dietary_preferences(owner, body):
+    """PUT /dietary-preferences/{owner} — upsert the 5 arrays under the HOUSEHOLD owner_id (so
+    every member shares one record), then regen for ALL household members so everyone's recipes
+    refresh immediately with the new prefs."""
+    conn = _mysql_conn()
+    _ensure_dietary_prefs_table(conn)
+    body = body or {}
+    household = _resolve_household_owner_id(conn, owner)
+
+    def clean(v):
+        return json.dumps([str(x).strip() for x in (v or []) if str(x).strip()])
+
+    # What is stored right now, so an identical save can be recognised as a no-op.
+    # Regenerating is expensive and destructive-looking: it re-invokes the recipes generator
+    # AND the explore personaliser for EVERY household member, so opening the preferences
+    # screen, changing nothing and tapping Save threw away a complete recipe set and rebuilt
+    # an identical one — minutes of "Cooking up fresh recipes" for no change.
+    _before, _ = _dietary_prefs_row(conn, household)
+
+    vals = [household] + [clean(body.get(k)) for k in _DIETARY_PREF_KEYS]
+    with conn.cursor() as cur:
+        cur.execute(
+            f"""INSERT INTO `{_DIETARY_PREFS_TABLE}`
+                (owner_id, allergies, diets, religious, health, custom)
+                VALUES (%s, %s, %s, %s, %s, %s)
+                ON DUPLICATE KEY UPDATE
+                  allergies = VALUES(allergies), diets = VALUES(diets),
+                  religious = VALUES(religious), health = VALUES(health),
+                  custom = VALUES(custom)""",
+            vals)
+    conn.commit()
+    # Regen on change, HOUSEHOLD-WIDE: bump kitchen_version + recipe_refresh_needed and
+    # async-invoke the recipes generator for EVERY household member (not just the setter), so
+    # everyone's recipes refresh immediately with the new prefs. UWIH needs nothing (fresh each
+    # open). Best-effort — a trigger failure never fails the save.
+    regen = False
+    try:
+        _after, _ = _dietary_prefs_row(conn, household)
+        # Compare as ORDER-INSENSITIVE sets of cleaned strings: the client sorts and
+        # lowercases before sending, but nothing guarantees a stored row was written that
+        # way, and re-ordering the same selections is not a change to a user.
+        def _norm(prefs):
+            return {k: sorted({str(x).strip().lower() for x in (prefs or {}).get(k) or [] if str(x).strip()})
+                    for k in _DIETARY_PREF_KEYS}
+        if _norm(_before) == _norm(_after):
+            print(json.dumps({'evt': 'dietary_prefs_unchanged_no_regen', 'owner': owner}))
+            prefs, updated_at = _dietary_prefs_row(conn, household)
+            return _success_response({'owner': owner, **prefs, 'updated_at': updated_at,
+                                      'regen_triggered': False})
+        members = _get_household_member_ids(conn, owner) or [owner]
+        _mark_recipe_refresh_needed_for_owners(conn, members)
+        for member in members:
+            _invoke_recipes_generator(member)
+            # Explore is personalised per member too — the household shares one
+            # preferences record, so everyone's feed has to be rebuilt against it.
+            _invoke_explore_personalizer(member)
+        regen = True
+    except Exception as e:
+        print(f"[WARN] dietary prefs regen trigger failed: {e}")
+    prefs, updated_at = _dietary_prefs_row(conn, household)
+    return _success_response({'owner': owner, **prefs, 'updated_at': updated_at,
+                              'regen_triggered': regen})
+
+
 def _should_bump_kitchen_version_for_fields(changed_fields):
     return bool(set(changed_fields or []) & _RECIPE_RELEVANT_KITCHEN_FIELDS)
 
@@ -588,6 +779,12 @@ def _record_master_feed_event(conn, owner, member_ids, record):
     try:
         write_master_feed_event(conn, owner, record, member_ids=member_ids)
     except Exception as exc:
+        # A 1062 duplicate-key on the append-only master_feed is the sha256 event_key
+        # dedup working as designed (the event is already recorded) — benign, NOT a
+        # failure. Suppress it so it doesn't pollute backend_error; only report real writes.
+        args = getattr(exc, 'args', ()) or ()
+        if (args and args[0] == 1062) or 'Duplicate entry' in str(exc):
+            return
         print(f"[WARN] Master feed write failed: {exc}")
         _report_backend_error('master_feed_write', owner_id=owner, code='feed_write_failed',
                               error=exc, job_id=(record or {}).get('job_id'))
@@ -1219,11 +1416,15 @@ def _create_kitchen_item(owner, body):
             if not created_item:
                 return _error_response(500, 'Item was inserted but could not be read back')
 
-            _invoke_kitchen_analysis_generator(owner, points_delta=1)
-            _refresh_shelf_life_cache(owner)
-            _invoke_meal_plan_generator(owner)
-            if not body.get('defer_recipes'):
-                _invoke_recipes_generator(owner)
+            # Each of these is a whole-kitchen recompute, not a per-item delta, so a
+            # batch caller (text-add) sets defer_side_effects and fires them ONCE after
+            # all rows land — 4 Lambda control-plane round trips instead of 4 per item.
+            if not body.get('defer_side_effects'):
+                _invoke_kitchen_analysis_generator(owner, points_delta=1)
+                _refresh_shelf_life_cache(owner)
+                _invoke_meal_plan_generator(owner)
+                if not body.get('defer_recipes'):
+                    _invoke_recipes_generator(owner)
 
             serialized = _serialize_rows([created_item])[0]
             _record_master_feed_event(
@@ -1275,6 +1476,10 @@ def _create_kitchen_item(owner, body):
 
 TEXT_ADD_PARSE_MODEL = os.getenv('KITCHEN_TEXT_PARSE_MODEL', 'gpt-4o-mini')
 TEXT_ADD_MAX_ITEMS = 25
+TEXT_ADD_PARSE_TIMEOUT_SECONDS = float(os.getenv('KITCHEN_TEXT_PARSE_TIMEOUT_SECONDS', '10'))
+TEXT_ADD_PARSE_ATTEMPTS = 2
+# Parallel create+enrich fan-out across parsed items.
+TEXT_ADD_MAX_WORKERS = 8
 # Public enrich endpoint (grocery-identifier stack). KitchenApiFunction's IAM role
 # can only invoke the 3 generator lambdas, so we dispatch enrichment over HTTP.
 ENRICH_KITCHEN_ITEM_URL = os.getenv(
@@ -1356,30 +1561,40 @@ _TEXT_ADD_SCHEMA = {
 
 
 def _parse_text_items_with_llm(text, owner=None):
-    """Parse free text into (items, skipped) via OpenAI structured outputs. Raises on failure."""
+    """Parse free text into (items, skipped) via OpenAI structured outputs. Raises on failure.
+
+    Bounded by TEXT_ADD_PARSE_TIMEOUT_SECONDS with one retry: this call's median is ~2-4s
+    but it has a long stuck tail (28s+ observed). Dying at the timeout and re-asking is far
+    cheaper than waiting out a hung request. Each attempt logs its own ai_op marker.
+    """
     client = _openai_client()
-    _t0 = time.time()
-    try:
-        response = client.chat.completions.create(
-            model=TEXT_ADD_PARSE_MODEL,
-            temperature=0,
-            messages=[
-                {"role": "system", "content": _TEXT_ADD_SYSTEM_PROMPT},
-                {"role": "user", "content": text},
-            ],
-            response_format={"type": "json_schema", "json_schema": _TEXT_ADD_SCHEMA},
-        )
-        data = json.loads(response.choices[0].message.content)
-        items = data.get('items') or []
-        skipped = data.get('skipped') or []
-        _ai_op('parse_text_add', TEXT_ADD_PARSE_MODEL, int((time.time() - _t0) * 1000), 'success',
-               input_summary=text, output_summary=f'items={len(items)} skipped={len(skipped)}',
-               owner_id=owner)
-        return items, skipped
-    except Exception as _e:
-        _ai_op('parse_text_add', TEXT_ADD_PARSE_MODEL, int((time.time() - _t0) * 1000), 'error',
-               input_summary=text, error=_e, owner_id=owner)
-        raise
+    last_error = None
+    for attempt in range(1, TEXT_ADD_PARSE_ATTEMPTS + 1):
+        _t0 = time.time()
+        try:
+            response = client.chat.completions.create(
+                model=TEXT_ADD_PARSE_MODEL,
+                temperature=0,
+                messages=[
+                    {"role": "system", "content": _TEXT_ADD_SYSTEM_PROMPT},
+                    {"role": "user", "content": text},
+                ],
+                response_format={"type": "json_schema", "json_schema": _TEXT_ADD_SCHEMA},
+                timeout=TEXT_ADD_PARSE_TIMEOUT_SECONDS,
+            )
+            data = json.loads(response.choices[0].message.content)
+            items = data.get('items') or []
+            skipped = data.get('skipped') or []
+            _ai_op('parse_text_add', TEXT_ADD_PARSE_MODEL, int((time.time() - _t0) * 1000), 'success',
+                   input_summary=text,
+                   output_summary=f'items={len(items)} skipped={len(skipped)} attempt={attempt}',
+                   owner_id=owner)
+            return items, skipped
+        except Exception as _e:
+            last_error = _e
+            _ai_op('parse_text_add', TEXT_ADD_PARSE_MODEL, int((time.time() - _t0) * 1000), 'error',
+                   input_summary=text, output_summary=f'attempt={attempt}', error=_e, owner_id=owner)
+    raise last_error
 
 
 def _fire_kitchen_enrichment(owner, item_id, product_name, brand, variant):
@@ -1399,7 +1614,9 @@ def _fire_kitchen_enrichment(owner, item_id, product_name, brand, variant):
             headers={"Content-Type": "application/json"},
             method="POST",
         )
-        with urllib.request.urlopen(req, timeout=8) as r:
+        # The enrich endpoint self-invokes async and acks immediately; a slow ack means a
+        # cold start, not real work. 3s is plenty and a miss here is already non-fatal.
+        with urllib.request.urlopen(req, timeout=3) as r:
             r.read()
         return True
     except Exception as e:
@@ -1446,10 +1663,12 @@ def _handle_text_add(owner, body):
         return _success_response({'created': [], 'count': 0, 'parse': [], 'skipped': skipped,
                                   'error': 'No parseable items found in text'}, status_code=422)
 
-    # 4) Create each parsed item, then dispatch enrichment
+    # 4) Create each parsed item, then dispatch enrichment — one worker per item.
+    # Every item is created with defer_recipes=True; the single recipes regen that the
+    # last item used to trigger from inside the create path is fired once after the join.
     parse_out = []
-    created = []
-    created_ids = []
+    jobs = []
+    outcomes = {}  # idx -> ('created', item) | ('skipped', {...}) — reassembled in input order
     for idx, it in enumerate(items):
         pn = str((it.get('product_name') or '')).strip()
         brand = it.get('brand')
@@ -1460,31 +1679,72 @@ def _handle_text_add(owner, body):
         parse_out.append({'fragment': fragment, 'product_name': pn, 'brand': brand,
                           'variant': variant, 'quantity_value': qv, 'quantity_unit': qu})
         if not pn:
-            skipped.append({'fragment': fragment, 'reason': 'empty_product_name'})
+            outcomes[idx] = ('skipped', {'fragment': fragment, 'reason': 'empty_product_name'})
             continue
-        is_last = (idx == len(items) - 1)
         item_body = {
             'product_name': pn, 'brand': brand, 'variant': variant,
             'quantity_value': qv, 'quantity_unit': qu,
             'action': 'IN', 'device_id': device_id, 'user_id': user_id,
             'analysis_stage': 'preliminary', 'analysis_status': 'ready',
-            'analysis_source': 'kitchen_text_add', 'defer_recipes': not is_last,
+            'analysis_source': 'kitchen_text_add', 'defer_recipes': True, 'defer_side_effects': True,
             'provisional_payload': {'source': 'text_add', 'raw_fragment': fragment, 'enrichment_status': 'pending'},
         }
+        jobs.append((idx, fragment, pn, brand, variant, item_body))
+
+    def _create_and_enrich(idx, fragment, pn, brand, variant, item_body):
         try:
             resp = _create_kitchen_item(owner, item_body)
             if resp.get('statusCode') not in (200, 201):
                 err = json.loads(resp.get('body') or '{}').get('error', 'create failed')
-                skipped.append({'fragment': fragment, 'reason': f'create_failed: {err}'})
-                continue
+                return idx, ('skipped', {'fragment': fragment, 'reason': f'create_failed: {err}'})
             item = json.loads(resp['body']).get('item') or {}
-            created.append(item)
             item_id = item.get('_id')
             if item_id:
-                created_ids.append(item_id)
                 _fire_kitchen_enrichment(owner, item_id, pn, brand, variant)
+            return idx, ('created', item)
         except Exception as e:
-            skipped.append({'fragment': fragment, 'reason': f'create_error: {str(e)}'})
+            return idx, ('skipped', {'fragment': fragment, 'reason': f'create_error: {str(e)}'})
+        finally:
+            # Workers own their MySQL connection; don't leak it past the request.
+            _close_thread_mysql_conn()
+
+    if len(jobs) == 1:
+        idx, outcome = _create_and_enrich(*jobs[0])
+        outcomes[idx] = outcome
+    elif jobs:
+        # Warm the botocore client cache on this thread first — concurrent first-time
+        # boto3.client() calls can race on service-model loading.
+        try:
+            boto3.client('lambda')
+        except Exception:
+            pass
+        workers = min(TEXT_ADD_MAX_WORKERS, len(jobs))
+        # The `with` block joins every worker before we build the response: Lambda freezes
+        # the execution environment on return, so nothing may outlive the handler.
+        with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+            for idx, outcome in pool.map(lambda j: _create_and_enrich(*j), jobs):
+                outcomes[idx] = outcome
+
+    created = []
+    created_ids = []
+    for idx in range(len(items)):
+        kind, value = outcomes.get(idx, (None, None))
+        if kind == 'created':
+            created.append(value)
+            if value.get('_id'):
+                created_ids.append(value['_id'])
+        elif kind == 'skipped':
+            skipped.append(value)
+
+    # One round of downstream triggers for the whole batch (previously: analysis/shelf-life/
+    # meal-plan once per item, recipes once via the last item's defer_recipes=false).
+    # points_delta must carry the batch count — the analysis generator ADDS it to the
+    # running score, so one call with 1 would silently drop the other items' points.
+    if created:
+        _invoke_kitchen_analysis_generator(owner, points_delta=len(created))
+        _refresh_shelf_life_cache(owner)
+        _invoke_meal_plan_generator(owner)
+        _invoke_recipes_generator(owner)
 
     latency_ms = int((time.time() - t0) * 1000)
     # 5) Structured corpus log: one line per request (CloudWatch-searchable)
@@ -1864,6 +2124,20 @@ def handler(event, context):
             ok, msg = _validate_owner_token(event, owner)
             if not ok:
                 return _error_response(403, msg)
+
+        # Dietary preferences route (additive; dispatched BEFORE the kitchen-item routing so a
+        # GET/PUT here isn't treated as a kitchen-items call). GET reads, PUT/POST upserts +
+        # triggers a recipe regen. OPTIONS falls through to the shared CORS handler below.
+        raw_path = event.get('rawPath') or event.get('requestContext', {}).get('http', {}).get('path', '') or ''
+        if 'dietary-preferences' in raw_path and http_method != 'OPTIONS':
+            if not owner:
+                return _error_response(400, 'Missing owner parameter')
+            if http_method == 'GET':
+                return _get_dietary_preferences(owner)
+            if http_method in ('PUT', 'POST'):
+                body = json.loads(event.get('body', '{}'))
+                return _put_dietary_preferences(owner, body)
+            return _error_response(405, f'Method {http_method} not allowed')
 
         # Route based on HTTP method
         if http_method == 'GET':
