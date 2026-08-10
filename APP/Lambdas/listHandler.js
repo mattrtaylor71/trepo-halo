@@ -403,6 +403,7 @@ exports.handler = async (event) => {
       id,
       itemUUID,
       store,
+      aisle_category,   // optional: caller placed the item in a specific aisle
     } = body;
 
     validateOwner(ownerId);
@@ -528,10 +529,33 @@ exports.handler = async (event) => {
       const effectiveAction = action || 'ADDED';
       const sharedUUID = crypto.randomUUID();
 
+      // Caller-chosen aisle (user tapped "+" on an aisle section). Optional.
+      //
+      // Setting it here is what makes the choice STICK: the categorizer only ever
+      // touches rows WHERE aisle_category IS NULL, so a pre-set value is skipped
+      // forever. No "user set this" flag is needed.
+      //
+      // The column is added by a LAZY ALTER that until now only ran in the categorize
+      // path — so a table that has never been categorized may not have it, and
+      // `shared_list` never gets it at all. Two consequences, both handled:
+      //   1. Only widen the INSERT when an aisle was actually supplied, so every
+      //      existing caller executes byte-identical SQL to before.
+      //   2. Ensure the column on the tables we are about to name, first.
+      const chosenAisle = (aisle_category != null && String(aisle_category).trim() !== '')
+        ? clampAisle(aisle_category)
+        : null;
+      if (chosenAisle) {
+        for (const memberId of memberIds) await ensureAisleColumn(`${memberId}_new_list`);
+        await ensureAisleColumn('shared_shopping_list');
+      }
+      const aisleCol = chosenAisle ? ', aisle_category' : '';
+      const aisleVal = chosenAisle ? ', ?' : '';
+      const aisleParam = chosenAisle ? [chosenAisle] : [];
+
       const sql = `
         INSERT INTO \`${'${tableName}'}\`
-          (_owner, _device, product_name, product_brand, images, product_barcode, action, store, household_item_uuid)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+          (_owner, _device, product_name, product_brand, images, product_barcode, action, store, household_item_uuid${aisleCol})
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?${aisleVal})
       `;
       let result;
       for (const memberId of memberIds) {
@@ -547,6 +571,7 @@ exports.handler = async (event) => {
             effectiveAction,
             store || null,
             sharedUUID,
+            ...aisleParam,
           ]);
           if (memberId === ownerId) result = insertResult;
         } catch (e) {
@@ -554,9 +579,14 @@ exports.handler = async (event) => {
           // retry once instead of 500ing.
           if (memberId === ownerId && e.code === 'ER_NO_SUCH_TABLE') {
             await ensureOwnListTable(ownerId);
+            // ensureOwnListTable creates the ORIGINAL schema, which has no
+            // aisle_category — the column only ever arrives via the lazy ALTER. Without
+            // this the retry would fail on the very account the retry exists to rescue.
+            if (chosenAisle) await ensureAisleColumn(tableName);
             const [retryResult] = await pool.execute(sql.replace('${tableName}', tableName), [
               memberId, device, product_name, product_brand || null, images || null,
               product_barcode || null, effectiveAction, store || null, sharedUUID,
+              ...aisleParam,
             ]);
             result = retryResult;
             continue;
@@ -577,16 +607,21 @@ exports.handler = async (event) => {
         try {
           await pool.execute(
             `INSERT INTO shared_shopping_list
-              (owner_id, _owner, _device, product_name, product_brand, images, product_barcode, action, store, household_item_uuid)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            [memberId, memberId, device, product_name, product_brand || null, images || null, product_barcode || null, effectiveAction, store || null, sharedUUID]
+              (owner_id, _owner, _device, product_name, product_brand, images, product_barcode, action, store, household_item_uuid${aisleCol})
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?${aisleVal})`,
+            [memberId, memberId, device, product_name, product_brand || null, images || null, product_barcode || null, effectiveAction, store || null, sharedUUID, ...aisleParam]
           );
         } catch (e) {
           console.error(JSON.stringify({ evt: 'shared_shopping_add_miss', op: 'add', ownerId, memberId, error: e.code || e.message }));
         }
       }
 
-      // Dual-write to shared_list
+      // Dual-write to shared_list.
+      // Deliberately NOT carrying aisle_category: `shared_list` is a migration mirror and
+      // is the one table ensureAisleColumn never touches, so naming the column here would
+      // throw on every add. The miss is self-healing — if reads ever flip to this table the
+      // categorizer fills the NULL — and this INSERT is already non-fatal, which would have
+      // turned a hard schema error into a silently dead dual-write.
       if (isDualWriteEnabled) {
         try {
           await pool.execute(
