@@ -14,10 +14,39 @@ const AISLE_CATEGORIES = [
   'household', 'personal_care', 'other',
 ];
 const AISLE_SET = new Set(AISLE_CATEGORIES);
+// User-created aisles live in their own namespace so they can never collide with the
+// fixed enum, and so a stray LLM string can never masquerade as one.
+const CUSTOM_AISLE_RE = /^custom:[a-z0-9_]{1,40}$/;
 function clampAisle(v) {
   if (typeof v !== 'string') return 'other';
   const norm = v.trim().toLowerCase();
+  // Pass custom aisles through verbatim. Without this the clamp silently rewrote every
+  // user-created aisle to 'other' - it guards every write path, so it is the single
+  // thing that decides whether custom aisles can exist at all.
+  if (CUSTOM_AISLE_RE.test(norm)) return norm;
   return AISLE_SET.has(norm) ? norm : 'other';
+}
+
+// Per-household list of user-created aisles. Idempotent create, mirroring the lazy
+// table/column pattern used elsewhere in this handler.
+async function ensureAislesTable() {
+  await getPool().query(`
+    CREATE TABLE IF NOT EXISTS shared_list_aisles (
+      _id VARCHAR(64) NOT NULL PRIMARY KEY,
+      owner_id VARCHAR(64) NOT NULL,
+      aisle_key VARCHAR(64) NOT NULL,
+      label VARCHAR(80) NOT NULL,
+      sort_order INT NOT NULL DEFAULT 0,
+      _createdDate DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE KEY uniq_owner_aisle (owner_id, aisle_key),
+      KEY idx_owner (owner_id)
+    )`);
+}
+
+/// "Toiletries" -> custom:toiletries
+function slugifyAisle(label) {
+  return String(label).trim().toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 40);
 }
 
 // Lambda self-invoke client (async fire-and-forget categorization).
@@ -520,6 +549,74 @@ exports.handler = async (event) => {
         }
         throw err;
       }
+    }
+
+    // ---------------------------------------------------------------- custom aisles
+    if (operation === 'aisles_list') {
+      await ensureAislesTable();
+      const [rows] = await pool.execute(
+        'SELECT aisle_key, label, sort_order FROM shared_list_aisles WHERE owner_id = ? ORDER BY sort_order, label',
+        [ownerId]
+      );
+      return response(200, {
+        aisles: rows.map(r => ({ key: r.aisle_key, label: r.label, sort_order: r.sort_order })),
+      });
+    }
+
+    if (operation === 'aisle_create') {
+      const label = String(body.label || '').trim().slice(0, 40);
+      const slug = slugifyAisle(label);
+      if (!label || !slug) return response(400, { message: 'A name is required' });
+      // Block names that would duplicate a built-in aisle, otherwise the user ends up with
+      // two "Produce" sections that items scatter between.
+      if (AISLE_SET.has(slug)) return response(409, { message: `"${label}" already exists` });
+      const key = `custom:${slug}`;
+
+      await ensureAislesTable();
+      // Fan out across the household exactly like an item add: an aisle only one member can
+      // see would render their shared items under a heading nobody else has.
+      let created = 0;
+      for (const memberId of memberIds) {
+        try {
+          const [r] = await pool.execute(
+            'INSERT IGNORE INTO shared_list_aisles (_id, owner_id, aisle_key, label, sort_order) VALUES (?, ?, ?, ?, ?)',
+            [crypto.randomUUID(), memberId, key, label, 0]
+          );
+          if (r.affectedRows) created += 1;
+        } catch (e) {
+          console.error(JSON.stringify({ evt: 'aisle_fanout_miss', op: 'aisle_create', ownerId, memberId, error: e.code || e.message }));
+          if (memberId === ownerId) throw e;
+        }
+      }
+      console.log(JSON.stringify({ evt: 'list_op', op: 'aisle_create', ownerId, key, created }));
+      return response(200, { aisle: { key, label } });
+    }
+
+    if (operation === 'aisle_delete') {
+      const key = String(body.aisle_key || '').trim().toLowerCase();
+      // Built-in aisles are not the user's to remove; only their own creations.
+      if (!CUSTOM_AISLE_RE.test(key)) {
+        return response(400, { message: 'Only custom aisles can be deleted' });
+      }
+      await ensureAislesTable();
+      for (const memberId of memberIds) {
+        try {
+          await pool.execute('DELETE FROM shared_list_aisles WHERE owner_id = ? AND aisle_key = ?', [memberId, key]);
+          // Items keep existing - they just lose the aisle. NULL (not 'other') so the
+          // categorizer re-files them into a real aisle instead of stranding them in OTHER.
+          await pool.execute(
+            `UPDATE \`${memberId}_new_list\` SET aisle_category = NULL WHERE aisle_category = ?`, [key]
+          );
+        } catch (e) {
+          console.error(JSON.stringify({ evt: 'aisle_fanout_miss', op: 'aisle_delete', ownerId, memberId, error: e.code || e.message }));
+        }
+      }
+      try {
+        await pool.execute('UPDATE shared_shopping_list SET aisle_category = NULL WHERE aisle_category = ?', [key]);
+      } catch (e) { /* mirror only; never fatal */ }
+      try { dispatchCategorize(ownerId); } catch (e) { /* best effort re-file */ }
+      console.log(JSON.stringify({ evt: 'list_op', op: 'aisle_delete', ownerId, key }));
+      return response(200, { deleted: key });
     }
 
     if (operation === 'add') {
