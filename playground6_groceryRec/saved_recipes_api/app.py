@@ -48,6 +48,101 @@ import recipe_inventory_llm
 
 _DB_ENV_VARS = ['DB_HOST', 'DB_USER', 'DB_PASS', 'DB_NAME']
 _REQUEST_TIMEOUT_SECONDS = 15
+# Image mirroring runs INSIDE the saved-recipes read path, so its timeout is a direct
+# tax on every list request. At 15s a single unreachable host (kroger.com, which does
+# not answer bots) blew straight past API Gateway's 30s ceiling: two candidate URLs x
+# 15s = 31.2s, the Lambda returned 200 to nobody, and the user got a 503 and an endless
+# "Finding recipes..." spinner on EVERY load, forever. A thumbnail is not worth 15s.
+_IMAGE_MIRROR_TIMEOUT_SECONDS = float(os.getenv('IMAGE_MIRROR_TIMEOUT_SECONDS', '3'))
+# Hard ceiling on time spent mirroring across a WHOLE request, regardless of how many
+# rows or candidate URLs are involved. Past this the remaining rows are served with
+# their original image URLs and mirrored on a later request. Bounded degradation beats
+# a request that never arrives.
+_IMAGE_MIRROR_BUDGET_SECONDS = float(os.getenv('IMAGE_MIRROR_BUDGET_SECONDS', '6'))
+_image_mirror_spent = {'seconds': 0.0}
+
+# How long a failed image URL is left alone before we try it again. A host that refused
+# us today is overwhelmingly likely to refuse us tomorrow; a week means a genuinely
+# transient outage still self-heals without us re-paying the timeout every request.
+_IMAGE_MIRROR_FAILURE_TTL_SECONDS = float(
+    os.getenv('IMAGE_MIRROR_FAILURE_TTL_SECONDS', str(7 * 24 * 3600)))
+# url -> epoch seconds after which it may be retried. Per-container, so a cold start
+# retries once; the DB column below is what makes the memory durable.
+_image_mirror_failures = {}
+
+
+def _mirror_url_recently_failed(url):
+    expiry = _image_mirror_failures.get(url)
+    return bool(expiry and expiry > time.time())
+
+
+def _note_mirror_failure(url):
+    """Remember a dead URL, and keep the map from growing without bound in a long-lived
+    container by dropping entries that have already expired."""
+    if not url:
+        return
+    _image_mirror_failures[url] = time.time() + _IMAGE_MIRROR_FAILURE_TTL_SECONDS
+    if len(_image_mirror_failures) > 5000:
+        now = time.time()
+        for key, expiry in list(_image_mirror_failures.items()):
+            if expiry <= now:
+                _image_mirror_failures.pop(key, None)
+
+
+def _ensure_mirror_failed_column(conn, table):
+    """Lazy, idempotent ALTER — same pattern used elsewhere in this codebase."""
+    try:
+        with conn.cursor() as cur:
+            cur.execute(f"ALTER TABLE `{table}` ADD COLUMN image_mirror_failed_at DATETIME NULL")
+        conn.commit()
+    except Exception:
+        pass          # already present, or the table is gone; both are fine
+
+
+def _mark_mirror_failed_in_db(conn, owner, recipe_id):
+    """Persist the failure so a cold container does not re-pay the timeout. Never fatal:
+    losing the marker costs latency, not correctness."""
+    try:
+        table = _saved_recipes_table(owner)
+        _ensure_mirror_failed_column(conn, table)
+        with conn.cursor() as cur:
+            cur.execute(
+                f"UPDATE `{table}` SET image_mirror_failed_at = NOW() WHERE _id = %s LIMIT 1",
+                [recipe_id])
+        conn.commit()
+        # The user-facing list read runs against shared_saved_recipes whenever
+        # READ_SHARED_SAVED_RECIPES is on (it is), so a marker written ONLY to the
+        # per-owner table is invisible to the very code path meant to consume it — the
+        # skip could never fire and every request re-paid the timeout. Mark both.
+        _ensure_mirror_failed_column(conn, 'shared_saved_recipes')
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE `shared_saved_recipes` SET image_mirror_failed_at = NOW() "
+                "WHERE owner_id = %s AND _id = %s LIMIT 1",
+                [owner, recipe_id])
+        conn.commit()
+    except Exception:
+        pass
+
+
+def _row_mirror_failed_recently(row):
+    failed_at = row.get('image_mirror_failed_at') if isinstance(row, dict) else None
+    if not failed_at:
+        return False
+    try:
+        age = (datetime.now() - failed_at).total_seconds()
+    except Exception:
+        return False
+    return age < _IMAGE_MIRROR_FAILURE_TTL_SECONDS
+
+
+
+def _image_mirror_budget_left():
+    return _IMAGE_MIRROR_BUDGET_SECONDS - _image_mirror_spent['seconds']
+
+
+def _reset_image_mirror_budget():
+    _image_mirror_spent['seconds'] = 0.0
 _USER_AGENT = (
     'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) '
     'AppleWebKit/537.36 (KHTML, like Gecko) '
@@ -1848,7 +1943,7 @@ def _mirror_recipe_image(owner, recipe_id, source_image_url, request_id=None):
     try:
         response = requests.get(
             source_url,
-            timeout=_REQUEST_TIMEOUT_SECONDS,
+            timeout=_IMAGE_MIRROR_TIMEOUT_SECONDS,
             allow_redirects=True,
             headers={'User-Agent': _USER_AGENT, 'Accept-Language': 'en-US,en;q=0.9'}
         )
@@ -5257,7 +5352,7 @@ def _handle_personalize_warm_task(event, request_id=None):
         with conn.cursor() as cur:
             if use_shared:
                 cur.execute(
-                    f"""SELECT {_drift_safe_select(conn, 'shared_saved_recipes')}
+                    f"""SELECT {_drift_safe_select(conn, 'shared_saved_recipes', extra_fields=['image_mirror_failed_at'])}
                         FROM `shared_saved_recipes`
                         WHERE {_household_owner_filter(conn, owner)[0]}
                         ORDER BY COALESCE(_updatedDate, _createdDate) DESC""",
@@ -5439,6 +5534,14 @@ def _refresh_saved_recipe_generated_image(conn, owner, recipe_id, request_id=Non
 def _ensure_owned_saved_recipe_image(conn, owner, row, request_id=None):
     if not row:
         return row
+    # Out of budget for this request: hand the row back untouched. It keeps its original
+    # image URL and gets mirrored on a later request. Serving the list is what matters.
+    if _image_mirror_budget_left() <= 0:
+        return row
+    # Known-dead image: skip entirely rather than re-pay the timeout on every single
+    # read. This is what stops one unreachable host taxing a user's list forever.
+    if _row_mirror_failed_recently(row):
+        return row
     recipe_id = _safe_text(row.get('_id'))
     current_image_url = _safe_text(row.get('image_url'))
     if not recipe_id or not current_image_url:
@@ -5451,17 +5554,36 @@ def _ensure_owned_saved_recipe_image(conn, owner, row, request_id=None):
         *(_parse_json_field(row.get('source_image_urls')) or []),
         current_image_url,
     ])
+    attempted_any = False
     for candidate_url in candidate_urls:
+        if _image_mirror_budget_left() <= 0:
+            return row
+        if _mirror_url_recently_failed(candidate_url):
+            continue                      # already known dead, in this container
+        attempted_any = True
+        attempt_started = time.time()
         try:
             image_fields = _mirror_recipe_image(owner, recipe_id, candidate_url, request_id=request_id)
             _update_saved_recipe_image_fields(conn, owner, recipe_id, image_fields)
             row.update(image_fields)
             return row
         except Exception:
+            _note_mirror_failure(candidate_url)
             continue
+        finally:
+            # Charge every attempt, successful or not. Failures are the expensive ones.
+            _image_mirror_spent['seconds'] += time.time() - attempt_started
+    if attempted_any:
+        # Persist the failure so a cold container inherits the knowledge instead of
+        # rediscovering it at the user's expense.
+        _mark_mirror_failed_in_db(conn, owner, recipe_id)
 
     refresh_url = _safe_text(row.get('source_url') or row.get('resolved_url'))
     if not refresh_url:
+        return row
+    # Re-extracting the page is far more expensive than the mirror fetch that just failed.
+    # Never start one on a read once the budget is gone.
+    if _image_mirror_budget_left() <= 0:
         return row
 
     try:
@@ -5555,7 +5677,7 @@ def _read_own_saved_recipe_rows(conn, owner, limit, before):
             params.append(before)
         where_clause = ("WHERE " + " AND ".join(where_parts)) if where_parts else ""
         cur.execute(
-            f"""SELECT {_drift_safe_select(conn, from_table)}
+            f"""SELECT {_drift_safe_select(conn, from_table, extra_fields=['image_mirror_failed_at'])}
                 FROM {from_ref}
                 {where_clause}
                 ORDER BY COALESCE(_updatedDate, _createdDate) DESC
@@ -5681,7 +5803,9 @@ def _get_saved_recipes(owner, query=None, request_id=None):
         effective_scope = 'own'
 
     # Self-heal images against each row's REAL owner table so a household read never
-    # cross-writes one member's recipe into the acting user's table.
+    # cross-writes one member's recipe into the acting user's table. Budget is per
+    # request: Lambda containers are reused, so a stale spend would starve later calls.
+    _reset_image_mirror_budget()
     rows = [
         _ensure_owned_saved_recipe_image(conn, _safe_owner_token(r.get('_owner')) or owner, r, request_id=request_id)
         for r in rows
@@ -5748,7 +5872,7 @@ def _personalize_saved_recipes(owner, request_id=None, recipe_ids=None):
         with conn.cursor() as cur:
             if use_shared:
                 cur.execute(
-                    f"""SELECT {_drift_safe_select(conn, 'shared_saved_recipes')}
+                    f"""SELECT {_drift_safe_select(conn, 'shared_saved_recipes', extra_fields=['image_mirror_failed_at'])}
                         FROM `shared_saved_recipes`
                         WHERE {_household_owner_filter(conn, owner)[0]}
                         ORDER BY COALESCE(_updatedDate, _createdDate) DESC""",
