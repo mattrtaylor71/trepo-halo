@@ -1113,7 +1113,17 @@ def _scrub_egg(b):
     return "egg" if (re.search(r"\begg", b) and "eggplant" not in b) else None
 
 
+# A "steak" is not always beef. Tuna, swordfish, salmon and halibut are all sold and
+# written as steaks, and the bare substring match dropped them as meat - which pulled
+# exactly the fish a pescatarian is there for out of their feed. Measured on a live run:
+# "Mexican Tuna Steak" and "Grilled Swordfish with Herb Butter" were both dropped as
+# diet:pescatarian=steak.
+_FISH_STEAK = re.compile(
+    r'\b(tuna|ahi|salmon|swordfish|halibut|mahi[\s-]?mahi|cod|marlin|shark|fish)\s+steak', re.I)
+
+
 def _scrub_meat(b):
+    b = _FISH_STEAK.sub(' ', b)
     for w in ["chicken", "beef", "bacon", " pork", "sausage", "turkey", "lamb", "steak",
               "ham ", "salami", "pepperoni", "chorizo", "meatball", "prosciutto", "veal"]:
         if w in b:
@@ -1417,6 +1427,21 @@ def _instruction_only_hit(detector, recipe):
     return token
 
 
+def _pref_names_allergen(pref_text, token):
+    """Does this preference actually name this allergen?
+
+    `token in pref_text` looks right and is badly wrong: "fish" is a substring of
+    "shellfish", so every shellfish-allergic user also ran the fin-fish detector and lost
+    salmon, cod, tuna, halibut and sardines. Measured on a live run: a pescatarian with a
+    shellfish allergy had 8 of 15 candidates dropped that way and got an almost entirely
+    vegetarian feed.
+
+    Anchoring at a word START keeps plurals and phrasings working ("tree nuts",
+    "peanuts", "milk/dairy") while refusing to find "fish" inside "shellfish".
+    """
+    return re.search(r'\b' + re.escape(token) + r'\w*', pref_text) is not None
+
+
 def _recipe_violates(recipe, prefs):
     """Return a reason string if the recipe violates any HARD dietary exclusion in
     prefs, else None. prefs = {allergies, diets, religious, health, custom}."""
@@ -1427,7 +1452,7 @@ def _recipe_violates(recipe, prefs):
     for name in prefs.get('allergies', []) or []:
         low = str(name).strip().lower()
         for token, fn in _ALLERGEN_DETECTORS:
-            if token in low:
+            if _pref_names_allergen(low, token):
                 hit = fn(b)
                 if hit:
                     return f'allergy:{name}={hit}'
