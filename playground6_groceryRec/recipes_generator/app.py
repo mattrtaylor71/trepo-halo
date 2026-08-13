@@ -7,6 +7,7 @@ import time
 import hashlib
 import uuid
 import urllib.request
+import urllib.error
 import urllib.parse
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -1282,9 +1283,58 @@ _ALLERGEN_DETECTORS = [
     ('gluten', _scrub_gluten),
 ]
 
+# Recognised protein sources, for the ONE quantitative preference we can check honestly.
+#
+# We hold no nutrition data, so "high-protein" cannot be verified as grams. What CAN be
+# verified is the floor: does the recipe contain a protein source at all? A user asking
+# for high-protein was served eggplant, peppers, oil, garlic, hoisin, soy sauce and rice -
+# nothing above trace protein - and nothing caught it, because quantitative preferences
+# had no check whatsoever. This is not a nutrition model; it is a smell test that a
+# "high-protein" suggestion has at least one thing protein actually comes from.
+_PROTEIN_SOURCES = (
+    'chicken', 'beef', 'pork', 'lamb', 'turkey', 'duck', 'veal', 'venison', 'bacon',
+    'ham', 'sausage', 'steak', 'mince', 'ground meat', 'prosciutto', 'chorizo',
+    'salmon', 'tuna', 'cod', 'haddock', 'halibut', 'trout', 'sardine', 'anchov',
+    'mackerel', 'tilapia', 'shrimp', 'prawn', 'crab', 'lobster', 'scallop', 'mussel',
+    'clam', 'squid', 'octopus', 'fish',
+    'egg', 'tofu', 'tempeh', 'seitan', 'edamame', 'soy curl',
+    'lentil', 'chickpea', 'garbanzo', 'black bean', 'kidney bean', 'pinto bean',
+    'white bean', 'cannellini', 'navy bean', 'butter bean', 'split pea', 'bean',
+    'greek yogurt', 'yoghurt', 'yogurt', 'cottage cheese', 'ricotta', 'paneer',
+    'halloumi', 'cheese', 'milk', 'whey', 'protein powder', 'protein shake',
+    'quinoa', 'peanut butter', 'almond butter', 'almond', 'cashew', 'walnut',
+    'peanut', 'pumpkin seed', 'hemp seed', 'chia',
+)
+
+
+def _scrub_protein_source(b):
+    """Return the protein source found, or None. Inverse of the allergen scrubbers: here
+    finding something is GOOD."""
+    for term in _PROTEIN_SOURCES:
+        if term in b:
+            return term
+    return None
+
+
+def _lacks_protein_for_high_protein(recipe, prefs):
+    """Reason string if a high-protein preference is set but the recipe has no protein
+    source at all, else None.
+
+    Deliberately a floor, not a threshold. Without grams we cannot say a dish is high in
+    protein; we can say with confidence that one containing no protein source is not.
+    """
+    wanted = [str(x).strip().lower() for v in ('health', 'diets')
+              for x in (prefs.get(v) or [])]
+    if not any('high-protein' in w or 'high protein' in w for w in wanted):
+        return None
+    b = _recipe_blob(recipe)
+    return None if _scrub_protein_source(b) else 'high-protein:no protein source'
+
+
 # Exclusion diets -> list of detectors that must all pass. Quantitative diets
 # (keto/low-carb/paleo/etc) have NO deterministic check and are skipped here
-# (they stay prompt-only best-effort).
+# (they stay prompt-only best-effort). high-protein is the exception: see
+# _lacks_protein_for_high_protein, which checks the floor rather than a threshold.
 _DIET_DETECTORS = {
     'vegetarian': [_scrub_meat, _scrub_seafood],
     'vegan': [_scrub_meat, _scrub_seafood, _scrub_dairy, _scrub_egg, _scrub_honey],
@@ -1314,6 +1364,59 @@ def _recipe_blob(recipe):
     return ' '.join(parts).lower()
 
 
+# Clauses that describe what to serve ALONGSIDE the dish rather than what goes in it.
+# "Serve with crusty bread" does not make a steak recipe contain gluten, and dropping the
+# recipe over an optional accompaniment costs the user a compliant dinner. Measured on
+# real data: 3 of 8 instruction-driven drops were exactly this.
+_SERVING_SUGGESTION_RE = re.compile(
+    r'\b(serve[sd]?\s+(with|over|alongside)|serving\s+suggestion|garnish(e[sd])?\s+with|'
+    r'for\s+serving|to\s+serve|top\s+with\s+optional|optional[:,]?)\b.*', re.I)
+
+
+def _instructions_blob(recipe):
+    """Instruction text only, with serving suggestions removed."""
+    v = recipe.get('instructions')
+    if isinstance(v, list):
+        steps = [str(x) for x in v]
+    elif isinstance(v, str):
+        steps = [v]
+    else:
+        return ''
+    return ' \n '.join(_SERVING_SUGGESTION_RE.sub(' ', s) for s in steps).lower()
+
+
+def _instruction_only_hit(detector, recipe):
+    """Run one detector over the INSTRUCTIONS and report a hit only when the instructions
+    introduce a food the ingredient list never mentions.
+
+    Why so narrow. Steps refer to ingredients by short name: a recipe listing "vegan
+    butter" or "flat rice noodles" says "spread butter" / "cook noodles" in the method.
+    The qualifier stripping that keeps those safe works on the PHRASE, so the bare word in
+    a step sails past it and the recipe gets dropped - a vegan recipe pulled from a vegan
+    user, Pad Thai pulled from a gluten-free user. Both measured on real saved recipes.
+    Requiring the food to be absent from the ingredient list keeps the case this was built
+    for ("cook pork belly" in a dish whose ingredients list no pork) and discards the rest.
+
+    The whole-word test also fixes a real substring bug: the dairy detector matches bare
+    "brie", so the step "dip the rice paper briefly" read as cheese.
+    """
+    ins = _instructions_blob(recipe)
+    if not ins:
+        return None
+    token = detector(ins)
+    if not token:
+        return None
+    token = token.strip()
+    if not token:
+        return None
+    # Already accounted for by the ingredient list (possibly in a qualified, allowed form).
+    if token in _recipe_blob(recipe):
+        return None
+    if not re.search(r'\b' + re.escape(token) + r'\b', ins):
+        return None
+    return token
+
+
 def _recipe_violates(recipe, prefs):
     """Return a reason string if the recipe violates any HARD dietary exclusion in
     prefs, else None. prefs = {allergies, diets, religious, health, custom}."""
@@ -1328,6 +1431,12 @@ def _recipe_violates(recipe, prefs):
                 hit = fn(b)
                 if hit:
                     return f'allergy:{name}={hit}'
+                # An allergen named only in a step ("stir in the peanut butter") was
+                # invisible to every check, because the blob stops at the ingredient list.
+                # Narrow by construction - see _instruction_only_hit.
+                hit = _instruction_only_hit(fn, recipe)
+                if hit:
+                    return f'allergy:{name}={hit}(step)'
 
     # Exclusion diets
     for name in prefs.get('diets', []) or []:
@@ -1338,6 +1447,9 @@ def _recipe_violates(recipe, prefs):
                     hit = fn(b)
                     if hit:
                         return f'diet:{name}={hit}'
+                    hit = _instruction_only_hit(fn, recipe)
+                    if hit:
+                        return f'diet:{name}={hit}(step)'
                 break
 
     # Religious rules
@@ -1361,6 +1473,13 @@ def _recipe_violates(recipe, prefs):
             a = _scrub_alcohol(b)
             if a:
                 return f'halal:alcohol={a}'
+
+    # Quantitative preferences: only the high-protein FLOOR is checkable without
+    # nutrition data. low-sodium / low-sugar / low-carb / keto stay prompt-only, because
+    # guessing at them from an ingredient list would drop good recipes on a hunch.
+    lacks = _lacks_protein_for_high_protein(recipe, prefs)
+    if lacks:
+        return lacks
 
     # Custom "no X" / "avoid X" / "no more X" -> substring match on X
     for entry in prefs.get('custom', []) or []:
@@ -1832,6 +1951,8 @@ EXPLORE_AGENT_WORKERS = int(os.getenv('EXPLORE_AGENT_WORKERS', '10'))
 # gpt-5.5, which measured 138-216s for this prompt and left nothing of the Lambda's 420s
 # for the extraction pass. The cheap structured model this app already uses elsewhere does
 # the same job in seconds.
+# Kill switch for the why-rewrite. Off => the old proposed-dish caption is kept.
+EXPLORE_WHY_REGENERATE = os.getenv('EXPLORE_WHY_REGENERATE', 'true').strip().lower() != 'false'
 EXPLORE_AGENT_MODEL = os.getenv('EXPLORE_AGENT_MODEL',
                                 os.getenv('OPENAI_INVENTORY_MODEL', 'gpt-4.1-mini'))
 # Whole-job deadline. The extraction fan-out must never run the function into its own
@@ -1906,6 +2027,21 @@ def _diet_query_terms(prefs):
     return ' '.join(out[:4])
 
 
+def _brave_pick_result(data):
+    """First result that looks like a single recipe page. Shared by the initial request and
+    the rate-limit retry so the two paths cannot drift apart."""
+    for item in ((data.get('web') or {}).get('results') or []):
+        title, link = item.get('title', ''), item.get('url', '')
+        if not link or _EXPLORE_ROUNDUP_RE.search(title) or _EXPLORE_ROUNDUP_RE.search(link):
+            continue
+        return {'url': link, 'title': title}
+    return None
+
+
+class BraveQuotaExhausted(Exception):
+    """The search plan's quota is gone. Terminal for the whole build, not just one dish."""
+
+
 def _brave_find_recipe_url(dish, diet_terms=''):
     """Search one dish name and return the first result that looks like a single recipe
     page. Roundups, category pages and social links are skipped — they have no one
@@ -1921,15 +2057,52 @@ def _brave_find_recipe_url(dish, diet_terms=''):
             url, headers={'Accept': 'application/json', 'X-Subscription-Token': key})
         with urllib.request.urlopen(req, timeout=20) as r:
             data = json.load(r)
+    except urllib.error.HTTPError as exc:
+        # A 429 is two very different failures wearing the same status code. Per-second
+        # rate limiting is transient and the next dish will succeed. A monthly QUOTA
+        # exhaustion is terminal: every remaining search in this build will fail too.
+        # Treating them alike is what let the plan run dry on Aug 12 and go unnoticed -
+        # 99 builds each burned their full 330s deadline on ~110 searches that could not
+        # possibly succeed, then reported a generic failure with no cause attached.
+        detail = ''
+        try:
+            detail = exc.read().decode('utf-8', 'replace')[:400]
+        except Exception:
+            pass
+        # Key on the exact error CODE, never on the body text. Brave returns the same
+        # `meta` block (quota_limit, quota_current) on BOTH failures, so a substring test
+        # for "quota" fires on an ordinary one-per-second rate-limit collision and would
+        # abort a whole build over a blip - worse than the bug it was added to fix.
+        code = ''
+        try:
+            code = ((json.loads(detail) or {}).get('error') or {}).get('code') or ''
+        except Exception:
+            pass
+        if exc.code == 429 and code.upper() == 'QUOTA_LIMITED':
+            print(json.dumps({'evt': 'brave_quota_exhausted', 'dish': dish,
+                              'detail': detail[:200]}))
+            raise BraveQuotaExhausted(detail)
+        if exc.code == 429:
+            # Transient. One retry after the rate window, then give up on this dish only.
+            print(json.dumps({'evt': 'brave_rate_limited', 'dish': dish}))
+            time.sleep(BRAVE_QPS_DELAY)
+            try:
+                req2 = urllib.request.Request(
+                    url, headers={'Accept': 'application/json', 'X-Subscription-Token': key})
+                with urllib.request.urlopen(req2, timeout=20) as r2:
+                    data = json.load(r2)
+                return _brave_pick_result(data)
+            except Exception as exc2:
+                print(json.dumps({'evt': 'brave_search_failed', 'dish': dish,
+                                  'error': f'retry failed: {str(exc2)[:80]}'}))
+                return None
+        print(json.dumps({'evt': 'brave_search_failed', 'dish': dish,
+                          'error': f'HTTP {exc.code}', 'detail': detail[:120]}))
+        return None
     except Exception as exc:
         print(json.dumps({'evt': 'brave_search_failed', 'dish': dish, 'error': str(exc)[:120]}))
         return None
-    for item in ((data.get('web') or {}).get('results') or []):
-        title, link = item.get('title', ''), item.get('url', '')
-        if not link or _EXPLORE_ROUNDUP_RE.search(title) or _EXPLORE_ROUNDUP_RE.search(link):
-            continue
-        return {'url': link, 'title': title}
-    return None
+    return _brave_pick_result(data)
 
 
 _EXPLORE_BUILD_TABLE = 'shared_explore_build'
@@ -2091,7 +2264,12 @@ def _explore_agent_iter_urls(prefs, count, exclude=None, seen_urls=None):
     seen_urls = seen_urls if seen_urls is not None else set()
     seen_domains, found = {}, 0
     for dish in dishes:
-        hit = _brave_find_recipe_url(dish['name'], diet_terms)
+        try:
+            hit = _brave_find_recipe_url(dish['name'], diet_terms)
+        except BraveQuotaExhausted:
+            print(json.dumps({'evt': 'explore_agent_aborted', 'reason': 'brave_quota',
+                              'dishes': len(dishes), 'urls': found}))
+            raise
         time.sleep(BRAVE_QPS_DELAY)
         if not hit:
             continue
@@ -2146,6 +2324,88 @@ def _explore_url_is_live(url):
         except Exception:
             continue
     return False
+
+
+def _why_from_prefs(prefs):
+    """Always-true fallback built from the preference record itself. Never wrong, never
+    specific."""
+    vals = [str(x).strip() for k in ('diets', 'allergies', 'religious', 'health')
+            for x in (prefs.get(k) or []) if str(x).strip()]
+    if not vals:
+        return ''
+    shown = vals[:3]
+    joined = shown[0] if len(shown) == 1 else ', '.join(shown[:-1]) + ' and ' + shown[-1]
+    return f'Matches your {joined} preferences'[:255]
+
+
+def _regenerate_why(recipe, prefs):
+    """Write the "why this matches you" line from the recipe we ACTUALLY stored.
+
+    The old line came from `_explore_agent_propose_dishes`, i.e. it described the dish the
+    model IMAGINED before any search happened. The title was then taken from the real page
+    while the why was carried over untouched, so whenever search returned something
+    different the explanation described a dish that was never fetched. That is how a
+    recipe with no tofu in it came to be recommended for its "protein-rich tofu".
+
+    Deriving it here, from the stored title and ingredients, makes that class of mismatch
+    structurally impossible rather than merely less likely. Falls back to the
+    preference-only line, which cannot be wrong.
+    """
+    fallback = _why_from_prefs(prefs)
+    try:
+        # Build the client here rather than taking one as an argument: the call site sits
+        # inside _personalize_explore, which has no client in scope. Passing one in looked
+        # fine and would have raised NameError at runtime, silently falling back forever.
+        from openai import OpenAI
+        client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'),
+                        timeout=float(os.getenv('EXPLORE_WHY_TIMEOUT_SECONDS', '20')))
+        # LABEL each group. Flattening them into one list lost the semantics entirely:
+        # a shellfish ALLERGY read as a shellfish REQUIREMENT, and the model dutifully
+        # wrote "does not meet shellfish requirement" onto a chicken recipe. Same labelled
+        # block _explore_agent_propose_dishes uses.
+        groups = [('allergies', 'must NOT contain (allergy)'), ('diets', 'diet'),
+                  ('religious', 'religious rule'), ('health', 'health goal'),
+                  ('custom', 'personal preference')]
+        parts = []
+        for key, label in groups:
+            vals = [str(x).strip() for x in (prefs.get(key) or []) if str(x).strip()]
+            if vals:
+                parts.append(f"{label}: {', '.join(vals)}")
+        pref_line = '\n'.join(parts) or 'no restrictions'
+        ings = '; '.join(recipe.get('ingredients') or [])[:1200]
+        resp = _create_chat(
+            client, model=EXPLORE_AGENT_MODEL,
+            messages=[
+                {'role': 'system', 'content':
+                 'Write an appetising reason this recipe suits the person, max 12 words. '
+                 'The recipe ALREADY satisfies every requirement - never say it fails one, '
+                 'and never mention an allergen just to say it is absent. '
+                 'Use ONLY ingredients that appear in the list given, and never name an '
+                 'ingredient that is not there. Describe the food, not the rules. '
+                 'Good: "Protein-rich chicken with warming Indian spices". '
+                 'Bad: "No shellfish in this recipe". '
+                 'Respond as JSON: {"why":""}'},
+                {'role': 'user', 'content':
+                 f"Requirements: {pref_line}\nTitle: {recipe.get('title')}\n"
+                 f"Ingredients: {ings}"},
+            ],
+            response_format={'type': 'json_object'})
+        why = (json.loads(resp.choices[0].message.content or '{}') or {}).get('why') or ''
+        why = str(why).strip()[:255]
+        if not why:
+            return fallback
+        # Last line of defence: if it named a food that is not in the recipe, do not ship
+        # it. Checked against title+ingredients, the same blob the diet filter trusts.
+        blob = _recipe_blob(recipe)
+        for token in re.findall(r'[a-z]{4,}', why.lower()):
+            if token in _PROTEIN_SOURCES and token not in blob:
+                print(json.dumps({'evt': 'explore_why_rejected', 'token': token,
+                                  'title': str(recipe.get('title') or '')}))
+                return fallback
+        return why
+    except Exception as exc:
+        print(json.dumps({'evt': 'explore_why_failed', 'error': str(exc)[:160]}))
+        return fallback
 
 
 def _explore_fetch_one(candidate):
@@ -2238,6 +2498,7 @@ def _personalize_explore(conn, owner, request_id=None):
     conn.commit()
     safe, seen_dishes, seen_urls = [], set(), set()
     proposed_total = live_total = extracted_total = dropped_total = 0
+    quota_exhausted = False
 
     # Rounds until the target is met. Each round asks for fresh dish names (the model is
     # told what it has already given), searches them, screens for liveness, extracts, and
@@ -2245,6 +2506,8 @@ def _personalize_explore(conn, owner, request_id=None):
     # round cap and the deadline both bound the work.
     for round_no in range(1, EXPLORE_AGENT_MAX_ROUNDS + 1):
         if len(safe) >= EXPLORE_AGENT_TARGET or time.monotonic() > deadline:
+            break
+        if quota_exhausted:
             break
         want = EXPLORE_AGENT_TARGET - len(safe)
         # Round 1 is deliberately small. Search is rate-limited to ~1 query/sec, so asking
@@ -2281,6 +2544,15 @@ def _personalize_explore(conn, owner, request_id=None):
             elif (result.get('source_url')
                   and all(result['source_url'] != x.get('source_url') for x in safe)
                   and len(safe) < EXPLORE_AGENT_TARGET):
+                # Rewrite the explanation from the recipe we are about to store, replacing
+                # the one written for the dish the model imagined before searching. Only
+                # runs for recipes that actually survive the diet filter, so it costs
+                # nothing on the ~55% that never reach a user.
+                if EXPLORE_WHY_REGENERATE:
+                    try:
+                        result['why'] = _regenerate_why(result, prefs)
+                    except Exception:
+                        pass                       # never let the caption kill the recipe
                 safe.append(result)
                 try:
                     _explore_store_one(conn, owner, fingerprint, len(safe) - 1, result)
@@ -2295,16 +2567,22 @@ def _personalize_explore(conn, owner, request_id=None):
             # Submit each candidate the moment search produces it, and publish anything that
             # has already finished. Extraction therefore overlaps the next search instead of
             # waiting for the whole round.
-            for c in _explore_agent_iter_urls(prefs, round_size, exclude=seen_dishes,
-                                              seen_urls=seen_urls):
-                proposed_total += 1
-                seen_dishes.add((c.get('title') or '').lower()[:60])
-                futures.append(pool.submit(_explore_screen_and_fetch, c))
-                for f in [f for f in futures if f.done() and f not in handled]:
-                    handled.add(f)
-                    _publish(f)
-                if len(safe) >= EXPLORE_AGENT_TARGET or time.monotonic() > deadline:
-                    break
+            try:
+                for c in _explore_agent_iter_urls(prefs, round_size, exclude=seen_dishes,
+                                                  seen_urls=seen_urls):
+                    proposed_total += 1
+                    seen_dishes.add((c.get('title') or '').lower()[:60])
+                    futures.append(pool.submit(_explore_screen_and_fetch, c))
+                    for f in [f for f in futures if f.done() and f not in handled]:
+                        handled.add(f)
+                        _publish(f)
+                    if len(safe) >= EXPLORE_AGENT_TARGET or time.monotonic() > deadline:
+                        break
+            except BraveQuotaExhausted:
+                # No further search can succeed, so stop proposing. Anything already
+                # extracted is still published below and still stored - a short feed beats
+                # discarding good recipes - but we stop paying for rounds that cannot work.
+                quota_exhausted = True
             for f in as_completed(futures):
                 if f in handled:
                     continue
@@ -2338,6 +2616,10 @@ def _personalize_explore(conn, owner, request_id=None):
            'met_target': len(safe) >= EXPLORE_AGENT_TARGET,
            'prefs_hash': fingerprint,
            'elapsed_ms': int((time.monotonic() - started) * 1000)}
+    if quota_exhausted:
+        # Distinct, greppable cause. The Aug 12 outage was invisible because a build that
+        # could not search looked identical to a build that searched and found nothing.
+        out['aborted_reason'] = 'brave_quota_exhausted'
     print(json.dumps({'evt': 'explore_personalized', **out}))
     return out
 
