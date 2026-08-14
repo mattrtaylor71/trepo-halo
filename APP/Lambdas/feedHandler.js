@@ -94,7 +94,27 @@ exports.handler = async (event) => {
         ORDER BY _id DESC
       `;
 
-      const [rows] = await pool.execute(sql, [ownerId, device]);
+      // A missing `_new_feed` means "this user has no feed", not an error.
+      //
+      // Writes to this table were neutered during the shared-table migration, so it can only
+      // ever be empty for anyone who signed up afterwards - and per-user tables are being
+      // retired to stop the table count growing with every signup (16,712 tables in July,
+      // 133,194 by mid-August). Without this, the first user created after `_new_feed` stops
+      // being provisioned would get a 500 here instead of an empty list.
+      //
+      // Scoped deliberately tight: ONLY table-not-found, and only on this read. Any other
+      // error still propagates, because a genuine failure should not be silently rendered
+      // as "you have nothing".
+      let rows = [];
+      try {
+        [rows] = await pool.execute(sql, [ownerId, device]);
+      } catch (err) {
+        if (err && (err.code === 'ER_NO_SUCH_TABLE' || err.errno === 1146)) {
+          console.log(JSON.stringify({ evt: 'feed_table_absent', ownerId }));
+        } else {
+          throw err;
+        }
+      }
 
       return response(200, {
         message: 'Feed items fetched',
