@@ -40,7 +40,28 @@ const BLOCKED_USER_IDS = new Set([
 const INVITE_CODES_RAW = process.env.INVITE_CODES || '{}';
 let INVITE_CODES = {};
 try { INVITE_CODES = JSON.parse(INVITE_CODES_RAW); } catch (e) { console.error('[InviteCode] Bad INVITE_CODES JSON:', e.message); }
-const REQUIRE_INVITE_CODE = (process.env.REQUIRE_INVITE_CODE || 'true').toLowerCase() === 'true';
+// ── INVITE GATE FLAG ──────────────────────────────────────────────────────────────
+// CANONICAL NAME: INVITE_GATE_ENABLED. Same name the grocery stack uses, where it is a
+// CloudFormation Parameter driving GET /app-config — so the app's "show the code field"
+// and this lambda's "enforce the code" read one concept under one name. REQUIRE_INVITE_CODE
+// is kept as a back-compat fallback so an un-migrated environment keeps working.
+//
+// DEFAULT IS 'false' (dormant / fail-OPEN). It used to default to 'true', which meant an
+// absent env var switched the gate ON by itself and 403'd EVERY signup, phone and Apple —
+// and env vars DO go absent: CloudFormation and CLI updates silently dropped bare env vars
+// twice in two days (2026-07-14 DUAL_WRITE_RECIPES, 2026-07-25 six flags). A config glitch
+// must never be able to lock every new user out of the product; the worst it may do is
+// leave the gate dormant, which is also the intended resting state.
+//
+// TO FLIP THE GATE, SET BOTH SIDES — see the runbook in playground6/scripts/deploy_safe.sh.
+const INVITE_GATE_RAW = process.env.INVITE_GATE_ENABLED
+  ?? process.env.REQUIRE_INVITE_CODE
+  ?? 'false';
+const REQUIRE_INVITE_CODE = String(INVITE_GATE_RAW).trim().toLowerCase() === 'true';
+console.log(`[InviteCode] gate=${REQUIRE_INVITE_CODE ? 'ON' : 'OFF'} (source=${
+  process.env.INVITE_GATE_ENABLED !== undefined ? 'INVITE_GATE_ENABLED'
+  : process.env.REQUIRE_INVITE_CODE !== undefined ? 'REQUIRE_INVITE_CODE(legacy)'
+  : 'default-false'})`);
 
 let pool;
 let verificationTablesReadyPromise;
@@ -431,14 +452,117 @@ async function ensureInviteCodeTable(conn) {
   _inviteTableEnsured = true;
 }
 
+// Same alphabet/length as invite_api.generate_code — no 0/O/1/I so a code survives being
+// read aloud or retyped from a text message. Keep the two in sync if either changes.
+const INVITE_CODE_ALPHABET = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
+const INVITE_CODE_LENGTH = 6;
+
+function makeInviteCode() {
+  let s = '';
+  for (let i = 0; i < INVITE_CODE_LENGTH; i++) {
+    s += INVITE_CODE_ALPHABET[Math.floor(Math.random() * INVITE_CODE_ALPHABET.length)];
+  }
+  return s;
+}
+
+/**
+ * Give a brand-new owner their shareable invite code at signup.
+ *
+ * BEST-EFFORT AND NON-BLOCKING BY CONTRACT: every failure is swallowed. A signup must never
+ * fail because a nice-to-have code couldn't be minted — and it doesn't need to, because
+ * GET /invite/mine generates on read, so a user whose hook failed still gets a code the
+ * first time the app asks. This hook only removes that first-open latency.
+ * Idempotent: INSERT IGNORE against the owner_id primary key, so a re-run or a household
+ * that already has a code is a no-op rather than a duplicate or an error.
+ */
+async function ensureInviteCodeForOwner(ownerId) {
+  if (!ownerId) return;
+  let conn;
+  try {
+    conn = await mysql.createConnection({
+      host: DB_HOST, user: DB_USER, password: DB_PASSWORD, database: DB_NAME,
+      connectTimeout: 5000,
+    });
+    const [existing] = await conn.query(
+      'SELECT code FROM invite_codes WHERE owner_id = ? LIMIT 1', [ownerId]
+    );
+    if (existing.length) return;                     // household already has one
+    // Retry on the UNIQUE code index: the DB arbitrates, so a collision can't produce a dupe.
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const code = makeInviteCode();
+      try {
+        await conn.query(
+          'INSERT IGNORE INTO invite_codes (owner_id, code) VALUES (?, ?)', [ownerId, code]
+        );
+        const [check] = await conn.query(
+          'SELECT code FROM invite_codes WHERE owner_id = ? LIMIT 1', [ownerId]
+        );
+        if (check.length) {
+          console.log(`[InviteCode] minted code for new owner ${ownerId}`);
+          return;
+        }
+      } catch (e) {
+        // duplicate code — loop and try another
+      }
+    }
+    console.warn(`[InviteCode] could not mint a code for ${ownerId} after retries; generate-on-read will cover it`);
+  } catch (err) {
+    console.error(`[InviteCode] mint failed for ${ownerId} (non-fatal, generate-on-read covers it): ${err.message}`);
+  } finally {
+    if (conn) { try { await conn.end(); } catch (e) { /* ignore */ } }
+  }
+}
+
+/**
+ * Look up a PER-OWNER invite code in `invite_codes` (written by invite_api).
+ * Returns the inviter's owner_id, or null when unknown/unavailable.
+ *
+ * FAILS CLOSED on a DB error, and says so loudly. Rationale: this only runs when the gate
+ * is ON, i.e. someone deliberately restricted signups — treating a DB blip as "let them in"
+ * would silently defeat the restriction at exactly the moment it was wanted. The cost is
+ * that a DB outage blocks new invitees while the gate is on, which is visible and bounded,
+ * whereas a silent bypass is neither.
+ */
+async function lookupPerOwnerInviteCode(normalized) {
+  if (!normalized) return null;
+  let conn;
+  try {
+    conn = await mysql.createConnection({
+      host: DB_HOST, user: DB_USER, password: DB_PASSWORD, database: DB_NAME,
+      connectTimeout: 5000,
+    });
+    const [rows] = await conn.query(
+      'SELECT owner_id FROM invite_codes WHERE code = ? LIMIT 1', [normalized]
+    );
+    return rows.length ? rows[0].owner_id : null;
+  } catch (err) {
+    console.error(`[InviteCode] per-owner lookup FAILED (failing closed) code_len=${normalized.length}: ${err.message}`);
+    return null;
+  } finally {
+    if (conn) { try { await conn.end(); } catch (e) { /* ignore */ } }
+  }
+}
+
 async function validateInviteCode(code) {
   if (!REQUIRE_INVITE_CODE) return { valid: true, code: '' };
   if (!code || typeof code !== 'string' || !code.trim()) {
     return { valid: false, reason: 'Invite code is required' };
   }
+  // Accept BOTH kinds of code, admin first (cheap, in-memory):
+  //   1. ADMIN codes from the INVITE_CODES env map (TREPO2026, BETATESTER, …) — unchanged.
+  //   2. PER-OWNER codes from `invite_codes`, one per household, so the gate can be viral
+  //      instead of admin-issued. Without this branch, turning the gate on would reject
+  //      all ~7,988 user codes and only the handful of admin codes would work.
+  // Normalisation mirrors invite_api.normalize_code: uppercase, strip a TREPO- prefix and
+  // any non-alphanumerics, so a code pasted out of Messages still matches.
   const upper = code.trim().toUpperCase();
+  const normalized = upper.replace(/^TREPO[- ]/, '').replace(/[^0-9A-Z]/g, '');
   const config = INVITE_CODES[upper];
-  if (!config) return { valid: false, reason: 'Invalid invite code' };
+  if (!config) {
+    const owner = await lookupPerOwnerInviteCode(normalized);
+    if (owner) return { valid: true, code: normalized, inviter_owner_id: owner };
+    return { valid: false, reason: 'Invalid invite code' };
+  }
 
   if (config.max_uses > 0) {
     const conn = await mysql.createConnection({
@@ -488,7 +612,6 @@ async function recordInviteCodeUsage(code, userId) {
  */
 async function ensureUserTables(conn, ownerId) {
   const listTable = `\`${ownerId}_new_list\``;
-  const kitchenTable = `\`${ownerId}_new_kitchen\``;
   const feedTable = `\`${ownerId}_new_feed\``;
   const prodKitchenTable = `\`${ownerId}_prod_kitchen\``;
   const discardsTable = `\`${ownerId}_discards\``;
@@ -520,22 +643,26 @@ async function ensureUserTables(conn, ownerId) {
         KEY \`idx_created\` (\`_createdDate\`)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
     `,
-    `
-      CREATE TABLE IF NOT EXISTS ${kitchenTable} (
-        \`_id\` CHAR(36) NOT NULL,
-        \`_owner\` CHAR(36) NOT NULL,
-        \`_device\` VARCHAR(64) NOT NULL,
-        \`product_name\` VARCHAR(255) NOT NULL,
-        \`product_brand\` VARCHAR(255) DEFAULT NULL,
-        \`product_expiration\` DATE DEFAULT NULL,
-        \`images\` TEXT,
-        \`product_barcode\` VARCHAR(64) DEFAULT NULL,
-        \`action\` VARCHAR(32) NOT NULL,
-        \`_createdDate\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        PRIMARY KEY (\`_id\`),
-        KEY \`idx_owner_time\` (\`_owner\`, \`_createdDate\`)
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
-    `,
+    // NOTE: `${ownerId}_new_kitchen` is deliberately NOT created here any more.
+    //
+    // Every signup was minting ~10 per-user tables, which took the database from 16,712
+    // tables in July to 133,194 by mid-August - ~2,400 new tables a day, 78% of them empty
+    // forever. The table cache holds 4,000 entries, so essentially every table open is now
+    // a miss (10.99M misses out of 10.99M opens over 31 days) and the cost grows with every
+    // signup. This is the first family retired.
+    //
+    // `_new_kitchen` was chosen first because it is provably dead, not merely quiet:
+    //   - 0 of 120 randomly sampled `_new_kitchen` tables contain a single row
+    //   - its only dedicated reader, trepo-kitchen-handler, has 0 invocations in 30 days
+    //   - no other production path reads it (the `recipes_generator_new_kitchen` hit in the
+    //     generator is a log label, not a table name)
+    // Verified end to end before shipping: dropped the table for a real account, then ran a
+    // photo check-in through the live app - analysis returned 10 items, the commit landed
+    // all 10 in shared_kitchen, and nothing recreated the table.
+    //
+    // Kitchen data lives in `shared_kitchen` (231,749 rows). If something ever does need a
+    // per-user kitchen table again, the voice path's ensureKitchenTable() creates it on
+    // demand, so its absence degrades to a lazy create rather than an error.
     `
       CREATE TABLE IF NOT EXISTS ${feedTable} (
         \`_id\` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
@@ -816,7 +943,13 @@ async function generateUniqueHouseholdId(conn) {
  *     - Else: keep existing owner_id.
  * - If user doesn't exist:
  *     - If join_household_id provided and valid: owner_id = join_household_id.
- *     - Else: owner_id = user_id (user becomes household owner).
+ *     - Else: owner_id = generateUniqueHouseholdId() — a fresh 5-digit household code.
+ *
+ * NOTE: owner_id and user_id are DIFFERENT identifier spaces and always have been for
+ * every row currently in new_users (all 7,993 owner_ids are 5-digit codes; user_id is a
+ * 36-char UUID). An earlier version of this comment claimed `owner_id = user_id`, which
+ * has not been true since household codes landed — do not assume owner ids are UUIDs, and
+ * do not length-check or UUID-validate them anywhere downstream.
  */
 async function findOrCreateUser({ phoneNumber, firstName, lastName, zipCode, email, joinHouseholdId }) {
   console.log('[findOrCreateUser] connecting...');
@@ -1599,6 +1732,12 @@ export const handler = async (event, context) => {
         await recordInviteCodeUsage(body.invite_code, userRecord.userId);
       }
 
+      // Mint this owner's OWN shareable code. Deliberately outside the invite_code check:
+      // every new user gets a code to share, whether or not they arrived via one.
+      if (userRecord.isNewUser) {
+        await ensureInviteCodeForOwner(userRecord.ownerId);
+      }
+
       await recordVerificationAttemptSafely({
         action: 'verify_code',
         phoneNumber: normalizedPhoneNumber,
@@ -1713,6 +1852,11 @@ export const handler = async (event, context) => {
       // Record invite code usage for newly created users
       if (userRecord.isNewUser && body.invite_code) {
         await recordInviteCodeUsage(body.invite_code, userRecord.userId);
+      }
+
+      // Mint this owner's OWN shareable code (see the phone path above).
+      if (userRecord.isNewUser) {
+        await ensureInviteCodeForOwner(userRecord.ownerId);
       }
 
       const token = await generateToken({
