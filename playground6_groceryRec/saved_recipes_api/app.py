@@ -1433,6 +1433,19 @@ def _compute_saved_recipe_availability_batch(recipes, kitchen_context, request_i
             'title': _safe_text((recipe or {}).get('title')),
             'ingredients': _clean_string_list((recipe or {}).get('ingredients') or []),
         })
+    # An EMPTY kitchen has exactly one correct answer: nothing is on hand. Running the LLM
+    # matcher against no inventory cannot improve on that, and it made the result unstable -
+    # a user with an empty kitchen reported the same recipe reading "0 ingredients on hand"
+    # one moment and "some other random amount" the next. Answer it deterministically and
+    # skip both the matcher and the substitution calls (there is nothing to substitute WITH).
+    # This is not a rare edge case: ~58% of households currently have an empty kitchen.
+    if not ((kitchen_context or {}).get('kitchen_candidates') or []):
+        return {
+            payload['id']: recipe_inventory_llm.deterministic_availability(
+                payload, kitchen_context, None)
+            for payload in recipe_payloads
+        }
+
     availability_map, _ = recipe_inventory_llm.match_recipes_fast(
         recipe_payloads,
         kitchen_context,

@@ -438,6 +438,59 @@ def _ensure_owner_kitchen_state_table(conn):
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
         """)
     conn.commit()
+    # Lazy, idempotent ALTERs so an existing table gains the retry counter without a
+    # migration step. Same pattern used elsewhere in this codebase.
+    for ddl in (
+        f"ALTER TABLE `{_OWNER_KITCHEN_STATE_TABLE}` ADD COLUMN incomplete_attempt_version BIGINT NULL",
+        f"ALTER TABLE `{_OWNER_KITCHEN_STATE_TABLE}` ADD COLUMN incomplete_attempts INT NOT NULL DEFAULT 0",
+    ):
+        try:
+            with conn.cursor() as cur:
+                cur.execute(ddl)
+            conn.commit()
+        except Exception:
+            pass          # already present
+
+
+# How many times a single kitchen_version may fail to yield a full set before we stop
+# retrying it. A first failure can be a transient model hiccup and is worth another go; a
+# kitchen that genuinely cannot produce ten distinct dishes will fail identically forever,
+# and each attempt costs a full gpt-5.4 generation.
+_MAX_INCOMPLETE_ATTEMPTS = int(os.getenv('MAX_INCOMPLETE_ATTEMPTS', '3'))
+
+
+def _bump_incomplete_attempts(conn, owners):
+    """Count consecutive incomplete generations for the CURRENT kitchen_version.
+
+    Keyed on the version so any real kitchen change resets the budget - the user gets fresh
+    attempts whenever their inventory actually changes, which is the only thing that could
+    plausibly change the outcome. Returns the highest count across the owners, or 0 on any
+    failure (never let bookkeeping break generation).
+    """
+    highest = 0
+    try:
+        _ensure_owner_kitchen_state_table(conn)
+        for owner in [_sanitize_user_id(o) for o in (owners or []) if _sanitize_user_id(o)]:
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"""
+                    UPDATE `{_OWNER_KITCHEN_STATE_TABLE}`
+                    SET incomplete_attempts = CASE
+                            WHEN incomplete_attempt_version = kitchen_version
+                            THEN incomplete_attempts + 1 ELSE 1 END,
+                        incomplete_attempt_version = kitchen_version,
+                        _updatedDate = NOW()
+                    WHERE owner = %s
+                    """, [owner])
+                cur.execute(
+                    f"SELECT incomplete_attempts FROM `{_OWNER_KITCHEN_STATE_TABLE}` WHERE owner = %s",
+                    [owner])
+                row = cur.fetchone() or {}
+            highest = max(highest, int(row.get('incomplete_attempts') or 0))
+        conn.commit()
+    except Exception as exc:
+        print(json.dumps({'evt': 'incomplete_attempts_bump_failed', 'error': str(exc)[:160]}))
+    return highest
 
 
 def _get_owner_kitchen_version(conn, owner):
@@ -2889,6 +2942,16 @@ def handler(event, context):
             if not has_existing_recipes:
                 for target_owner in target_owners:
                     _set_status(conn, target_owner, 'failed', 'Could not build a full 10+10 recipe set after survivor backfill')
+                # This owner has NOTHING on screen, so another attempt is worth paying for -
+                # the shortfall may have been a transient model failure. But not forever: if
+                # their kitchen genuinely cannot yield ten dishes, every sweep re-fire burns a
+                # generation to reach the identical dead end. Give up after a few tries and
+                # let the next kitchen change re-open the budget.
+                attempts = _bump_incomplete_attempts(conn, target_owners)
+                if attempts >= _MAX_INCOMPLETE_ATTEMPTS:
+                    print(json.dumps({'evt': 'incomplete_set_giving_up', 'owner': str(owner),
+                                      'attempts': attempts}))
+                    _mark_recipe_refresh_complete(conn, target_owners)
             else:
                 # Their previous recipes are still on screen and still fine, but the row was
                 # moved to 'regenerating' when this run started. Returning without resolving
@@ -2897,6 +2960,18 @@ def handler(event, context):
                 # a terminal status, even the ones where nothing is wrong.
                 for target_owner in target_owners:
                     _set_status(conn, target_owner, 'ready')
+                # ...and it has to close the refresh gap too. Publishing a terminal STATUS was
+                # only half the job: the kitchen_version gap stayed open, so the stuck-owner
+                # sweep re-matched this owner every RECIPE_SWEEP_CLAIM_TTL_MIN and re-fired a
+                # full gpt-5.4 generation that could never succeed. The shortfall is nearly
+                # always kitchen_only on a small kitchen - there simply are not ten distinct
+                # cookable dishes in it - so retrying was guaranteed to fail again. Measured
+                # over 19 days: 281 generations across 10 owners, every one of them wasted.
+                #
+                # The user has a usable set on screen, so this run is DONE for this version of
+                # their kitchen. A genuinely transient shortfall is picked up by the next
+                # kitchen change, which is the normal trigger for regeneration anyway.
+                _mark_recipe_refresh_complete(conn, target_owners)
             return
 
         kitchen_only_list, need_grocery_list = _build_recipes(kitchen_only, need_grocery)
@@ -2942,11 +3017,30 @@ def handler(event, context):
         import traceback
         traceback.print_exc()
         _report_backend_error('generate', owner_id=owner, code='handler_error', error=e)
-        if not has_existing_recipes:
-            try:
+        try:
+            if not has_existing_recipes:
                 for target_owner in target_owners:
                     _set_status(conn, target_owner, 'failed', str(e))
-            except Exception:
-                pass
+            else:
+                # Previously this branch did NOTHING, so the row stayed on 'regenerating'
+                # forever and the client polled a run that had already crashed. Their old
+                # recipes are still on screen and still fine, so resolve to a terminal state
+                # like every other exit from this function.
+                for target_owner in target_owners:
+                    _set_status(conn, target_owner, 'ready')
+        except Exception:
+            pass
+        try:
+            # Neither branch used to close the refresh gap, so the stuck-owner sweep re-fired
+            # the same crashing run every few minutes. One owner logged 64 "Request timed out"
+            # generations in a single burst that way. Allow a few retries (a timeout really can
+            # be transient), then stop until the kitchen actually changes.
+            attempts = _bump_incomplete_attempts(conn, target_owners)
+            if attempts >= _MAX_INCOMPLETE_ATTEMPTS:
+                print(json.dumps({'evt': 'generate_giving_up', 'owner': str(owner),
+                                  'attempts': attempts, 'error': str(e)[:160]}))
+                _mark_recipe_refresh_complete(conn, target_owners)
+        except Exception:
+            pass
     finally:
         _release_named_lock(owner_lock_conn, owner_lock_name)
