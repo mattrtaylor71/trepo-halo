@@ -612,7 +612,6 @@ async function recordInviteCodeUsage(code, userId) {
  */
 async function ensureUserTables(conn, ownerId) {
   const listTable = `\`${ownerId}_new_list\``;
-  const feedTable = `\`${ownerId}_new_feed\``;
   const prodKitchenTable = `\`${ownerId}_prod_kitchen\``;
   const discardsTable = `\`${ownerId}_discards\``;
   const dishesTable = `\`${ownerId}_dishes\``;
@@ -663,24 +662,12 @@ async function ensureUserTables(conn, ownerId) {
     // Kitchen data lives in `shared_kitchen` (231,749 rows). If something ever does need a
     // per-user kitchen table again, the voice path's ensureKitchenTable() creates it on
     // demand, so its absence degrades to a lazy create rather than an error.
-    `
-      CREATE TABLE IF NOT EXISTS ${feedTable} (
-        \`_id\` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-        \`_owner\` CHAR(36) NOT NULL,
-        \`_device\` VARCHAR(64) NOT NULL,
-        \`product_name\` VARCHAR(255) NOT NULL,
-        \`product_brand\` VARCHAR(255) DEFAULT NULL,
-        \`images\` TEXT,
-        \`product_barcode\` VARCHAR(64) DEFAULT NULL,
-        \`action\` VARCHAR(32) NOT NULL,
-        \`_createdDate\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        \`created_at\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        \`updated_at\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-        PRIMARY KEY (\`_id\`),
-        KEY \`idx_owner_device\` (\`_owner\`, \`_device\`),
-        KEY \`idx_created\` (\`_createdDate\`)
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
-    `,
+    // `${ownerId}_new_feed` is no longer provisioned here either - second family retired.
+    // Its writes were neutered during the shared-table migration so it can only ever be
+    // empty, and 0 of 120 sampled `_new_feed` tables contain a row. The one live reader
+    // (trepo-feed-handler, 256 invocations/30d) was made tolerant of a missing table first
+    // and verified against the deployed function: it now returns 200 with an empty list
+    // instead of a 500. See trepov2 ae25716.
     `
       CREATE TABLE IF NOT EXISTS ${prodKitchenTable} (
         \`_id\` VARCHAR(36) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'UUID for this record',
@@ -896,16 +883,23 @@ async function ensureUserTables(conn, ownerId) {
     await conn.query(sql);
   }
 
-  // Ensure _createdDate exists on list/feed for older tables.
+  // Ensure _createdDate exists on the list table for older tables.
+  //
+  // The `_new_feed` entry was removed along with its CREATE above: that table is no longer
+  // provisioned, so there is nothing to alter for a new user. Leaving it in would have been
+  // a ReferenceError on every signup once the const went, and even with the const it would
+  // have thrown ER_NO_SUCH_TABLE straight through the catch below, which only forgives a
+  // duplicate column. Existing users already have the column, so nothing is lost.
   const alterClauses = [
     { table: listTable, column: '_createdDate', ddl: 'ADD COLUMN `_createdDate` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP' },
-    { table: feedTable, column: '_createdDate', ddl: 'ADD COLUMN `_createdDate` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP' },
   ];
   for (const { table, ddl } of alterClauses) {
     try {
       await conn.query(`ALTER TABLE ${table} ${ddl}`);
     } catch (err) {
-      if (err.code !== 'ER_DUP_FIELDNAME') {
+      // Already migrated, or the table is one we no longer provision. Neither is a reason
+      // to fail a signup - this is opportunistic backfill, not a required step.
+      if (err.code !== 'ER_DUP_FIELDNAME' && err.code !== 'ER_NO_SUCH_TABLE' && err.errno !== 1146) {
         throw err;
       }
     }
