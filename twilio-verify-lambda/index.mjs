@@ -1238,10 +1238,12 @@ async function findOrCreateUserByApple({ appleUserId, email, firstName, lastName
 
 // ── End Apple Sign In ──────────────────────────────────────────────────────
 
+// Families retired from provisioning must be removed from here too, or joining a household
+// quietly puts them back: the mirror copies whatever the EXISTING member has, and older
+// members still carry the retired tables. Measured after the first two removals - 48 of 53
+// new users correctly got 8 tables, and the 5 exceptions were all household joiners.
 const MIRRORED_TABLES = [
   { suffix: '_new_list', rewriteOwner: true, skipColumns: ['_id', 'created_at', 'updated_at'] },
-  { suffix: '_new_kitchen', rewriteOwner: true },
-  { suffix: '_new_feed', rewriteOwner: true, skipColumns: ['_id', 'created_at', 'updated_at'] },
   { suffix: '_prod_kitchen', rewriteOwner: true },
   { suffix: '_discards', rewriteOwner: true },
   { suffix: '_dishes', rewriteOwner: true },
