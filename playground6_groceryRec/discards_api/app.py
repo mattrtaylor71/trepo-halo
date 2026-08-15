@@ -486,39 +486,66 @@ def _update_discard(owner, item_id, body):
         values.append(item_id)
         conn = _mysql_conn()
         member_ids = _get_household_member_ids(conn, owner)
+        # Same flag the READ path uses. Reads cut over to shared_discards a while ago but this
+        # write did not, so it still required a per-owner table that is being retired - a user
+        # could SEE a discard (served from shared) and get a 404 trying to edit it. Both halves
+        # now follow the flag together.
+        use_shared = os.getenv('READ_SHARED_DISCARDS', '').strip().lower() == 'true'
         with conn.cursor() as cur:
-            cur.execute("""
-                SELECT COUNT(*) as count FROM information_schema.tables 
-                WHERE table_schema = DATABASE() AND table_name = %s
-            """, [table_name])
-            if cur.fetchone()['count'] == 0:
-                return _error_response(404, f'Discards table not found for owner: {owner}')
-            cur.execute(f"SELECT `_id` FROM `{table_name}` WHERE `_id` = %s", [item_id])
-            if not cur.fetchone():
-                return _error_response(404, f'Item with id {item_id} not found')
-            cur.execute(f"""
-                SELECT COUNT(*) as count FROM information_schema.columns 
-                WHERE table_schema = DATABASE() AND table_name = %s AND column_name = '_updatedDate'
-            """, [table_name])
-            if cur.fetchone()['count'] == 0:
-                # Tolerate errno 1060: two concurrent requests can both see the column
-                # missing and both ALTER — a duplicate just means the other won the race.
-                try:
-                    cur.execute(f"ALTER TABLE `{table_name}` ADD COLUMN `_updatedDate` DATETIME NULL")
-                    conn.commit()
-                except Exception as e:
-                    if getattr(e, 'args', (None,))[0] == 1060:
-                        conn.rollback()
-                    else:
-                        raise
-            query = f"UPDATE `{{table_name}}` SET {', '.join(updates)} WHERE `_id` = %s"
-            for member_id in member_ids:
-                member_table_name = f"{member_id}_discards"
-                cur.execute(query.format(table_name=member_table_name), values)
-            conn.commit()
-            for member_id in member_ids:
-                _dual_write_discard_to_shared(conn, member_id, item_id)
-            cur.execute(f"SELECT * FROM `{table_name}` WHERE `_id` = %s", [item_id])
+            if use_shared:
+                # MANDATORY owner scoping — shared_discards holds every owner's rows, so an
+                # unscoped WHERE `_id` would edit a stranger's discard. Scoped to the household
+                # rather than the acting user alone, because the per-owner path below fans the
+                # same edit out to every member's table and that behaviour must be preserved.
+                owner_ids = [_sanitize_user_id(m) for m in member_ids] or [_sanitize_user_id(owner)]
+                placeholders = ','.join(['%s'] * len(owner_ids))
+                cur.execute(
+                    f"SELECT `_id` FROM `shared_discards` WHERE `_id` = %s AND `owner_id` IN ({placeholders})",
+                    [item_id] + owner_ids)
+                if not cur.fetchone():
+                    return _error_response(404, f'Item with id {item_id} not found')
+                cur.execute(
+                    f"UPDATE `shared_discards` SET {', '.join(updates)} "
+                    f"WHERE `_id` = %s AND `owner_id` IN ({placeholders})",
+                    values + owner_ids)
+                conn.commit()
+                # No _dual_write_discard_to_shared here: shared IS the table we just wrote.
+                cur.execute(
+                    "SELECT * FROM `shared_discards` WHERE `_id` = %s AND `owner_id` = %s",
+                    [item_id, _sanitize_user_id(owner)])
+            else:
+                cur.execute("""
+                    SELECT COUNT(*) as count FROM information_schema.tables
+                    WHERE table_schema = DATABASE() AND table_name = %s
+                """, [table_name])
+                if cur.fetchone()['count'] == 0:
+                    return _error_response(404, f'Discards table not found for owner: {owner}')
+                cur.execute(f"SELECT `_id` FROM `{table_name}` WHERE `_id` = %s", [item_id])
+                if not cur.fetchone():
+                    return _error_response(404, f'Item with id {item_id} not found')
+                cur.execute(f"""
+                    SELECT COUNT(*) as count FROM information_schema.columns
+                    WHERE table_schema = DATABASE() AND table_name = %s AND column_name = '_updatedDate'
+                """, [table_name])
+                if cur.fetchone()['count'] == 0:
+                    # Tolerate errno 1060: two concurrent requests can both see the column
+                    # missing and both ALTER — a duplicate just means the other won the race.
+                    try:
+                        cur.execute(f"ALTER TABLE `{table_name}` ADD COLUMN `_updatedDate` DATETIME NULL")
+                        conn.commit()
+                    except Exception as e:
+                        if getattr(e, 'args', (None,))[0] == 1060:
+                            conn.rollback()
+                        else:
+                            raise
+                query = f"UPDATE `{{table_name}}` SET {', '.join(updates)} WHERE `_id` = %s"
+                for member_id in member_ids:
+                    member_table_name = f"{member_id}_discards"
+                    cur.execute(query.format(table_name=member_table_name), values)
+                conn.commit()
+                for member_id in member_ids:
+                    _dual_write_discard_to_shared(conn, member_id, item_id)
+                cur.execute(f"SELECT * FROM `{table_name}` WHERE `_id` = %s", [item_id])
             updated_item = cur.fetchone()
             if not updated_item:
                 return _error_response(404, 'Item not found after update')
