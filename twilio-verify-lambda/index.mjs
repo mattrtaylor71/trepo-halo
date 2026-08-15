@@ -611,10 +611,14 @@ async function recordInviteCodeUsage(code, userId) {
  * Uses the same schemas as existing production tables.
  */
 async function ensureUserTables(conn, ownerId) {
+    // Retired families - see trepov2 d853843 / 502f663 / dba284e for the first two.
+    // `_prod_kitchen`, `_discards` and `_dishes` are all 0-2% in use across 120-table samples,
+    // and every path that touched them now resolves to a shared table
+    // (USE_SHARED_TABLES / READ_SHARED_DISCARDS / READ_SHARED_DISHES are all live true).
+    // Each was verified by dropping it for a real account and exercising the flow that
+    // actually depends on it: deleting a kitchen item (the archive bootstrap), reading a
+    // dish, and editing a discard. All three behaved identically with the table absent.
   const listTable = `\`${ownerId}_new_list\``;
-  const prodKitchenTable = `\`${ownerId}_prod_kitchen\``;
-  const discardsTable = `\`${ownerId}_discards\``;
-  const dishesTable = `\`${ownerId}_dishes\``;
   const recipesTable = `\`${ownerId}_recipes\``;
   const savedRecipesTable = `\`${ownerId}_saved_recipes\``;
   const mealPlanTable = `\`${ownerId}_meal_plan\``;
@@ -668,133 +672,6 @@ async function ensureUserTables(conn, ownerId) {
     // (trepo-feed-handler, 256 invocations/30d) was made tolerant of a missing table first
     // and verified against the deployed function: it now returns 200 with an empty list
     // instead of a 500. See trepov2 ae25716.
-    `
-      CREATE TABLE IF NOT EXISTS ${prodKitchenTable} (
-        \`_id\` VARCHAR(36) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'UUID for this record',
-        \`_owner\` VARCHAR(36) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'Owner UUID (matches table name prefix)',
-        \`_device\` VARCHAR(255) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'Device ID that captured the image',
-        \`_createdDate\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'When the record was created',
-        \`product_name\` VARCHAR(500) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'Product name identified by AI',
-        \`brand\` VARCHAR(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'Brand name if visible',
-        \`variant\` VARCHAR(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'Product variant (e.g., "Large", "Organic")',
-        \`category\` VARCHAR(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'Product category',
-        \`confidence\` DECIMAL(3,2) DEFAULT NULL COMMENT 'AI confidence score (0.00 to 1.00)',
-        \`explanation\` TEXT COLLATE utf8mb4_unicode_ci COMMENT 'AI explanation of identification',
-        \`product_description\` VARCHAR(500) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'One sentence: what this product actually is (for recipe/meal-plan AI context)',
-        \`barcode\` VARCHAR(100) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'Barcode if detected',
-        \`country_guess\` VARCHAR(100) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'Country of origin guess',
-        \`estimated_price\` VARCHAR(50) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'Estimated price (e.g., "$3.99", "$5.50-$7.00")',
-        \`ingredients\` JSON DEFAULT NULL COMMENT 'Array of ingredient strings',
-        \`nutrition_summary\` TEXT COLLATE utf8mb4_unicode_ci COMMENT 'Nutrition information summary',
-        \`upf\` ENUM('yes','no') COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'Ultra-processed food flag',
-        \`harmful_ingredients\` JSON DEFAULT NULL COMMENT 'Array of harmful ingredient strings',
-        \`similar_items\` JSON DEFAULT NULL COMMENT 'Array of similar items with name, brand, reason',
-        \`alternatives\` JSON DEFAULT NULL COMMENT 'Array of alternative products with name, brand, reason',
-        \`healthier_alternatives\` JSON DEFAULT NULL COMMENT 'Array of healthier alternatives with name, brand, why_healthier, trade_offs',
-        \`store_availability\` JSON DEFAULT NULL COMMENT 'Array of stores with name, price, availability, store_url',
-        \`images\` VARCHAR(1000) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'S3 URL to the uploaded image',
-        \`s3_key\` VARCHAR(500) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'S3 object key for the image',
-        \`action\` ENUM('IN','OUT') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'IN' COMMENT 'IN = adding to kitchen, OUT = removing from kitchen',
-        \`product_expiration\` DATE DEFAULT NULL COMMENT 'Product expiration date (YYYY-MM-DD)',
-        \`product_image_url\` VARCHAR(1000) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'S3 URL to generated wireframe/product image',
-        \`product_image_key\` VARCHAR(500) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'S3 object key for the generated product image',
-        \`job_id\` VARCHAR(100) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'Job ID from DynamoDB for tracking',
-        \`user_id\` VARCHAR(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'User ID from the upload request',
-        \`_updatedDate\` DATETIME DEFAULT NULL COMMENT 'Last update timestamp',
-        PRIMARY KEY (\`_id\`),
-        KEY \`idx_owner\` (\`_owner\`),
-        KEY \`idx_device\` (\`_device\`),
-        KEY \`idx_product_name\` (\`product_name\`),
-        KEY \`idx_category\` (\`category\`),
-        KEY \`idx_action\` (\`action\`),
-        KEY \`idx_created\` (\`_createdDate\`),
-        KEY \`idx_expiration\` (\`product_expiration\`)
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='Comprehensive grocery kitchen inventory with full product details';
-    `,
-    `
-      CREATE TABLE IF NOT EXISTS ${discardsTable} (
-        \`_id\` VARCHAR(36) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'UUID for this record',
-        \`_owner\` VARCHAR(36) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'Owner UUID (matches table name prefix)',
-        \`_device\` VARCHAR(255) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'Device ID that captured the image',
-        \`_createdDate\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'When the record was created',
-        \`product_name\` VARCHAR(500) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'Product name identified by AI',
-        \`brand\` VARCHAR(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'Brand name if visible',
-        \`variant\` VARCHAR(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'Product variant',
-        \`category\` VARCHAR(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'Product category',
-        \`confidence\` DECIMAL(3,2) DEFAULT NULL COMMENT 'AI confidence score (0.00 to 1.00)',
-        \`explanation\` TEXT COLLATE utf8mb4_unicode_ci COMMENT 'AI explanation of identification',
-        \`barcode\` VARCHAR(100) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'Barcode if detected',
-        \`country_guess\` VARCHAR(100) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'Country of origin guess',
-        \`estimated_price\` VARCHAR(50) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'Estimated price',
-        \`ingredients\` JSON DEFAULT NULL COMMENT 'Array of ingredient strings',
-        \`nutrition_summary\` TEXT COLLATE utf8mb4_unicode_ci COMMENT 'Nutrition information summary',
-        \`upf\` ENUM('yes','no') COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'Ultra-processed food flag',
-        \`harmful_ingredients\` JSON DEFAULT NULL COMMENT 'Array of harmful ingredient strings',
-        \`similar_items\` JSON DEFAULT NULL COMMENT 'Array of similar items',
-        \`alternatives\` JSON DEFAULT NULL COMMENT 'Array of alternative products',
-        \`healthier_alternatives\` JSON DEFAULT NULL COMMENT 'Array of healthier alternatives',
-        \`store_availability\` JSON DEFAULT NULL COMMENT 'Array of stores',
-        \`images\` VARCHAR(1000) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'S3 URL to the uploaded image',
-        \`s3_key\` VARCHAR(500) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'S3 object key for the image',
-        \`action\` ENUM('IN','OUT') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'IN' COMMENT 'IN = adding to discards, OUT = removing',
-        \`product_expiration\` DATE DEFAULT NULL COMMENT 'Product expiration date (YYYY-MM-DD)',
-        \`product_image_url\` VARCHAR(1000) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'S3 URL to generated product image',
-        \`product_image_key\` VARCHAR(500) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'S3 object key for the generated product image',
-        \`job_id\` VARCHAR(100) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'Job ID from DynamoDB for tracking',
-        \`user_id\` VARCHAR(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'User ID from the upload request',
-        PRIMARY KEY (\`_id\`),
-        KEY \`idx_owner\` (\`_owner\`),
-        KEY \`idx_device\` (\`_device\`),
-        KEY \`idx_product_name\` (\`product_name\`),
-        KEY \`idx_category\` (\`category\`),
-        KEY \`idx_action\` (\`action\`),
-        KEY \`idx_created\` (\`_createdDate\`),
-        KEY \`idx_expiration\` (\`product_expiration\`)
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='Discarded groceries - same structure as prod_kitchen';
-    `,
-    `
-      CREATE TABLE IF NOT EXISTS ${dishesTable} (
-        \`_id\` VARCHAR(36) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'UUID for this record',
-        \`_owner\` VARCHAR(36) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'Owner UUID (matches table name prefix)',
-        \`_device\` VARCHAR(255) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'Device ID that captured the image',
-        \`_createdDate\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'When the record was created',
-        \`_updatedDate\` DATETIME DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP COMMENT 'When the record was last updated',
-        \`dish_name\` VARCHAR(500) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'Dish name identified by AI',
-        \`confidence\` DECIMAL(3,2) DEFAULT NULL COMMENT 'AI confidence score (0.00 to 1.00)',
-        \`explanation\` TEXT COLLATE utf8mb4_unicode_ci COMMENT 'AI explanation of dish identification',
-        \`serving_size\` VARCHAR(100) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'Estimated serving size (e.g., "1 bowl", "1 plate", "200g")',
-        \`calories\` DECIMAL(10,2) DEFAULT NULL COMMENT 'Calories per serving',
-        \`total_fat\` DECIMAL(10,2) DEFAULT NULL COMMENT 'Total fat in grams',
-        \`saturated_fat\` DECIMAL(10,2) DEFAULT NULL COMMENT 'Saturated fat in grams',
-        \`trans_fat\` DECIMAL(10,2) DEFAULT NULL COMMENT 'Trans fat in grams',
-        \`cholesterol\` DECIMAL(10,2) DEFAULT NULL COMMENT 'Cholesterol in milligrams',
-        \`sodium\` DECIMAL(10,2) DEFAULT NULL COMMENT 'Sodium in milligrams',
-        \`total_carbohydrates\` DECIMAL(10,2) DEFAULT NULL COMMENT 'Total carbohydrates in grams',
-        \`dietary_fiber\` DECIMAL(10,2) DEFAULT NULL COMMENT 'Dietary fiber in grams',
-        \`sugars\` DECIMAL(10,2) DEFAULT NULL COMMENT 'Sugars in grams',
-        \`protein\` DECIMAL(10,2) DEFAULT NULL COMMENT 'Protein in grams',
-        \`vitamin_a\` DECIMAL(10,2) DEFAULT NULL COMMENT 'Vitamin A in IU or mcg',
-        \`vitamin_c\` DECIMAL(10,2) DEFAULT NULL COMMENT 'Vitamin C in milligrams',
-        \`calcium\` DECIMAL(10,2) DEFAULT NULL COMMENT 'Calcium in milligrams',
-        \`iron\` DECIMAL(10,2) DEFAULT NULL COMMENT 'Iron in milligrams',
-        \`ingredients\` JSON DEFAULT NULL COMMENT 'Array of ingredient strings',
-        \`allergens\` JSON DEFAULT NULL COMMENT 'Array of allergen strings (e.g., ["dairy", "nuts", "gluten"])',
-        \`images\` VARCHAR(1000) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'S3 URL to the uploaded dish image',
-        \`s3_key\` VARCHAR(500) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'S3 object key for the uploaded image',
-        \`action\` ENUM('IN','OUT') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'IN' COMMENT 'IN = adding dish, OUT = removing/consumed',
-        \`dish_image_url\` VARCHAR(1000) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'S3 URL to generated dish image',
-        \`dish_image_key\` VARCHAR(500) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'S3 object key for the generated dish image',
-        \`job_id\` VARCHAR(100) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'Job ID from DynamoDB for tracking',
-        \`user_id\` VARCHAR(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'User ID from the upload request',
-        PRIMARY KEY (\`_id\`),
-        KEY \`idx_owner\` (\`_owner\`),
-        KEY \`idx_device\` (\`_device\`),
-        KEY \`idx_dish_name\` (\`dish_name\`),
-        KEY \`idx_action\` (\`action\`),
-        KEY \`idx_created\` (\`_createdDate\`),
-        KEY \`idx_calories\` (\`calories\`)
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='Comprehensive dish tracking with nutrition analysis';
-    `,
     `
       CREATE TABLE IF NOT EXISTS ${recipesTable} (
         \`_id\` VARCHAR(36) NOT NULL,
@@ -1244,9 +1121,6 @@ async function findOrCreateUserByApple({ appleUserId, email, firstName, lastName
 // new users correctly got 8 tables, and the 5 exceptions were all household joiners.
 const MIRRORED_TABLES = [
   { suffix: '_new_list', rewriteOwner: true, skipColumns: ['_id', 'created_at', 'updated_at'] },
-  { suffix: '_prod_kitchen', rewriteOwner: true },
-  { suffix: '_discards', rewriteOwner: true },
-  { suffix: '_dishes', rewriteOwner: true },
   { suffix: '_recipes', rewriteOwner: true },
   { suffix: '_meal_plan', rewriteOwner: true },
   { suffix: '-metrics', rewriteOwner: true },
