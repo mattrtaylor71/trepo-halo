@@ -676,7 +676,68 @@ def _is_pantry_ingredient(text):
     return bool(tokens) and all(token in _PANTRY_TOKENS for token in tokens)
 
 
-def _build_kitchen_match_context(ingredients, kitchen_version=0):
+def _planned_ingredient_tokens(conn, owner):
+    """Token sets for ingredients already committed to meals planned TODAY or later.
+
+    A user who plans Friday's stir-fry reasonably expects that chicken to stop reading as free
+    for Monday's suggestions. Reported 2026-08-17; before this, the recipe generator had no
+    reference to the meal calendar at all, so nothing was ever reserved.
+
+    Past-dated meals are deliberately NOT reserved: the date has gone, so the food was either
+    eaten (and check-out removes it) or the plan lapsed. Reserving them forever would slowly
+    starve the kitchen of everything the user had ever planned.
+
+    Returns the raw ingredient strings. Never raises — a reservation is a nicety, and failing to
+    compute one must not take recipe generation down with it.
+    """
+    try:
+        safe = _sanitize_user_id(owner)
+        # The kitchen is already shared across a household, so once the CALENDAR is shared too
+        # a partner's planned meals legitimately consume the same items and must reserve them.
+        # Gated on the same flag on purpose: while the calendar is still per-person, reserving
+        # household-wide would grey out an item for a meal the user cannot see, which reads as
+        # a bug rather than a feature.
+        scope = [safe]
+        if os.getenv('HOUSEHOLD_MEAL_CALENDAR', 'false').strip().lower() == 'true':
+            scope = _get_household_member_ids(conn, owner) or [safe]
+        placeholders = ', '.join(['%s'] * len(scope))
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT ingredients FROM shared_meal_calendar "
+                f"WHERE owner_id IN ({placeholders}) AND plan_date >= CURDATE()",
+                list(scope),
+            )
+            rows = cur.fetchall() or []
+    except Exception as exc:
+        print(json.dumps({'evt': 'planned_reservation_skipped',
+                          'owner_id': str(owner), 'error': str(exc)[:200]}), file=sys.stderr)
+        return []
+
+    out = []
+    for row in rows:
+        raw = row.get('ingredients') if isinstance(row, dict) else row[0]
+        if not raw:
+            continue
+        try:
+            parsed = json.loads(raw) if isinstance(raw, str) else raw
+        except Exception:
+            continue
+        for ing in (parsed or []):
+            text = str(ing or '').strip()
+            if not text:
+                continue
+            # Pantry staples (salt, oil, water) match everything and would reserve the whole
+            # kitchen, so they never reserve.
+            if _is_pantry_ingredient(text):
+                continue
+            out.append(text)
+    return out
+
+
+_RESERVATION_MIN_SCORE = 150
+
+
+def _build_kitchen_match_context(ingredients, kitchen_version=0, planned_ingredients=None):
     kitchen_candidates = []
     for item in ingredients or []:
         display_name = str((item or {}).get('name') or '').strip()
@@ -690,10 +751,36 @@ def _build_kitchen_match_context(ingredients, kitchen_version=0):
             'description': description or None,
             'canonical_ingredient': ' '.join(tokens),
             'tokens': tokens,
+            'reserved': False,
         })
+
+    # Reserve ONE kitchen item per planned ingredient, using the same scorer the ingredient
+    # matcher uses so the two agree. 1:1 matters: a planned stir-fry consumes one chicken, not
+    # every chicken-ish thing in the kitchen. A naive "any two tokens overlap" rule reserved 20
+    # of one tester's 43 items from two meals — couscous matched "olive oil", chicken broth
+    # matched on the words "less sodium". Greying half a kitchen is worse than the bug it fixes.
+    #
+    # ADDITIVE ONLY: `reserved` is a display hint. match_status and availability are untouched,
+    # so anything ignoring this field behaves exactly as before.
+    for planned in (planned_ingredients or []):
+        planned_tokens = _ingredient_tokens(planned)
+        if not planned_tokens:
+            continue
+        best, best_score = None, -1
+        for candidate in kitchen_candidates:
+            if candidate.get('reserved'):
+                continue          # already spoken for by an earlier planned meal
+            score = _score_kitchen_candidate(planned_tokens, candidate.get('tokens') or [])
+            if score > best_score:
+                best, best_score = candidate, score
+        # Same threshold the matcher treats as a real hit; anything weaker is a coincidence.
+        if best is not None and best_score >= _RESERVATION_MIN_SCORE:
+            best['reserved'] = True
+
     return {
         'kitchen_version': int(kitchen_version or 0),
         'kitchen_candidates': kitchen_candidates,
+        'reserved_count': sum(1 for c in kitchen_candidates if c.get('reserved')),
     }
 
 
@@ -2796,7 +2883,11 @@ def handler(event, context):
 
         ingredients = _get_kitchen_ingredients(conn, owner)
         kitchen_version = _get_owner_kitchen_version(conn, owner)
-        kitchen_context = _build_kitchen_match_context(ingredients, kitchen_version=kitchen_version)
+        # Ingredients already committed to meals planned today or later are marked reserved so
+        # the client can grey them, rather than reading as freely available (reported 2026-08-17).
+        planned_ingredients = _planned_ingredient_tokens(conn, owner)
+        kitchen_context = _build_kitchen_match_context(
+            ingredients, kitchen_version=kitchen_version, planned_ingredients=planned_ingredients)
         if len(ingredients) < MIN_KITCHEN_ITEMS:
             for target_owner in target_owners:
                 _set_empty(conn, target_owner)

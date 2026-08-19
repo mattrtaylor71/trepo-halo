@@ -10,9 +10,17 @@ Dual-table infrastructure (matches the shared-table migration mid-flight state):
   - PRIMARY writes go to the per-owner table `{owner}_meal_calendar`.
   - Every mutation also mirrors into `shared_meal_calendar` (owner_id-keyed),
     gated by DUAL_WRITE_MEAL_CALENDAR (default true), non-blocking.
-  - READS come from the per-owner table until READ_SHARED_MEAL_CALENDAR flips.
+  - READS come from the per-owner table until READ_SHARED_MEAL_CALENDAR flips (now true).
 This keeps the feature consistent with every other type and ready for the
 eventual read cutover with no data migration.
+
+Household scope (HOUSEHOLD_MEAL_CALENDAR, default false):
+  - OFF: every path behaves exactly as before, per person. This is the rollback.
+  - ON: one calendar per household. Reads span every member's owner_id, and PUT/DELETE
+    resolve the entry to its AUTHOR's row on the shared table rather than assuming the
+    caller owns it (they usually do not — that is the point). The author's per-owner
+    table is still kept in step so flipping the flag back off finds its data.
+  - Entries carry `added_by_me` / `added_by_name` so a meal you did not add is explained.
 
 Routes (owner_id is the sole identity — matches the grocery API convention):
   GET    /meal-calendar/{owner}?start=YYYY-MM-DD&end=YYYY-MM-DD
@@ -33,6 +41,11 @@ _SOURCE_TYPES = {'saved', 'kitchen', 'explore', 'manual'}
 _SHARED_TABLE = 'shared_meal_calendar'
 DUAL_WRITE = os.getenv('DUAL_WRITE_MEAL_CALENDAR', 'true').strip().lower() == 'true'
 READ_SHARED = os.getenv('READ_SHARED_MEAL_CALENDAR', 'false').strip().lower() == 'true'
+# One calendar per HOUSEHOLD rather than per person. The kitchen and shopping list already
+# work this way (APP/Lambdas/householdSync.js); the calendar was never wired in, so a partner
+# saw nothing you planned. Default false so a missing env var degrades to today's per-person
+# behaviour rather than to something broken.
+HOUSEHOLD_SCOPE = os.getenv('HOUSEHOLD_MEAL_CALENDAR', 'false').strip().lower() == 'true'
 _MAX_RANGE_DAYS = 60
 
 # Columns carried on both the per-owner and shared tables (shared adds owner_id).
@@ -53,6 +66,47 @@ def _table_name(owner):
     if not safe:
         raise ValueError('Invalid owner')
     return f"{safe}_meal_calendar"
+
+
+def _get_household_member_ids(conn, acting_user_id):
+    """Every user_id in the caller's household, including the caller.
+
+    NOTE the identity model, which is easy to get backwards: the app's `owner` path param is
+    `new_users.user_id` (a UUID). `new_users.owner_id` is the HOUSEHOLD id (a short numeric
+    string). Members of one household share `owner_id`.
+
+    Copied from meal_plan_api/app.py — these Lambdas do not share code, and duplication is the
+    house pattern here. Falls back to [caller] so a user with no household row behaves exactly
+    as they do today.
+    """
+    safe_user_id = _sanitize_owner(acting_user_id)
+    if not safe_user_id:
+        return []
+    with conn.cursor() as cur:
+        cur.execute("SELECT owner_id FROM new_users WHERE user_id = %s LIMIT 1", [safe_user_id])
+        row = cur.fetchone() or {}
+        household_id = row.get('owner_id')
+        if not household_id:
+            return [safe_user_id]
+        cur.execute(
+            "SELECT user_id FROM new_users WHERE owner_id = %s ORDER BY created_at ASC, user_id ASC",
+            [household_id]
+        )
+        members = [_sanitize_owner(item.get('user_id')) for item in (cur.fetchall() or [])]
+    members = [member for member in members if member]
+    return list(dict.fromkeys(members)) or [safe_user_id]
+
+
+def _scope_ids(conn, owner):
+    """The owner_ids a request may read and write. Just the caller unless household scope is on."""
+    if not HOUSEHOLD_SCOPE:
+        return [_sanitize_owner(owner)]
+    try:
+        return _get_household_member_ids(conn, owner) or [_sanitize_owner(owner)]
+    except Exception as exc:
+        # A household lookup failure must never take the calendar down. Degrade to per-person.
+        _log_miss('household_scope_failed', owner, None, exc)
+        return [_sanitize_owner(owner)]
 
 
 def _mysql_conn():
@@ -299,6 +353,41 @@ def _validate_entry(body, partial=False):
 
 # ---------------- handlers ----------------
 
+def _annotate_authors(conn, entries, caller):
+    """Stamp `added_by_me` and `added_by_name` on each entry.
+
+    A shared calendar where meals appear with no explanation reads as a bug, so every entry
+    says who put it there. `_owner` is already written on create, so this is a lookup, not a
+    schema change. Additive to the response and never fatal: on any failure entries keep their
+    other fields and just carry added_by_me=True, which renders as today's un-attributed UI.
+    """
+    if not entries:
+        return
+    me = _sanitize_owner(caller)
+    for entry in entries:
+        entry['added_by_me'] = True
+        entry['added_by_name'] = None
+    others = {_sanitize_owner(e.get('_owner')) for e in entries}
+    others = {o for o in others if o and o != me}
+    if not others:
+        return
+    try:
+        placeholders = ', '.join(['%s'] * len(others))
+        with conn.cursor() as cur:
+            cur.execute(
+                f"SELECT user_id, first_name FROM new_users WHERE user_id IN ({placeholders})",
+                list(others))
+            names = {r['user_id']: (r.get('first_name') or '').strip() for r in (cur.fetchall() or [])}
+    except Exception as exc:
+        _log_miss('author_lookup_failed', caller, None, exc)
+        return
+    for entry in entries:
+        author = _sanitize_owner(entry.get('_owner'))
+        if author and author != me:
+            entry['added_by_me'] = False
+            entry['added_by_name'] = names.get(author) or None
+
+
 def _get_calendar(owner, query):
     conn = _mysql_conn()
     try:
@@ -312,8 +401,10 @@ def _get_calendar(owner, query):
 
         if READ_SHARED:
             table = _SHARED_TABLE
-            where = "`owner_id` = %s AND `plan_date` BETWEEN %s AND %s"
-            params = [owner, start.isoformat(), end.isoformat()]
+            scope = _scope_ids(conn, owner)
+            placeholders = ', '.join(['%s'] * len(scope))
+            where = f"`owner_id` IN ({placeholders}) AND `plan_date` BETWEEN %s AND %s"
+            params = list(scope) + [start.isoformat(), end.isoformat()]
             _ensure_shared_table(conn)
         else:
             table = _table_name(owner)
@@ -333,6 +424,7 @@ def _get_calendar(owner, query):
                 f"ORDER BY `plan_date` ASC, {slot_order}, `_createdDate` ASC",
                 params)
             entries = [_serialize_row(r) for r in cur.fetchall()]
+        _annotate_authors(conn, entries, owner)
         return _resp(200, {'owner': owner, 'start': start.isoformat(),
                            'end': end.isoformat(), 'entries': entries})
     finally:
@@ -358,9 +450,91 @@ def _create_entry(owner, body):
         with conn.cursor() as cur:
             cur.execute(f"SELECT * FROM `{table}` WHERE `_id` = %s", [item_id])
             row = cur.fetchone()
-        return _resp(201, {'message': 'Added to meal calendar', 'entry': _serialize_row(row)})
+        entry = _serialize_row(row)
+        # Annotate here too so the client sees the same entry shape from every route.
+        _annotate_authors(conn, [entry], owner)
+        return _resp(201, {'message': 'Added to meal calendar', 'entry': entry})
     finally:
         conn.close()
+
+
+def _find_in_household(conn, owner, item_id):
+    """The owner_id that actually holds `item_id`, or None if nobody in the household does.
+
+    A household member editing a meal someone else added is the whole point of a shared
+    calendar, and the row lives under the AUTHOR's owner_id, not the caller's.
+    """
+    scope = _scope_ids(conn, owner)
+    if not scope:
+        return None
+    _ensure_shared_table(conn)
+    placeholders = ', '.join(['%s'] * len(scope))
+    with conn.cursor() as cur:
+        cur.execute(
+            f"SELECT `owner_id` FROM `{_SHARED_TABLE}` "
+            f"WHERE `_id` = %s AND `owner_id` IN ({placeholders})",
+            [item_id] + list(scope))
+        row = cur.fetchone()
+    return row['owner_id'] if row else None
+
+
+def _mirror_to_owner_table(conn, author, item_id, cleaned=None, delete=False):
+    """Keep the AUTHOR's per-owner table in step so DUAL_WRITE rollback stays intact.
+
+    Non-fatal by design: the shared table is the source of truth once household scope is on,
+    and the per-owner copy exists only so turning the flag back off finds its data.
+    """
+    if not DUAL_WRITE:
+        return
+    try:
+        table = _table_name(author)
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT COUNT(*) c FROM information_schema.tables "
+                "WHERE table_schema=DATABASE() AND table_name=%s", [table])
+            if cur.fetchone()['c'] == 0:
+                return
+            if delete:
+                cur.execute(f"DELETE FROM `{table}` WHERE `_id` = %s", [item_id])
+            elif cleaned:
+                set_sql = ', '.join(f'`{k}` = %s' for k in cleaned)
+                cur.execute(f"UPDATE `{table}` SET {set_sql} WHERE `_id` = %s",
+                            list(cleaned.values()) + [item_id])
+    except Exception as exc:
+        _log_miss('owner_table_mirror_failed', author, item_id, exc)
+
+
+def _update_entry_household(conn, owner, item_id, cleaned):
+    author = _find_in_household(conn, owner, item_id)
+    if not author:
+        return _err(404, f'Entry {item_id} not found')
+    set_sql = ', '.join(f'`{k}` = %s' for k in cleaned)
+    with conn.cursor() as cur:
+        cur.execute(
+            f"UPDATE `{_SHARED_TABLE}` SET {set_sql}, `_updatedDate` = NOW() "
+            f"WHERE `_id` = %s AND `owner_id` = %s",
+            list(cleaned.values()) + [item_id, author])
+    _mirror_to_owner_table(conn, author, item_id, cleaned=cleaned)
+    with conn.cursor() as cur:
+        cur.execute(f"SELECT * FROM `{_SHARED_TABLE}` WHERE `_id` = %s AND `owner_id` = %s",
+                    [item_id, author])
+        row = cur.fetchone()
+    entry = _serialize_row(row) if row else None
+    if entry:
+        _annotate_authors(conn, [entry], owner)
+    return _resp(200, {'message': 'Entry updated', 'entry': entry})
+
+
+def _delete_entry_household(conn, owner, item_id):
+    author = _find_in_household(conn, owner, item_id)
+    if not author:
+        # Keep DELETE idempotent, matching the per-owner path.
+        return _resp(200, {'message': 'Entry deleted', 'item_id': item_id})
+    with conn.cursor() as cur:
+        cur.execute(f"DELETE FROM `{_SHARED_TABLE}` WHERE `_id` = %s AND `owner_id` = %s",
+                    [item_id, author])
+    _mirror_to_owner_table(conn, author, item_id, delete=True)
+    return _resp(200, {'message': 'Entry deleted', 'item_id': item_id})
 
 
 def _update_entry(owner, item_id, body):
@@ -371,6 +545,8 @@ def _update_entry(owner, item_id, body):
         return _err(400, 'No updatable fields provided')
     conn = _mysql_conn()
     try:
+        if HOUSEHOLD_SCOPE:
+            return _update_entry_household(conn, owner, item_id, cleaned)
         table = _table_name(owner)
         with conn.cursor() as cur:
             cur.execute(
@@ -396,6 +572,8 @@ def _update_entry(owner, item_id, body):
 def _delete_entry(owner, item_id):
     conn = _mysql_conn()
     try:
+        if HOUSEHOLD_SCOPE:
+            return _delete_entry_household(conn, owner, item_id)
         table = _table_name(owner)
         with conn.cursor() as cur:
             cur.execute(
