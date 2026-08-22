@@ -1769,6 +1769,7 @@ def _correct_kitchen_item_with_llm(item_dict, correction_text, owner=None):
 product_name: {item_dict.get('product_name', '')}
 brand: {item_dict.get('brand', '')}
 category: {item_dict.get('category', '')}
+variant: {item_dict.get('variant', '')}
 description: {item_dict.get('product_description', '')}
 ingredients: {item_dict.get('ingredients', [])}
 nutrition_summary: {item_dict.get('nutrition_summary', '')}
@@ -1777,7 +1778,8 @@ upf: {item_dict.get('upf', 'no')}
 User correction: "{correction_text}"
 
 Return JSON with these fields updated to match the corrected item:
-product_name, brand, category (EXACTLY one of: leftovers/produce/dairy_eggs/meat_seafood/pantry/snacks_sweets/beverages/prepared_other — no other values; seasonings/sauces are pantry), description, ingredients (array), nutrition_summary, upf ("yes"/"no"), harmful_ingredients (array), healthier_alternatives (array of objects with name/brand/why_healthier). IMPORTANT: If the current category is 'leftovers', keep it as 'leftovers' unless the user's correction clearly indicates otherwise."""
+product_name, brand, category (EXACTLY one of: leftovers/produce/dairy_eggs/meat_seafood/pantry/snacks_sweets/beverages/prepared_other — no other values; seasonings/sauces are pantry), variant, description, ingredients (array), nutrition_summary, upf ("yes"/"no"), harmful_ingredients (array), healthier_alternatives (array of objects with name/brand/why_healthier). IMPORTANT: If the current category is 'leftovers', keep it as 'leftovers' unless the user's correction clearly indicates otherwise.
+IMPORTANT about `variant`: it is the descriptive qualifier shown DIRECTLY UNDER the product name in the app ("Broccoli Florets", "Organic", "2%"). It must describe the CORRECTED item. If the old variant described the item the user just told you was wrong, do NOT carry it over: return a correct one, or null if none applies. Always include the `variant` key."""
 
     client = _openai_client()
     _t0 = time.time()
@@ -1843,6 +1845,18 @@ def _handle_correct_kitchen_item(owner, item_id, body, conn):
             'product_name': corrected.get('product_name'),
             'brand': corrected.get('brand'),
             'category': corrected.get('category'),
+            # `variant` renders as the subtitle DIRECTLY UNDER the product name, so leaving it
+            # stale is the most visible failure a correction can have. Reported 2026-08-22: an
+            # item corrected from broccoli to spinach kept `variant = "Broccoli Florets"`, so the
+            # user read "Great Value Frozen Spinach / Broccoli Florets" and quite reasonably said
+            # the description would not change.
+            #
+            # Written only when the model actually returned the key, so a model that omits it
+            # cannot silently wipe a good variant. '' is deliberate and clears the column: None
+            # is dropped by the `is not None` filter below, which is exactly how it went stale.
+            **({'variant': ('' if corrected.get('variant') is None
+                            else str(corrected.get('variant')).strip())}
+               if 'variant' in corrected else {}),
             'product_description': corrected.get('description'),
             'ingredients': _json_column_value(corrected.get('ingredients'), default_empty_list=True),
             'nutrition_summary': corrected.get('nutrition_summary'),
