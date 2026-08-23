@@ -846,8 +846,33 @@ export function formatDietaryPreferencesBlock(prefs) {
   }
   if (has("health")) lines.push(`- HEALTH — tailor toward (informational, not medical advice): ${p.health.join(", ")}`);
   if (has("custom")) lines.push(`- ALSO AVOID/HONOR (their own words): ${p.custom.join(", ")}`);
-  lines.push("INGREDIENT-LEVEL CHECK: check EVERY ingredient in any recipe or suggestion against the constraints above, including staples. Do not assume a staple is compliant just because it is common. Butter, milk, cream, cheese, yogurt, and eggs are NOT vegan or dairy-free (use plant milk, vegan butter, or omit them); honey is not vegan; regular soy sauce, teriyaki, most bread, pasta, flour, and breadcrumbs contain gluten (use tamari or certified gluten-free versions). Substitute any non-compliant ingredient with a compliant alternative or leave it out.");
-  lines.push("When the user ASKS about their dietary preferences / restrictions / allergies, state what is saved here — do NOT say you don't know them; these ARE their saved preferences.");
+  // The staple-level hints used to be emitted UNCONDITIONALLY, which made Thyme report
+  // restrictions the user had never set. Reported twice on 2026-08-16 by two owners who
+  // independently described the same phantom set {gluten free, dairy free, vegan}.
+  //
+  // The mechanism: the very next line tells the model these ARE the user's saved preferences,
+  // so a paragraph naming vegan/dairy-free/gluten was read as the preferences themselves.
+  // Reproduced with a real row whose ONLY preference was custom ["High fiber"] — its block
+  // mentioned vegan 3x, dairy-free 1x and gluten 2x, and the user was told she was low fiber.
+  //
+  // So: only emit a hint when the user's OWN saved values actually invoke it.
+  const allValues = _DIETARY_PREF_KEYS
+    .flatMap((k) => (Array.isArray(p[k]) ? p[k] : []))
+    .map((v) => String(v || "").toLowerCase())
+    .join(" | ");
+  const mentions = (...needles) => needles.some((n) => allValues.includes(n));
+
+  const check = ["INGREDIENT-LEVEL CHECK: check EVERY ingredient in any recipe or suggestion against the constraints above, including staples. Do not assume a staple is compliant just because it is common."];
+  if (mentions("vegan", "dairy", "lactose", "plant-based", "plant based", "vegetarian")) {
+    check.push("Butter, milk, cream, cheese, yogurt, and eggs are NOT vegan or dairy-free (use plant milk, vegan butter, or omit them); honey is not vegan.");
+  }
+  if (mentions("gluten", "celiac", "coeliac", "wheat")) {
+    check.push("Regular soy sauce, teriyaki, most bread, pasta, flour, and breadcrumbs contain gluten (use tamari or certified gluten-free versions).");
+  }
+  check.push("Substitute any non-compliant ingredient with a compliant alternative or leave it out.");
+  lines.push(check.join(" "));
+
+  lines.push("When the user ASKS about their dietary preferences / restrictions / allergies, state EXACTLY what is listed above and nothing more — do NOT say you don't know them, and do NOT infer, add, or repeat back any restriction that is not listed above. The examples in the ingredient check are guidance, never the user's preferences.");
   return lines.join("\n");
 }
 
