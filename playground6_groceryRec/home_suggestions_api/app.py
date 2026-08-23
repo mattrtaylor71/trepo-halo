@@ -520,8 +520,22 @@ def _compute_clean_priority(item):
     user_days_until = None
     if exp_str:
         try:
-            exp_dt = datetime.strptime(str(exp_str)[:10], '%Y-%m-%d')
-            user_days_until = (exp_dt - datetime.now()).days
+            # CALENDAR-day difference, not a datetime difference.
+            #
+            # This used to be `(exp_dt - datetime.now()).days`, where exp_dt is MIDNIGHT of the
+            # expiry date. timedelta.days floors toward negative infinity, so every partial day
+            # was truncated and every answer came out one day early:
+            #   expires tomorrow  -> 0  ("Expires today")
+            #   expires TODAY     -> -1 ("Past the expiration date by 1 day")
+            #   expired yesterday -> -2 ("...by 2 days")
+            #
+            # The GET/cache path below (`(exp - today).days` on date objects) was already
+            # correct, so the two halves of /home/items-to-watch disagreed about the same item
+            # in the same second. The POST is what the app renders, so users saw the wrong day
+            # on the Shelf Life screen, whose entire job is that date. Found on Android
+            # 2026-08-22; identical on iOS since both clients call the same endpoint.
+            exp_date = datetime.strptime(str(exp_str)[:10], '%Y-%m-%d').date()
+            user_days_until = (exp_date - datetime.now().date()).days
             exp_date_norm = str(exp_str)[:10]
         except (ValueError, TypeError):
             user_days_until = None
