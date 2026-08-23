@@ -12,7 +12,7 @@ try:
 except ImportError as exc:
     OpenAI = None
     _OPENAI_IMPORT_ERROR = exc
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 
 _DB_ENV_VARS = ['DB_HOST', 'DB_USER', 'DB_PASS', 'DB_NAME']
@@ -496,6 +496,35 @@ _CATEGORY_MULTIPLIER = {
 }
 
 
+# Hours behind UTC used to decide what "today" is for shelf life. Default 8 = US Pacific.
+SHELF_LIFE_UTC_OFFSET_HOURS = int(os.getenv('SHELF_LIFE_UTC_OFFSET_HOURS', '8'))
+
+
+def _shelf_life_today():
+    """The date to measure expiry against.
+
+    Lambda runs in UTC, so date.today() rolls over at 5pm Pacific. Before this, every US user
+    spent their whole evening being told food expires a day sooner than it does - and at the
+    boundary an item expiring TODAY came back urgency 'expired', "Past the expiration date you
+    set by 1 day". That is the exact inverse of a feature whose job is to stop people binning
+    food that is still good. Measured on the review account at 21:57 PDT, 2026-08-22.
+
+    The right fix is the USER's timezone, which this endpoint does not receive - no client sends
+    one and no column stores one (only 67% of users even have a zip code). That needs a contract
+    change on both clients, so it is filed separately.
+
+    Until then, anchor to UTC-8 rather than UTC. The two errors are NOT symmetric:
+      - too early (UTC today): declares good food expired and tells the user to throw it out
+      - too late  (UTC-8 for an Eastern user, late at night): shows an item as one day fresher
+    The first actively causes the waste this feature exists to prevent, so bias away from it.
+    Worst case for an Eastern user is a ~3h window after midnight where an item reads one day
+    fresher; for a Pacific user this is exact. Alaska and Hawaii are still early by 1-2h.
+
+    Env-tunable so the bias can be adjusted without a code deploy.
+    """
+    return (datetime.utcnow() - timedelta(hours=SHELF_LIFE_UTC_OFFSET_HOURS)).date()
+
+
 def _compute_clean_priority(item):
     """Deterministic shelf-life score — mirrors iOS cleanPriority.
 
@@ -521,6 +550,7 @@ def _compute_clean_priority(item):
     if exp_str:
         try:
             # CALENDAR-day difference, not a datetime difference.
+            # See _shelf_life_today() for why "today" is not simply date.today().
             #
             # This used to be `(exp_dt - datetime.now()).days`, where exp_dt is MIDNIGHT of the
             # expiry date. timedelta.days floors toward negative infinity, so every partial day
@@ -535,7 +565,7 @@ def _compute_clean_priority(item):
             # on the Shelf Life screen, whose entire job is that date. Found on Android
             # 2026-08-22; identical on iOS since both clients call the same endpoint.
             exp_date = datetime.strptime(str(exp_str)[:10], '%Y-%m-%d').date()
-            user_days_until = (exp_date - datetime.now().date()).days
+            user_days_until = (exp_date - _shelf_life_today()).days
             exp_date_norm = str(exp_str)[:10]
         except (ValueError, TypeError):
             user_days_until = None
@@ -770,7 +800,7 @@ def _write_shelf_life_cache(conn, owner, cache_data):
 
 def _recompute_days_old(items):
     """Recompute days_old from _created_date so cached values stay accurate."""
-    today = date.today()
+    today = _shelf_life_today()
     for item in items:
         # User-entered expiration is authoritative — recompute from the date so
         # a cached item's urgency stays correct as days pass (mirrors scoring).
