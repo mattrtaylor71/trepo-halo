@@ -117,6 +117,41 @@ byte-identical to today. This is the proof the deploy itself is safe, before any
 
 ---
 
+## Phase 2b — the processors are pinned to one bucket (FOUND 2026-08-24, BLOCKS PHASE 3)
+
+Phase 3 was attempted and **failed its gate**. Rolled back the same minute.
+
+Extending the EventBridge patterns makes the processors *fire* for prod objects, but they then
+read and write a **fixed** bucket from an env var:
+
+```js
+const BUCKET_NAME = process.env.BUCKET_NAME;   // trepo-grocery-uploads-dev
+Bucket: BUCKET_NAME,                            // analyze_on_upload_nodejs/app.js:165, 733, 740
+```
+
+`app.js:642` does pull `detail.bucket.name` off the event, but only to log it. So a prod object
+produced:
+
+```
+[handler] Processing S3 object: { bucket: 'trepo-grocery-uploads-prod', ... }
+[s3] Downloading image...
+AccessDenied: ... not authorized to perform: s3:ListBucket
+             on resource: "arn:aws:s3:::trepo-grocery-uploads-dev"
+```
+
+Note the denial names the **dev** bucket for a **prod** event — that mismatch is the whole tell.
+It reads the prod key out of the dev bucket, the object is not there, and S3 returns 403 rather
+than 404 because the role has no `ListBucket`.
+
+**The fix:** make the three processors use the bucket from the event, falling back to
+`BUCKET_NAME` when absent. Small and safe, but it is a code change to three functions on the live
+path for ~12.6k iOS users, so it needs its own before/after gate on the dev path.
+
+The alternative — deploying prod copies of all three with a different `BUCKET_NAME` — doubles the
+functions and the rules and leaves two codebases to keep in step. Not worth it.
+
+---
+
 ## Phase 3 — move ONE bench unit
 
 1. Set `HALO_PROD_DEVICE_IDS=halo-16f8-1a6d` (the bench device).
