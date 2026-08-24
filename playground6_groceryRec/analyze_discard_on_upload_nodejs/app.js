@@ -52,8 +52,27 @@ const OPENAI_MODEL_DEFAULT = 'gpt-5.4-2026-03-05';
 function discardTextModel() { return process.env.OPENAI_MODEL || OPENAI_MODEL_DEFAULT; }
 function discardFastModel() { return process.env.OPENAI_FAST_MODEL || 'gpt-4.1-mini'; }
 
-const BUCKET_NAME = process.env.BUCKET_NAME;
-const PRODUCT_IMAGES_BUCKET = process.env.PRODUCT_IMAGES_BUCKET || BUCKET_NAME;
+// Resolved PER EVENT in the handler, not fixed at cold start.
+//
+// This used to be `const BUCKET_NAME = process.env.BUCKET_NAME`, which pinned every processor to
+// one bucket. Once the EventBridge rules were extended to also fire on the HALO production
+// bucket, a prod object made this lambda look for a prod key inside the DEV bucket; S3 answered
+// 403 rather than 404 because the role has no ListBucket, and the capture was silently lost with
+// no resized twin. Found 2026-08-24 during the HALO prod cutover.
+//
+// A module-level `let` is safe here: a Node Lambda container handles exactly one event at a time,
+// and the handler reassigns this unconditionally on entry (falling back to the env var), so a
+// throw on one invocation cannot leak a stale bucket into the next.
+const DEFAULT_BUCKET_NAME = process.env.BUCKET_NAME;
+let BUCKET_NAME = DEFAULT_BUCKET_NAME;
+// Also resolved per event. PRODUCT_IMAGES_BUCKET is explicitly set (to the uploads bucket, a
+// DIFFERENT bucket from this function's BUCKET_NAME), so the `|| BUCKET_NAME` fallback never
+// fires and a cold-start constant would send a PROD discard's product image into the DEV uploads
+// bucket. Only diverges when PRODUCT_IMAGES_BUCKET_PROD is configured; unset means behaviour is
+// exactly as before.
+const PRODUCT_IMAGES_BUCKET_DEFAULT = process.env.PRODUCT_IMAGES_BUCKET || DEFAULT_BUCKET_NAME;
+const PRODUCT_IMAGES_BUCKET_PROD = process.env.PRODUCT_IMAGES_BUCKET_PROD || '';
+let PRODUCT_IMAGES_BUCKET = PRODUCT_IMAGES_BUCKET_DEFAULT;
 const JOBS_TABLE = process.env.JOBS_TABLE;
 const KEY_PREFIX = process.env.KEY_PREFIX || 'images/';
 const TOPIC_TEMPLATE = process.env.RESULT_TOPIC_TEMPLATE || 'trepo/{user_id}/{device_id}/jobs/{job_id}/result';
@@ -1021,6 +1040,12 @@ exports.handler = async (event) => {
     console.log('[handler] No bucket/key; ignoring.');
     return { statusCode: 200, body: JSON.stringify({ ok: true, ignored: true }) };
   }
+
+  // Operate on the bucket THIS event came from (see the BUCKET_NAME declaration).
+  BUCKET_NAME = bucket || DEFAULT_BUCKET_NAME;
+  PRODUCT_IMAGES_BUCKET = (PRODUCT_IMAGES_BUCKET_PROD && String(bucket || '').endsWith('-prod'))
+    ? PRODUCT_IMAGES_BUCKET_PROD
+    : PRODUCT_IMAGES_BUCKET_DEFAULT;
 
   if (KEY_PREFIX && !key.startsWith(KEY_PREFIX)) {
     console.log('[handler] Key not under prefix; skipping.', { prefix: KEY_PREFIX });

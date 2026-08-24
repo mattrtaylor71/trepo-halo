@@ -15,6 +15,8 @@ const { findStockImage } = require('./dist/utils/stockImageSearch');
 
 const { syncImageTriage } = require('./triage');
 const { writeMasterFeedEvent } = require('./masterFeedWriter');
+const { sweepStuckDishes } = require('./dishSweep');
+const { guardConfig, evaluateNoFoodFrame, enforceScopedForDevice } = require('./noFoodGuard');
 
 const s3 = new AWS.S3();
 
@@ -138,7 +140,19 @@ async function uploadResizedOriginalImage(buffer, userId, deviceId, jobId) {
 const dynamodb = new AWS.DynamoDB.DocumentClient();
 const iot = new AWS.IotData({ endpoint: process.env.IOT_ENDPOINT });
 
-const BUCKET_NAME = process.env.BUCKET_NAME;
+// Resolved PER EVENT in the handler, not fixed at cold start.
+//
+// This used to be `const BUCKET_NAME = process.env.BUCKET_NAME`, which pinned every processor to
+// one bucket. Once the EventBridge rules were extended to also fire on the HALO production
+// bucket, a prod object made this lambda look for a prod key inside the DEV bucket; S3 answered
+// 403 rather than 404 because the role has no ListBucket, and the capture was silently lost with
+// no resized twin. Found 2026-08-24 during the HALO prod cutover.
+//
+// A module-level `let` is safe here: a Node Lambda container handles exactly one event at a time,
+// and the handler reassigns this unconditionally on entry (falling back to the env var), so a
+// throw on one invocation cannot leak a stale bucket into the next.
+const DEFAULT_BUCKET_NAME = process.env.BUCKET_NAME;
+let BUCKET_NAME = DEFAULT_BUCKET_NAME;
 const JOBS_TABLE = process.env.JOBS_TABLE;
 const RESULTS_TABLE = process.env.RESULTS_TABLE || null;
 const KEY_PREFIX = process.env.KEY_PREFIX || 'images/';
@@ -985,8 +999,15 @@ function reportAnalysisFailed(kind, stage, jobId, err) {
   } catch (_) { /* never let logging throw */ }
 }
 
-exports.handler = async (event) => {
+exports.handler = async (event, context) => {
   console.log('[handler] Event received:', JSON.stringify(event).substring(0, 500));
+
+  // Scheduled self-heal branch (EventBridge input {"sweep": true}). Re-drives dish
+  // rows stranded with a stored image but no completed nutrition analysis. Never
+  // throws out; gated by DISH_SWEEP_ENABLED (default false). See dishSweep.js.
+  if (event && event.sweep === true) {
+    return sweepStuckDishes(context);
+  }
 
   const { bucket, key } = extractS3FromEvent(event);
   if (!bucket || !key) {
@@ -994,6 +1015,8 @@ exports.handler = async (event) => {
     return { statusCode: 200, body: JSON.stringify({ ok: true, ignored: true }) };
   }
 
+  // Operate on the bucket THIS event came from (see the BUCKET_NAME declaration).
+  BUCKET_NAME = bucket || DEFAULT_BUCKET_NAME;
   console.log('[handler] Processing S3 object:', { bucket, key });
 
   if (KEY_PREFIX && !key.startsWith(KEY_PREFIX)) {
@@ -1113,27 +1136,36 @@ exports.handler = async (event) => {
       await publishFastResult(user_id, device_id, jobId, normalizedFastData, action, fastTime);
       console.log('[fast] MQTT fast result published');
 
-      // Write preliminary dish to MySQL so it appears in Dish Log immediately
-      try {
-        await writeToDishesTable({
-          owner,
-          device_id,
-          user_id,
-          job_id: jobId,
-          action,
-          s3_key: key,
-          image_url: imageUrl,
-          resized_image_url: resizedImageUrl,
-          resized_image_key: resizedImageKey,
-          dish_image_url: null,
-          dish_image_key: null,
-          dish: { dish_name: normalizedFastData.dish_name, confidence: normalizedFastData.confidence || 0.5, explanation: normalizedFastData.meal_summary || null },
-          nutritionData: normalizedFastData,
-        });
-        console.log('[fast] Preliminary dish written to MySQL dishes table');
-      } catch (fastWriteError) {
-        console.error('[fast] Failed to write preliminary dish to MySQL (non-fatal):', fastWriteError);
-        reportAnalysisFailed('dish', 'preliminary_write', jobId, fastWriteError);
+      // Write preliminary dish to MySQL so it appears in Dish Log immediately.
+      // no-food guard (enforce only): if the fast pass found no dish on an in-scope
+      // device, skip the preliminary write so a no-food frame never leaves a blank
+      // row. The deep pass INSERTs normally if it later identifies a dish. Inert
+      // unless HALO_NOFOOD_GUARD_ENABLED=true + mode=enforce. Never deletes rows.
+      const fastNoDish = !(typeof normalizedFastData.dish_name === 'string' && normalizedFastData.dish_name.trim());
+      if (enforceScopedForDevice(device_id) && fastNoDish) {
+        console.log(JSON.stringify({ evt: 'dish_no_food_prelim_skipped', job_id: jobId, device_id }));
+      } else {
+        try {
+          await writeToDishesTable({
+            owner,
+            device_id,
+            user_id,
+            job_id: jobId,
+            action,
+            s3_key: key,
+            image_url: imageUrl,
+            resized_image_url: resizedImageUrl,
+            resized_image_key: resizedImageKey,
+            dish_image_url: null,
+            dish_image_key: null,
+            dish: { dish_name: normalizedFastData.dish_name, confidence: normalizedFastData.confidence || 0.5, explanation: normalizedFastData.meal_summary || null },
+            nutritionData: normalizedFastData,
+          });
+          console.log('[fast] Preliminary dish written to MySQL dishes table');
+        } catch (fastWriteError) {
+          console.error('[fast] Failed to write preliminary dish to MySQL (non-fatal):', fastWriteError);
+          reportAnalysisFailed('dish', 'preliminary_write', jobId, fastWriteError);
+        }
       }
     } catch (fastError) {
       console.error('[fast] Failed fast estimate/publish (non-fatal):', fastError);
@@ -1248,6 +1280,38 @@ exports.handler = async (event) => {
       }
     }
 
+    // Upstream no-food guard. If this frame has no identifiable food (no dish name
+    // AND low identify confidence AND zero nutrition, optionally scoped to halo-
+    // devices) suppress the row/feed/metrics creation so a hardware-cam capture of a
+    // non-food scene never becomes a blank dish. Fully inert unless
+    // HALO_NOFOOD_GUARD_ENABLED=true. observe mode logs only; enforce mode suppresses
+    // and marks the job DONE with a terminal "no dish" result. See noFoodGuard.js.
+    const noFood = evaluateNoFoodFrame(finalDish, finalNutritionData, device_id);
+    if (noFood.match) {
+      console.log(JSON.stringify({
+        evt: 'dish_no_food_suppressed', mode: noFood.reasons.mode,
+        job_id: jobId, owner, device_id, reasons: noFood.reasons,
+      }));
+      if (noFood.reasons.mode === 'enforce') {
+        // Never deletes existing rows — the preliminary write was gated above, so
+        // there is no blank row to remove. Give the app a terminal state (not a spinner).
+        try {
+          const noDishPayload = buildFinalResultPayload(jobMeta, null, 0, finalNutritionData, isoNow());
+          noDishPayload.dish_id = stableHouseholdRowId('dishes', jobId);
+          await writeDishResultSnapshot(jobMeta, 'final', noDishPayload);
+        } catch (snapErr) {
+          console.warn('[no-food] result snapshot failed (non-fatal):', snapErr && snapErr.message ? snapErr.message : snapErr);
+        }
+        await updateJob(jobId, {
+          status: 'DONE',
+          t_done: new Date().toISOString(),
+          last_dish: null,
+          no_dish_detected: true,
+        });
+        return { statusCode: 200, body: JSON.stringify({ ok: true, job_id: jobId, no_dish_detected: true }) };
+      }
+    }
+
     // imageUrl / resizedImageUrl / resizedImageKey are declared above (before the
     // fast path) so the preliminary write can use imageUrl without a TDZ error.
     try {
@@ -1347,7 +1411,9 @@ exports.handler = async (event) => {
         source_table: `${escapedOwner}_dishes`,
         metadata: {
           confidence,
-          calories: finalNutritionData.calories || null,
+          // toNullableNumber (not `|| null`) so a legitimate 0-cal item keeps 0
+          // in the feed metadata instead of being dropped to null.
+          calories: toNullableNumber(finalNutritionData.calories),
           cuisine_type: finalDish.cuisine_type || null,
         },
       });
@@ -1369,7 +1435,7 @@ exports.handler = async (event) => {
         event_key: `upload:${jobId}:dish`,
         metadata: {
           confidence,
-          calories: finalNutritionData.calories || null,
+          calories: toNullableNumber(finalNutritionData.calories),
           cuisine_type: finalDish.cuisine_type || null,
           serving_size: finalNutritionData.serving_size || null,
         },
