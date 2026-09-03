@@ -624,6 +624,33 @@ exports.handler = async (event) => {
         return response(400, { message: 'Missing required fields for add' });
       }
       const effectiveAction = action || 'ADDED';
+
+      // Dedupe on write. Duplicate list rows were the single most repair-heavy complaint in the
+      // Thyme corpus: every instance was a user asking two or three times in a row to remove
+      // duplicates ("Move all duplicates onto themselves" -> "Get rid of the duplicates" ->
+      // "Remove all duplicates"). Nobody asks once. It should never have been a conversation.
+      //
+      // Only collapses an ACTIVE, identical, unchecked item for the same owner. A checked-off
+      // row is history and is left alone, and a genuine re-add after checking off still works.
+      if (effectiveAction === 'ADDED') {
+        try {
+          const [dupes] = await pool.execute(
+            `SELECT _id FROM \`${ownerId}_new_list\`
+              WHERE LOWER(TRIM(product_name)) = LOWER(TRIM(?))
+                AND action = 'ADDED'
+              LIMIT 1`,
+            [product_name]
+          );
+          if (Array.isArray(dupes) && dupes.length > 0) {
+            console.log(JSON.stringify({ evt: 'list_add_deduped', owner: ownerId, item: product_name }));
+            return response(200, { message: 'Item already on the list', deduped: true });
+          }
+        } catch (e) {
+          // Never block a genuine add because the dedupe probe failed.
+          console.log(JSON.stringify({ evt: 'list_dedupe_probe_failed', error: String(e).slice(0, 120) }));
+        }
+      }
+
       const sharedUUID = crypto.randomUUID();
 
       // Caller-chosen aisle (user tapped "+" on an aisle section). Optional.
