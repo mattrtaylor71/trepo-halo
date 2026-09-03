@@ -47,7 +47,7 @@ KITCHEN_CATEGORY_KEYWORDS = [
     (["produce", "fruit", "vegetable", "veggie", "lettuce", "spinach", "tomato", "onion",
       "potato", "apple", "banana", "berry", "berries", "corn", "herb", "cilantro"], "produce"),
     (["meat", "seafood", "fish", "poultry", "beef", "pork", "bacon", "sausage", "chicken",
-      "turkey", "ham", "salmon", "shrimp", "tuna", "deli",
+      "turkey", "ham", "salmon", "shrimp", "tuna", "deli", "spam",
       # Cuts of raw meat. Scanned AFTER spices+pantry so "Steak Seasoning"->spices and
       # "Steak Sauce"->pantry still win (order matters). "steak" also catches "steaks".
       "steak", "sirloin", "ribeye", "tbone", "t bone", "porterhouse", "flank", "brisket",
@@ -92,6 +92,19 @@ def normalize_kitchen_category(raw_category, storage_location=None, product_name
     if (raw != 'leftovers'
             and re.search(r'\b(steaks?|ribeye|rib eye|sirloin|porterhouse|t-?bone|brisket|filet mignon|veal|lamb chop)\b', pname)
             and not re.search(r'\b(sauce|seasoning|marinade|rub|broth|stock|bouillon|jerky|flavor|flavored|chips?|crisps?)\b', pname)):
+        return 'meat_seafood'
+    # Hard override: canned PROTEIN is still protein. "canned" lives in the pantry keyword
+    # list, which is scanned BEFORE meat_seafood, so the PACKAGING word beat the FOOD word:
+    # plain "Tuna" landed in meat_seafood (96 live rows) while "Canned Tuna" landed in pantry
+    # (57) - the same food on two different shelves purely because of the word "canned".
+    # User feedback 2026-08-21: "things like tuna and chicken in a can weren't coded as meat".
+    # Generic "Canned Goods"/"Canned Corn" are NOT proteins and correctly stay in pantry, and
+    # broths/soups/sauces/pet food are excluded so they keep their existing homes.
+    # Category is WHAT the food is; storage_location still (correctly) says pantry.
+    if (raw != 'leftovers'
+            and re.search(r'\b(canned|tinned|can of|pouch|chunk light|in\s+(?:\w+\s+){0,3}(?:water|oil))\b', pname)
+            and re.search(r'\b(tuna|salmon|sardines?|anchov\w*|chicken|turkey|beef|pork|ham|spam|crab|clams?|shrimp|mackerel|herring)\b', pname)
+            and not re.search(r'\b(broth|stock|bouillon|soup|sauce|gravy|pet|cat food|dog food|treat)\b', pname)):
         return 'meat_seafood'
     if raw in KITCHEN_CATEGORY_ENUM:
         return raw

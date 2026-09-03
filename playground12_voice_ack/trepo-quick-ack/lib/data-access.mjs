@@ -2855,7 +2855,7 @@ const KITCHEN_CATEGORY_KEYWORDS = [
   [["produce", "fruit", "vegetable", "veggie", "lettuce", "spinach", "tomato", "onion",
     "potato", "apple", "banana", "berry", "berries", "corn", "herb", "cilantro"], "produce"],
   [["meat", "seafood", "fish", "poultry", "beef", "pork", "bacon", "sausage", "chicken",
-    "turkey", "ham", "salmon", "shrimp", "tuna", "deli",
+    "turkey", "ham", "salmon", "shrimp", "tuna", "deli", "spam",
     // Cuts of raw meat. Scanned AFTER spices+pantry so "Steak Seasoning"->spices and
     // "Steak Sauce"->pantry still win (order matters). "steak" also catches "steaks".
     "steak", "sirloin", "ribeye", "tbone", "t bone", "porterhouse", "flank", "brisket",
@@ -2886,6 +2886,15 @@ export function normalizeKitchenCategory(rawCategory, storageLocation, productNa
   // confident 'produce' guess (user feedback: "this is not a vegetable"). Leftovers win.
   const pname = (productName == null ? "" : String(productName)).toLowerCase();
   if (raw !== "leftovers" && /\b(tofu|tempeh|seitan)\b/.test(pname)) return "prepared_other";
+  // Hard override, kept in step with the Python twin in kitchen_api/category_normalizer.py:
+  // canned PROTEIN is still protein. "canned" sits in the pantry keyword list which is scanned
+  // before meat_seafood, so the packaging word beat the food word ("Canned Tuna" -> pantry
+  // while plain "Tuna" -> meat_seafood). Generic canned goods and broths/soups/sauces/pet food
+  // are excluded and keep their existing category.
+  if (raw !== "leftovers"
+      && /\b(canned|tinned|can of|pouch|chunk light|in\s+(?:\w+\s+){0,3}(?:water|oil))\b/.test(pname)
+      && /\b(tuna|salmon|sardines?|anchov\w*|chicken|turkey|beef|pork|ham|spam|crab|clams?|shrimp|mackerel|herring)\b/.test(pname)
+      && !/\b(broth|stock|bouillon|soup|sauce|gravy|pet|cat food|dog food|treat)\b/.test(pname)) return "meat_seafood";
   // Hard override: an unambiguous raw-meat CUT in the product name is meat_seafood,
   // even when the AI category guess is confidently wrong (the Gemini bulk path
   // mislabeled raw steaks as 'beverages'; that exact-enum value would otherwise pass
