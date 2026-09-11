@@ -1,14 +1,14 @@
 # OTA report analytics deployment baseline
 
 The canonical `app.py` and `analytics.py` are the exact two modules deployed and
-verified on 2026-09-10. The baseline preserves the already deployed September 8
+verified with the raw numeric correction on 2026-09-11 UTC. The baseline preserves the already deployed September 8
 D3/H4 diagnostic validator and its exclusion of retained records from current
 state. The former local `app.py` lacked that validator and must not be restored.
 
 Function: `trepo-grocery-backend-dev-OtaReportApiFunction-cyUvBswGXwDb`,
 `us-east-1`, account `566667681926`, handler `app.handler`, runtime Python 3.9.
 The deployment ZIP SHA-256 (base64) is
-`9p2PltzTBd6Y2zK8Ka3kMH8wmd8w2rPWZGeSDUpEjEg=`.
+`iTXcTy8iFKIwf6ncnYda8/FmW7q4624gtT5wjUDt4VY=`.
 
 ## Subsequent code deployment
 
@@ -38,6 +38,32 @@ its server runtime. Do not place it in code, browser bundles, documentation,
 command arguments, or commit history. Any separately reviewed environment update
 must merge the complete fresh existing Variables map with only authorized
 additions and use its current RevisionId; never replace unrelated variables.
+
+## Raw numeric validation regression
+
+New reports preserve the original raw numeric validity for analytics before
+legacy normalization coerces values. Boolean counters, fractional numeric values,
+and out-of-bounds measurements are omitted from analytics; valid Boolean flags
+and integer strings remain supported. Legacy stored values and reads retain their
+previous behavior. The server-derived rejection metadata also protects event
+history and a latest-state fallback if its optional analytics snapshot fails.
+
+Historical rows that already lost their raw types cannot be repaired accurately
+from the stored integer alone. They remain unchanged; no historical migration or
+deletions were performed. The D3/H4 validator and exclusion from current state
+remain intact.
+
+Run the focused actual-handler regression suite from the repository root:
+
+```sh
+python3 -m unittest discover -s ota_report_api/tests -v
+```
+
+These 13 tests use in-memory tables and dummy process-only credentials, with no
+network requests. The full 48-test candidate suite, baseline failing reproducer,
+reviewed ZIP/diff, code-only deployment, and post-deployment live QA cleanup are
+archived under:
+`/Users/MattTaylor/halo-device-analytics-2026-09-10/simulation-2026-09-11/backend/candidate/`.
 
 ## API and evidence
 

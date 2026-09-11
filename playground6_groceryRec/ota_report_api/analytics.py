@@ -105,6 +105,32 @@ def integer(value, low=0, high=253402300799):
 def safe_text(value, pattern=IDENTIFIER):
     return value if isinstance(value, str) and pattern.fullmatch(value) else None
 
+NUMERIC_WIRE_FIELDS = frozenset(key for keys, _, _ in NUMBERS.values() for key in keys) | {'ts_epoch'}
+
+
+def raw_numeric_rejections(raw):
+    """Remember raw type/bound failures before legacy INT_FIELDS coercion loses them."""
+    specs = {}
+    for keys, low, high in NUMBERS.values():
+        for key in keys: specs.setdefault(key, []).append((low, high))
+    specs['ts_epoch'] = [(0, 253402300799)]
+    rejected = []
+    for key, bounds in specs.items():
+        if key not in raw: continue
+        value = raw[key].strip() if isinstance(raw[key], str) else raw[key]
+        # A few wire names, such as wifi, also have a supported string enum.
+        if isinstance(value, str) and any(key == wire and value in values.split() for wire, values in ENUMS.values()): continue
+        accepted = any(integer(int(value) if type(value) is bool and (low, high) == (0, 1) else value, low, high) is not None for low, high in bounds)
+        if not accepted: rejected.append(key)
+    return sorted(rejected)
+
+
+def without_rejected_numerics(payload, rejected):
+    # Only server-derived, allowlisted field names can affect this projection.
+    blocked = {key for key in rejected if isinstance(key, str) and key in NUMERIC_WIRE_FIELDS} if isinstance(rejected, list) else set()
+    return {key: value for key, value in payload.items() if key not in blocked}
+
+
 def retention_days():
     return integer(os.getenv('ANALYTICS_RETENTION_DAYS', '90'), 7, 365) or 90
 
@@ -188,11 +214,14 @@ def add_age(row, now, stale_after):
 def from_item(item, latest=False):
     payload=item.get('last_payload' if latest else 'payload') or {}
     if not isinstance(payload,dict): payload={}
+    rejected=item.get('analytics_raw_numeric_rejections',[])
     received=item.get('updated_at_epoch' if latest else 'ingested_at_epoch')
     event_id=str(item.get('device_id') or '')+':'+str(item.get('last_event_ts_key' if latest else 'event_ts_key') or '')
     # Project stored normalized rows AGAIN, rather than trust arbitrary database maps.
     if latest and isinstance(item.get('analytics_latest_payload'),dict):
         payload=item['analytics_latest_payload'];received=item.get('analytics_received_at_epoch');event_id=item.get('analytics_event_id') or event_id
+        rejected=[]  # This independent snapshot already omitted its own raw failures.
+    payload=without_rejected_numerics(payload,rejected)
     diagnostic=bool(payload.get('diag_export') or payload.get('diag_handoff'))
     return normalize(payload,received,event_id,diagnostic)
 

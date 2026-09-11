@@ -310,7 +310,7 @@ def _make_event_keys(payload):
     return ingest_id, event_ts_key
 
 
-def _put_event(table, payload):
+def _put_event(table, payload, raw_numeric_rejections=None):
     now_epoch = int(time.time())
     now_iso = _utc_now_iso()
     ingest_id, event_ts_key = _make_event_keys(payload)
@@ -334,6 +334,8 @@ def _put_event(table, payload):
         if value is not None and value != "":
             item[field] = value
 
+    if raw_numeric_rejections is not None:
+        item["analytics_raw_numeric_rejections"] = raw_numeric_rejections
     table.put_item(Item=item)
     return item, now_epoch
 
@@ -580,14 +582,17 @@ def _ingest_report(events_table, latest_table, event):
         build=payload["build"],
     )
 
-    event_item, now_epoch = _put_event(events_table, payload)
+    rejected_numerics = analytics.raw_numeric_rejections(raw_payload)
+    analytics_payload = analytics.without_rejected_numerics(payload, rejected_numerics)
+    event_item, now_epoch = _put_event(events_table, payload, rejected_numerics)
     latest_updated = False
     analytics_latest_updated = False
     if not diagnostic_export:
         latest_item = _build_latest_item(payload, event_item, now_epoch)
+        latest_item["analytics_raw_numeric_rejections"] = rejected_numerics
         latest_updated = _update_latest_if_newer(latest_table, latest_item)
         try:
-            analytics_latest_updated = analytics.update_latest(latest_table, payload, event_item, now_epoch)
+            analytics_latest_updated = analytics.update_latest(latest_table, analytics_payload, event_item, now_epoch)
         except Exception:
             # The accepted legacy report remains acknowledged if its optional
             # projection fails. No payload or exception contents in this log.
