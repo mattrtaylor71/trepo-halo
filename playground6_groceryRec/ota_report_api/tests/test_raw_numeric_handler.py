@@ -64,6 +64,20 @@ class RawNumericHandlerTests(unittest.TestCase):
     def post(self,**changes):return self.invoke('POST','/ota/report',dict(BASE,**changes))
     def view(self,kind='latest',device='halo-raw-numeric-qa'):
         status,out=self.invoke('GET','/ota/report/'+kind,query={'view':'analytics','device_id':device});self.assertEqual(status,200);return out['items']
+    def test_clock_terminal_reasons_survive_real_handler_latest_and_history(self):
+        for reason in ('clock_unconfirmed', 'clock_unconfirmed_defer'):
+            with self.subTest(reason=reason):
+                self.events.items.clear();self.latest.items.clear()
+                status,_=self.post(fw='6.4.127',build='6.4.127-clock-regression',report_type='pre_sleep',ota_result=reason)
+                self.assertEqual(status,200)
+                for kind in ('latest','events'):
+                    self.assertEqual(self.view(kind)[0]['metrics']['ota']['result'],reason)
+    def test_unknown_clock_terminal_text_remains_outside_analytics_allowlist(self):
+        self.assertEqual(self.post(ota_result='clock_unconfirmed-private-sentinel')[0],200)
+        for kind in ('latest','events'):
+            row=self.view(kind)[0]
+            self.assertNotIn('result',row['metrics'].get('ota',{}))
+            self.assertNotIn('private-sentinel',json.dumps(row))
     def test_actual_handler_omits_bool_counter_and_fractional_values_both_views(self):
         status,_=self.post(boot_count=True,uptime_ms=1.5,rssi=-61.75);self.assertEqual(status,200)
         stored=next(iter(self.events.items.values()));self.assertEqual(stored['payload']['boot_count'],1);self.assertEqual(stored['payload']['uptime_ms'],1);self.assertEqual(stored['payload']['rssi'],-61)
