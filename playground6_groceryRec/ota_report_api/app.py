@@ -614,7 +614,9 @@ def _ingest_report(events_table, latest_table, event):
             "ok": True,
             "ingested": True,
             "latest_updated": latest_updated,
-            "analytics_latest_updated": analytics_latest_updated,
+            # Deployed diagnostic parsers accept field names shorter than 24
+            # bytes. Keep their legacy receipt so durable ACK/retirement works.
+            **({"analytics_latest_updated": analytics_latest_updated} if not diagnostic_export else {}),
             "server_time_epoch": now_epoch,
             "event_ts_key": event_item["event_ts_key"],
         },

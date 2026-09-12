@@ -118,6 +118,27 @@ class RawNumericHandlerTests(unittest.TestCase):
         payload=diagnostic();self.assertTrue(app._validated_diagnostic_export(payload))
         status,out=self.invoke('POST','/ota/report',payload);self.assertEqual(status,200);self.assertFalse(out['latest_updated']);self.assertEqual(self.latest.updates,0)
         row=self.view('events',payload['device_id'])[0];self.assertEqual(row['source'],'retained_diagnostic');self.assertNotIn('boot_count',row['metrics'].get('system',{}))
+    def assert_legacy_diagnostic_receipt(self,payload):
+        self.assertTrue(app._validated_diagnostic_export(payload))
+        status,out=self.invoke('POST','/ota/report',payload)
+        self.assertEqual(status,200);self.assertTrue(out['ok']);self.assertTrue(out['ingested'])
+        self.assertEqual(set(out),{'ok','ingested','latest_updated','server_time_epoch','event_ts_key'})
+        self.assertTrue(all(len(name)<24 for name in out))
+        self.assertLessEqual(len(json.dumps(out).encode()),256)
+        stored=next(iter(self.events.items.values()))
+        self.assertEqual(out['event_ts_key'],stored['event_ts_key'])
+        self.assertEqual(stored['payload']['request_id'],payload['request_id'])
+        self.assertFalse(out['latest_updated']);self.assertEqual(self.latest.updates,0)
+    def test_d3_receipt_retains_legacy_field_and_size_limits(self):
+        self.assert_legacy_diagnostic_receipt(diagnostic())
+    def test_h4_handoff_receipt_retains_legacy_field_and_size_limits(self):
+        payload=diagnostic();context=base64.b64decode(payload['diag_context_b64'])
+        handoff=bytearray(72);handoff[:16]=context[24:40]
+        handoff[16:24]=payload['diag_sequence'].to_bytes(8,'little')
+        handoff[24:28]=payload['diag_crc'].to_bytes(4,'little')
+        handoff[52:56]=context[252:256];handoff[56:60]=NOW.to_bytes(4,'little');handoff[68]=1
+        payload.update(diag_handoff=1,diag_handoff_schema=4,diag_handoff_b64=base64.b64encode(handoff).decode(),request_id='h4-'+context[24:40].hex()+'-'+format(zlib.crc32(handoff)&0xffffffff,'08x'))
+        self.assert_legacy_diagnostic_receipt(payload)
     def test_bad_d3_crc_is_still_rejected_before_write(self):
         payload=diagnostic();raw=bytearray(base64.b64decode(payload['diag_record_b64']));raw[30]^=1;payload['diag_record_b64']=base64.b64encode(raw).decode()
         self.assertEqual(self.invoke('POST','/ota/report',payload)[0],400);self.assertEqual(self.events.puts,0);self.assertEqual(self.latest.updates,0)
