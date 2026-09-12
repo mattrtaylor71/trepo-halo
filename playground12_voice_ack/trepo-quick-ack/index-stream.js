@@ -1,3 +1,4 @@
+import { formatRecipeResponse } from "./lib/recipe-response.mjs";
 /**
  * Streaming voice assistant handler for iOS app.
  *
@@ -405,7 +406,9 @@ async function streamHandler(event, responseStream, context) {
 
   // Post-stream: entity capitalization, app_output, session persistence
   const toolEvents = result?.toolEvents || [];
-  const responseText = applyEntityCapitalization(result?.text || "Okay.", toolEvents);
+  const originalResponseText = applyEntityCapitalization(result?.text || "Okay.", toolEvents);
+    const responseText = requestInput?.responseSurface === "app"
+      ? (formatRecipeResponse(originalResponseText) || originalResponseText) : originalResponseText;
   const durationMs = Date.now() - startedAt;
 
   const appOutput = buildAppOutput({

@@ -1,3 +1,5 @@
+import { formatRecipeResponse } from "./recipe-response.mjs";
+
 function cleanText(value) {
   return String(value || "")
     .replace(/\s+/g, " ")
@@ -583,7 +585,8 @@ export function buildAppOutput({
   responseSurface = "halo"
 }) {
   const normalizedResponseSurface = String(responseSurface || "halo").trim().toLowerCase() === "app" ? "app" : "halo";
-  const normalizedText = formatMessageText(text) || "Okay.";
+  const recipeText = normalizedResponseSurface === "app" ? formatRecipeResponse(text) : null;
+  const normalizedText = recipeText || formatMessageText(text) || "Okay.";
   const responseType = error ? "error" : type;
   const primaryEvent = [...toolEvents].reverse().find((event) => event?.result?.ok);
   const asyncUpdate = primaryEvent?.result?.toolResult?.async_update || null;

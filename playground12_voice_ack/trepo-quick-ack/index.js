@@ -1,3 +1,4 @@
+import { formatRecipeResponse } from "./lib/recipe-response.mjs";
 import { buildAppOutput } from "./lib/app-response.mjs";
 import { dispatchVoiceAssetJobs } from "./lib/voice-asset-dispatcher.mjs";
 import { runDeviceAssistant, transcribeAudio } from "./lib/device-assistant.mjs";
@@ -805,7 +806,9 @@ export async function handler(event, context) {
 
     toolTrace = result.toolTrace || [];
     toolEvents = result.toolEvents || [];
-    const responseText = applyEntityCapitalization(result.text || "Okay.", toolEvents);
+    const originalResponseText = applyEntityCapitalization(result.text || "Okay.", toolEvents);
+    const responseText = requestInput?.responseSurface === "app"
+      ? (formatRecipeResponse(originalResponseText) || originalResponseText) : originalResponseText;
     if (requestInput?.sessionId) {
       try {
         await appendSessionMessages(

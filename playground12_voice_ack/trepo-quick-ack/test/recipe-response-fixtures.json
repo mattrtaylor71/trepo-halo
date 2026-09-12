@@ -1,0 +1,237 @@
+[
+  {
+    "name": "legacy plain recipe",
+    "text": "Apple Yogurt Bites\nIngredients:\n- 1 apple\n- 2 tbsp yogurt\nSteps:\n1. Slice the apple.\n2. Top with yogurt.",
+    "expected": [
+      {
+        "title": "Apple Yogurt Bites",
+        "ingredients": [
+          "1 apple",
+          "2 tbsp yogurt"
+        ],
+        "steps": [
+          "Slice the apple.",
+          "Top with yogurt."
+        ]
+      }
+    ]
+  },
+  {
+    "name": "description after Markdown name",
+    "text": "### Apple Yogurt Bites\nA great snack, easy and quick.\nIngredients:\n- 1 apple\n- 2 tbsp yogurt\nSteps:\n1. Slice the apple.\n2. Top with yogurt.",
+    "expected": [
+      {
+        "title": "Apple Yogurt Bites",
+        "ingredients": [
+          "1 apple",
+          "2 tbsp yogurt"
+        ],
+        "steps": [
+          "Slice the apple.",
+          "Top with yogurt."
+        ]
+      }
+    ]
+  },
+  {
+    "name": "bold colon inside emphasis",
+    "text": "Apple Yogurt Bites\n**Ingredients:**\n- 1 apple\n- 2 tbsp yogurt\n**Instructions:**\n1. Slice the apple.\n2. Top with yogurt.",
+    "expected": [
+      {
+        "title": "Apple Yogurt Bites",
+        "ingredients": [
+          "1 apple",
+          "2 tbsp yogurt"
+        ],
+        "steps": [
+          "Slice the apple.",
+          "Top with yogurt."
+        ]
+      }
+    ]
+  },
+  {
+    "name": "bold colon outside emphasis",
+    "text": "Apple Yogurt Bites\n**Ingredients**:\n- 1 apple\n- 2 tbsp yogurt\n**Directions**:\n1. Slice the apple.\n2. Top with yogurt.",
+    "expected": [
+      {
+        "title": "Apple Yogurt Bites",
+        "ingredients": [
+          "1 apple",
+          "2 tbsp yogurt"
+        ],
+        "steps": [
+          "Slice the apple.",
+          "Top with yogurt."
+        ]
+      }
+    ]
+  },
+  {
+    "name": "underscore headings",
+    "text": "Apple Yogurt Bites\n__Ingredients:__\n- 1 apple\n- 2 tbsp yogurt\n__Method:__\n1. Slice the apple.\n2. Top with yogurt.",
+    "expected": [
+      {
+        "title": "Apple Yogurt Bites",
+        "ingredients": [
+          "1 apple",
+          "2 tbsp yogurt"
+        ],
+        "steps": [
+          "Slice the apple.",
+          "Top with yogurt."
+        ]
+      }
+    ]
+  },
+  {
+    "name": "numbered title and section headings",
+    "text": "1. Apple Yogurt Bites\n### Ingredients:\n- 1 apple\n- 2 tbsp yogurt\n### Preparation:\n1. Slice the apple.\n2. Top with yogurt.",
+    "expected": [
+      {
+        "title": "Apple Yogurt Bites",
+        "ingredients": [
+          "1 apple",
+          "2 tbsp yogurt"
+        ],
+        "steps": [
+          "Slice the apple.",
+          "Top with yogurt."
+        ]
+      }
+    ]
+  },
+  {
+    "name": "unnumbered preparation",
+    "text": "Apple Yogurt Bites\nIngredients:\n- 1 apple\n- 2 tbsp yogurt\nSteps:\nSlice the apple.\nTop with yogurt.",
+    "expected": [
+      {
+        "title": "Apple Yogurt Bites",
+        "ingredients": [
+          "1 apple",
+          "2 tbsp yogurt"
+        ],
+        "steps": [
+          "Slice the apple.",
+          "Top with yogurt."
+        ]
+      }
+    ]
+  },
+  {
+    "name": "numbered ingredients",
+    "text": "Apple Yogurt Bites\nIngredients:\n1) 1 apple\n2) 2 tbsp yogurt\nSteps:\n1. Slice the apple.\n2. Top with yogurt.",
+    "expected": [
+      {
+        "title": "Apple Yogurt Bites",
+        "ingredients": [
+          "1 apple",
+          "2 tbsp yogurt"
+        ],
+        "steps": [
+          "Slice the apple.",
+          "Top with yogurt."
+        ]
+      }
+    ]
+  },
+  {
+    "name": "wrapped preparation and followup",
+    "text": "Apple Yogurt Bites\nIngredients:\n- 1 apple\n- 2 tbsp yogurt\nSteps:\n1. Slice the\napple.\n2. Top with yogurt.\n\nIf you want, I can suggest more snacks.",
+    "expected": [
+      {
+        "title": "Apple Yogurt Bites",
+        "ingredients": [
+          "1 apple",
+          "2 tbsp yogurt"
+        ],
+        "steps": [
+          "Slice the apple.",
+          "Top with yogurt."
+        ]
+      }
+    ]
+  },
+  {
+    "name": "notes do not become steps",
+    "text": "Apple Yogurt Bites\nIngredients:\n- 1 apple\n- 2 tbsp yogurt\nSteps:\n1. Slice the apple.\n2. Top with yogurt.\n\nNotes:\nCheck the yogurt label for allergens.",
+    "expected": [
+      {
+        "title": "Apple Yogurt Bites",
+        "ingredients": [
+          "1 apple",
+          "2 tbsp yogurt"
+        ],
+        "steps": [
+          "Slice the apple.",
+          "Top with yogurt."
+        ]
+      }
+    ]
+  },
+  {
+    "name": "two cards with descriptions",
+    "text": "Here are two snacks.\n\n### Apple Yogurt Bites\nA great snack, easy and quick.\nIngredients:\n- 1 apple\n- 2 tbsp yogurt\nSteps:\n1. Slice the apple.\n2. Top with yogurt.\n\n### Pear Yogurt Bites\nA quick, filling snack.\nIngredients:\n- 1 pear\n- 2 tbsp yogurt\nSteps:\n1. Slice the pear.\n2. Top with yogurt.",
+    "expected": [
+      {
+        "title": "Apple Yogurt Bites",
+        "ingredients": [
+          "1 apple",
+          "2 tbsp yogurt"
+        ],
+        "steps": [
+          "Slice the apple.",
+          "Top with yogurt."
+        ]
+      },
+      {
+        "title": "Pear Yogurt Bites",
+        "ingredients": [
+          "1 pear",
+          "2 tbsp yogurt"
+        ],
+        "steps": [
+          "Slice the pear.",
+          "Top with yogurt."
+        ]
+      }
+    ]
+  },
+  {
+    "name": "prose is not a recipe",
+    "text": "Try an apple with yogurt. It is quick and easy.",
+    "expected": []
+  },
+  {
+    "name": "missing preparation remains text",
+    "text": "Apple Yogurt Bites\nIngredients:\n- 1 apple",
+    "expected": []
+  },
+  {
+    "name": "incomplete second recipe remains text",
+    "text": "Apple Yogurt Bites\nIngredients:\n- 1 apple\n- 2 tbsp yogurt\nSteps:\n1. Slice the apple.\n2. Top with yogurt.\n\n### Pear Bites\nIngredients:\n- 1 pear\nSteps:",
+    "expected": []
+  },
+  {
+    "name": "missing title remains text",
+    "text": "Ingredients:\n- 1 apple\nSteps:\n1. Slice the apple.",
+    "expected": []
+  },
+  {
+    "name": "dish heading outranks bold description",
+    "text": "### Apple Yogurt Bites\n**Quick and easy**\nIngredients:\n- 1 apple\n- 2 tbsp yogurt\nSteps:\n1. Slice the apple.\n2. Top with yogurt.",
+    "expected": [
+      {
+        "title": "Apple Yogurt Bites",
+        "ingredients": [
+          "1 apple",
+          "2 tbsp yogurt"
+        ],
+        "steps": [
+          "Slice the apple.",
+          "Top with yogurt."
+        ]
+      }
+    ]
+  }
+]
