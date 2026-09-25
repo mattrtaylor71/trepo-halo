@@ -1,0 +1,16 @@
+{
+  "status": "available to internal TestFlight testers",
+  "version": "1.17",
+  "build": "124",
+  "build_id": "6e1b893e-727b-425d-8bc8-f0b949b9c9aa",
+  "source_commit": "9637242b514a01de4a9726e889e2b4f654ab094a",
+  "runtime_commit": "ea86505e32f94d5b2fac2f9905886894ccbd6d2a",
+  "ipa_sha256": "7eed127a22854af7be69f3bb0544d44d4f9a2e06046e10e0223bebc33c9c4d65",
+  "native_executions": 148,
+  "fresh_full_unique_tests": 117,
+  "runtime_inputs": 278,
+  "ordinary_test_build_inputs": 482,
+  "capture_reuse_enabled": false,
+  "report": "RELEASE-REPORT.md",
+  "verified_at": "2026-09-25T06:51:40.131188+00:00"
+}

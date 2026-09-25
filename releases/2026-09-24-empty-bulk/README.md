@@ -1,5 +1,7 @@
 # Empty bulk scan terminal outcomes — September 24, 2026
 
+**Final status:** live backend and TestFlight1.17(124) verified; see [release completion](../2026-09-24-journey/RELEASE-COMPLETION.md). Earlier checkpoints below are retained as history. Photo reuse remains OFF.
+
 Status: source committed in `f369342`; both code-only deployments completed with unchanged configuration, and real Node20 cloud admission/polling canaries passed on September24. Final native qualification and TestFlight remain separate gates.
 
 This is a narrow follow-up to the customer journey release. A scan that identifies no grocery items must not claim that items are ready to review. The worker now stores a terminal no-items failure for ordinary bulk inventory scans and sends no empty-ready notification. The separately deployed polling handler projects retained legacy completed-empty jobs to the same terminal response, without rewriting their stored records. Receipt-specific typed recovery remains unchanged.

@@ -1,0 +1,58 @@
+[
+  {
+    "function": "thyme",
+    "from": 1790298678,
+    "through": 1790318794,
+    "result": [],
+    "query_id": "294041d3-ed28-4859-99f4-a28ac908d46d",
+    "bytes_scanned": 253569.0
+  },
+  {
+    "function": "thyme-sync",
+    "from": 1790298671,
+    "through": 1790318794,
+    "result": [],
+    "query_id": "35ca789b-52b6-463d-85f1-4f45eb94dc09",
+    "bytes_scanned": 11275.0
+  },
+  {
+    "function": "thyme-worker",
+    "from": 1790298684,
+    "through": 1790318794,
+    "result": [],
+    "query_id": "4481aafe-9b29-42ea-a0f4-a7ff4d8fe6f7",
+    "bytes_scanned": 6798.0
+  },
+  {
+    "function": "kitchen",
+    "from": 1790297912,
+    "through": 1790318794,
+    "result": [],
+    "query_id": "863f523a-f6ec-4142-afba-d476407c951a",
+    "bytes_scanned": 1564827.0
+  },
+  {
+    "function": "recipes",
+    "from": 1790305972,
+    "through": 1790318794,
+    "result": [],
+    "query_id": "d7f29719-654e-4e85-8279-134b6f911f38",
+    "bytes_scanned": 1746640.0
+  },
+  {
+    "function": "capture",
+    "from": 1790306536,
+    "through": 1790318794,
+    "result": [],
+    "query_id": "4e5fa4e4-eae3-43c8-93d5-f586115fcea9",
+    "bytes_scanned": 117441.0
+  },
+  {
+    "function": "getJob",
+    "from": 1790306520,
+    "through": 1790318794,
+    "result": [],
+    "query_id": "a92ebeb0-c71e-445e-9576-8da3965b3fb8",
+    "bytes_scanned": 255089.0
+  }
+]

@@ -1,0 +1,58 @@
+{
+  "checked_at": "2026-09-25T06:45:53.724738+00:00",
+  "serving_hashes_unchanged_since_qualification": true,
+  "configuration_unchanged": true,
+  "capture_recovery_enabled": false,
+  "functions": {
+    "thyme": {
+      "function": "trepo-quick-ack-stream-dev",
+      "code_sha256": "cmfWCl5U09P4SxVMVX22Ckvbe5np4Fo+qeRseujRLn0=",
+      "revision": "a4509e3f-f792-4b46-a2f8-0c3ea6bc2872",
+      "configuration_hash": "a9a830a8f18a04641b2e74505e9e92fc46cdb68f4beb4c88f8753b2fdccfd73a",
+      "capture_recovery_off": null
+    },
+    "thyme-sync": {
+      "function": "trepo-quick-ack-sam-dev",
+      "code_sha256": "n3zKKh8zwsFgpq9xNTwiMxiuA1bbyslb/B7CopFLC6s=",
+      "revision": "4ca6286b-1da7-4a51-84d1-cf6347d8f200",
+      "configuration_hash": "ed0e2d572865569c6acda66a4f7a467b8f22bc16ff88ecdfbb640a2b3714ae18",
+      "capture_recovery_off": null
+    },
+    "thyme-worker": {
+      "function": "trepo-quick-ack-async-worker-dev",
+      "code_sha256": "rpsgkSUYbRVKoeW+2L154QPGEek1Ae6ZtpkHE2B0jaU=",
+      "revision": "7bb68dc5-8704-452d-9f75-64d12bf9d0f8",
+      "configuration_hash": "82fdbadbc83c6204e558a0b7111ddd43957419792ea71e7ce0d55806bff940f0",
+      "capture_recovery_off": null
+    },
+    "kitchen": {
+      "function": "trepo-grocery-backend-dev-KitchenApiFunction-lC0BHStmZf1k",
+      "code_sha256": "bqiMBVyVo80t2VxWUnnHHar0rJFXKwUIHvh4vkwCXhU=",
+      "revision": "27afe1b9-0489-4e79-8639-93446b5e9c08",
+      "configuration_hash": "699cfaa424e0ec91b0611c478e944114bf5c9bb2a0c4f9c3c6035a62104c10b9",
+      "capture_recovery_off": null
+    },
+    "recipes": {
+      "function": "trepo-grocery-backend-dev-SavedRecipesApiFunction-a7aWuWlJvEF2",
+      "code_sha256": "0aaNoc7cx/LNzuOdPbgHYC5uQ6RqR2upxiKew4YCmao=",
+      "revision": "6a8b5e70-a58b-4f6c-bf93-0b18c90727d4",
+      "configuration_hash": "ab3b07777cb4891c90f0e920d8374a97a2f8b923499d26c01ad1f98f90ee39f3",
+      "capture_recovery_off": null
+    },
+    "capture": {
+      "function": "grocery-identifier-dev-identify-async",
+      "code_sha256": "m0s046cogIP8mE7Jz+IrIrSUSpaKT1I6UnBpTHPOEe4=",
+      "revision": "15f9de81-5b8d-4f5c-8c04-4484f335021a",
+      "configuration_hash": "466b5fcb4cddea4f0d657cd9fa1ea5ff8de51c51e6125e2ed67c1dbf01c01cc4",
+      "capture_recovery_off": true
+    },
+    "getJob": {
+      "function": "grocery-identifier-dev-GetJobFunction-xL9ddcVmBIaC",
+      "code_sha256": "1S0Y+omz2yjGKwTeMHmaAHetd9fRU793pTnyiScOlSs=",
+      "revision": "33eba49d-c43c-4fd3-b9ee-e9450ecfacd4",
+      "configuration_hash": "6174790f846d3a019c65872b633cd657e0c8320c6e9ccc710a70c83ba97ece21",
+      "capture_recovery_off": null
+    }
+  },
+  "stage": "final"
+}

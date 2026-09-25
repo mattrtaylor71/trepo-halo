@@ -1,5 +1,7 @@
 # Saved Recipes media timeout follow-up — September 24, 2026
 
+**Final status:** live backend and TestFlight1.17(124) verified; see [release completion](../2026-09-24-journey/RELEASE-COMPLETION.md). Earlier checkpoints below are retained as history. Photo reuse remains OFF.
+
 Status: code-only deployment completed and configuration verified unchanged on September 24. All three controlled live canaries passed on the dedicated review account. Final native qualification and TestFlight upload remain separate pending gates. Exact deployment and canary receipts are under `evidence/`.
 
 During the journey release health check, one URL import exhausted the service's 120-second limit while downloading a 45.92 MiB social video. AWS retried it; a retained recipe eventually appeared after roughly three minutes. Other oversized videos reached transcription and received size errors. Comparing the relevant functions against the package serving before the journey release confirmed that this behavior predates that release. No affected customer's data was edited or replayed to investigate it.

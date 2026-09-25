@@ -1,5 +1,7 @@
 # September 24 customer-journey backend release
 
+**Final status:** live backend and TestFlight1.17(124) verified; see [release completion](RELEASE-COMPLETION.md). Earlier checkpoints below are retained as history. Photo reuse remains OFF.
+
 This is the exact deployed-source record for six production Lambda code updates. The resources' `dev` names do not mean staging. Matt explicitly authorized the fixes, deployment, commits, documentation and TestFlight.
 
 ## Why per-function overlays

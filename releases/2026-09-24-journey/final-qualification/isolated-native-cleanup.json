@@ -1,0 +1,15 @@
+{
+  "checked_at": "2026-09-25T06:24:09.879442+00:00",
+  "release_snapshot": "20260924-231341-82a1ad",
+  "release_cases_passed": 7,
+  "isolated_schema": "recipe_edit_0aa4ac970e0e4e77ba7e1258cc61c182",
+  "schema_absence_independently_verified": true,
+  "server_stopped": true,
+  "reverse_tunnel_stop_requested": true,
+  "owned_mysql_stopped": true,
+  "other_mysql_connection_ids": [],
+  "evidence_preserved": true,
+  "production_writes": false,
+  "reverse_tunnel_stopped_verified": true,
+  "owned_processes_absent_verified": true
+}

@@ -1,0 +1,16 @@
+{
+  "clear": true,
+  "checked_at": "2026-09-25T06:46:51.446750+00:00",
+  "native_executions": 148,
+  "fresh_full_unique_tests": 117,
+  "source_commit": "9637242b514a01de4a9726e889e2b4f654ab094a",
+  "snapshot": "/Users/MattTaylor/Library/Caches/trepo-jill-implementation-20260924/rollout/pre-upload-20260925-064651Z",
+  "backend_function_count": 7,
+  "capture_recovery_enabled": false,
+  "note": "Zero Lambda Errors/Throttles after each current deployment and no selected timeout/backend-error markers. Metrics may lag; physical delivery and handled errors outside selected patterns are not qualified. Historical18:22 recipe timeout remains in earlier release evidence.",
+  "evidence": {
+    "backend-final-verification.json": "7d165412990749151f3bd71d29be5f11ad14753a7b03e35b2fd1d45d7581a021",
+    "health.json": "4ecd47f692d9add04910283cb12d408e558b9f2b19a19719ec84c55ad132897c",
+    "log-errors.json": "8fa20778c615ebd516fdced8d2f7f51906460c9dc8b9348df11664fe1241bb24"
+  }
+}
