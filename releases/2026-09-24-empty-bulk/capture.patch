@@ -1,0 +1,61 @@
+--- a/emptyBulkOutcome.js
++++ b/emptyBulkOutcome.js
+@@ -0,0 +1,22 @@
++// Keep valid empty bulk analysis terminal and nonreviewable for status-based clients.
++// Receipt captures have a separate typed recovery contract and are not changed here.
++const EMPTY_BULK_CODE = 'no_items_identified';
++const EMPTY_BULK_MESSAGE = 'No grocery items were found. Try a clearer photo.';
++function isEmptyBulkResult(mode, result) {
++  return mode === 'bulk_inventory_deep' && Array.isArray(result?.items) && result.items.length === 0;
++}
++function emptyBulkResult(result) {
++  return {...result, error_code: EMPTY_BULK_CODE, capture_outcome: 'no_items'};
++}
++function isTerminalEmptyBulkJob(job) {
++  return !job?.commit_status && isEmptyBulkResult(job?.analysis_mode, job?.result) &&
++    (job.status === 'completed' || (job.status === 'failed' && job.result.error_code === EMPTY_BULK_CODE));
++}
++// Pure response projection: do not rewrite retained legacy records or their ownership.
++function projectEmptyBulkJob(job) {
++  if (!isTerminalEmptyBulkJob(job)) return job;
++  return {...job, status: 'failed', stage: 'failed', stage_message: EMPTY_BULK_MESSAGE,
++    progress: 100, error: EMPTY_BULK_MESSAGE, result: emptyBulkResult(job.result)};
++}
++module.exports = {EMPTY_BULK_CODE, EMPTY_BULK_MESSAGE, isEmptyBulkResult, emptyBulkResult,
++  isTerminalEmptyBulkJob, projectEmptyBulkJob};
+--- a/identifyAsync/app.js
++++ b/identifyAsync/app.js
+@@ -1,3 +1,4 @@
++const {EMPTY_BULK_MESSAGE, isEmptyBulkResult, emptyBulkResult} = require('../emptyBulkOutcome');
+ const {captureOutcome,aggregateCaptureOutcomes,applyRecoveryAvailability} = require('../captureOutcome');
+ // Lambda handler for async identification - creates job and processes in background
+ const { randomUUID } = require('crypto');
+@@ -639,6 +640,28 @@
+       }
+     }
+ 
++    // An accepted photo can validly contain no groceries. This is terminal, but
++    // status-based installed clients must never offer it as an empty review.
++    if (isEmptyBulkResult(analysisMode, analysis)) {
++      await queue.updateJobProgress(jobId, 'failed', EMPTY_BULK_MESSAGE, 100, {item_count: 0});
++      const stored = await queue.updateJobStatus(jobId, 'failed', emptyBulkResult(analysis), EMPTY_BULK_MESSAGE);
++      if (stored === false) return; // A losing delivery must not change session state.
++      if (sessionId) {
++        try {
++          const sessionStore = require('../sessionStore');
++          const session = await sessionStore.markJobFailed(sessionId, jobId);
++          // A mixed session still has valid photos to review. An all-empty session
++          // must not send a ready notification or automatically retry the same photo.
++          if (sessionStore.isSessionComplete(session) && (session.completed_job_ids || []).length > 0) {
++            if (await sessionStore.tryMarkSessionNotified(sessionId)) await sendSessionCompletionNotification(session);
++          }
++        } catch (sessionErr) {
++          console.warn(`[IdentifyAsync] Empty photo session tracking failed for job ${jobId}: ${sessionErr.message}`);
++        }
++      }
++      return;
++    }
++
+     let persistence = null;
+     if (isInventoryAnalysisMode(analysisMode) && owner && parseOptionalBoolean((await queue.getJob(jobId))?.meta?.persist_to_kitchen) === true) {
+       await queue.updateJobProgress(jobId, 'persisting_kitchen_items', 'Saving to your kitchen...', 95, {

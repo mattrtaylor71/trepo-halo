@@ -1,0 +1,199 @@
+✖ empty bulk is a terminal failed job with no ready effect and no automatic redrive (1743.195625ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+  
+  + 'completed'
+  - 'failed'
+  
+      at TestContext.<anonymous> (/Users/MattTaylor/Library/Caches/trepo-jill-implementation-20260924/empty-bulk-followup/candidates/capture/test/empty-bulk-terminal.test.cjs:61:9)
+      at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+      at async Test.run (node:internal/test_runner/test:932:9)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:297:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'completed',
+    expected: 'failed',
+    operator: 'strictEqual'
+  }
+
+✖ empty bulk settles the session as failed without ready notification for an all-empty session (100.862667ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+  
+  + 'completed'
+  - 'failed'
+  
+      at TestContext.<anonymous> (/Users/MattTaylor/Library/Caches/trepo-jill-implementation-20260924/empty-bulk-followup/candidates/capture/test/empty-bulk-terminal.test.cjs:68:23)
+      at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+      at async Test.run (node:internal/test_runner/test:932:9)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:629:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'completed',
+    expected: 'failed',
+    operator: 'strictEqual'
+  }
+
+✖ an empty last photo still completes a mixed session with the valid photos reviewable (103.950417ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+  
+  + 'completed'
+  - 'failed'
+  
+      at TestContext.<anonymous> (/Users/MattTaylor/Library/Caches/trepo-jill-implementation-20260924/empty-bulk-followup/candidates/capture/test/empty-bulk-terminal.test.cjs:72:23)
+      at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+      at async Test.run (node:internal/test_runner/test:932:9)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:629:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'completed',
+    expected: 'failed',
+    operator: 'strictEqual'
+  }
+
+✔ nonempty bulk keeps completed and ready semantics (83.886166ms)
+✔ empty typed receipt is not converted to empty bulk failure (67.071417ms)
+✔ empty noninventory analysis is not converted to empty bulk failure (56.334542ms)
+✔ a stale empty worker cannot fail a concurrent nonempty completion or its session (53.815167ms)
+✖ overlapping empty deliveries analyze once and settle without duplicate effects (90.439208ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+  
+  + 'completed'
+  - 'failed'
+  
+      at TestContext.<anonymous> (/Users/MattTaylor/Library/Caches/trepo-jill-implementation-20260924/empty-bulk-followup/candidates/capture/test/empty-bulk-terminal.test.cjs:92:70)
+      at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+      at async Test.run (node:internal/test_runner/test:932:9)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:629:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'completed',
+    expected: 'failed',
+    operator: 'strictEqual'
+  }
+
+✖ disabled leases rollout still terminalizes an empty bulk result (36.936417ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+  
+  + 'completed'
+  - 'failed'
+  
+      at TestContext.<anonymous> (/Users/MattTaylor/Library/Caches/trepo-jill-implementation-20260924/empty-bulk-followup/candidates/capture/test/empty-bulk-terminal.test.cjs:96:23)
+      at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+      at async Test.run (node:internal/test_runner/test:932:9)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:629:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'completed',
+    expected: 'failed',
+    operator: 'strictEqual'
+  }
+
+ℹ tests 9
+ℹ suites 0
+ℹ pass 4
+ℹ fail 5
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 2474.542541
+
+✖ failing tests:
+
+test at test/empty-bulk-terminal.test.cjs:57:1
+✖ empty bulk is a terminal failed job with no ready effect and no automatic redrive (1743.195625ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+  
+  + 'completed'
+  - 'failed'
+  
+      at TestContext.<anonymous> (/Users/MattTaylor/Library/Caches/trepo-jill-implementation-20260924/empty-bulk-followup/candidates/capture/test/empty-bulk-terminal.test.cjs:61:9)
+      at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+      at async Test.run (node:internal/test_runner/test:932:9)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:297:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'completed',
+    expected: 'failed',
+    operator: 'strictEqual'
+  }
+
+test at test/empty-bulk-terminal.test.cjs:66:1
+✖ empty bulk settles the session as failed without ready notification for an all-empty session (100.862667ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+  
+  + 'completed'
+  - 'failed'
+  
+      at TestContext.<anonymous> (/Users/MattTaylor/Library/Caches/trepo-jill-implementation-20260924/empty-bulk-followup/candidates/capture/test/empty-bulk-terminal.test.cjs:68:23)
+      at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+      at async Test.run (node:internal/test_runner/test:932:9)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:629:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'completed',
+    expected: 'failed',
+    operator: 'strictEqual'
+  }
+
+test at test/empty-bulk-terminal.test.cjs:70:1
+✖ an empty last photo still completes a mixed session with the valid photos reviewable (103.950417ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+  
+  + 'completed'
+  - 'failed'
+  
+      at TestContext.<anonymous> (/Users/MattTaylor/Library/Caches/trepo-jill-implementation-20260924/empty-bulk-followup/candidates/capture/test/empty-bulk-terminal.test.cjs:72:23)
+      at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+      at async Test.run (node:internal/test_runner/test:932:9)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:629:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'completed',
+    expected: 'failed',
+    operator: 'strictEqual'
+  }
+
+test at test/empty-bulk-terminal.test.cjs:90:1
+✖ overlapping empty deliveries analyze once and settle without duplicate effects (90.439208ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+  
+  + 'completed'
+  - 'failed'
+  
+      at TestContext.<anonymous> (/Users/MattTaylor/Library/Caches/trepo-jill-implementation-20260924/empty-bulk-followup/candidates/capture/test/empty-bulk-terminal.test.cjs:92:70)
+      at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+      at async Test.run (node:internal/test_runner/test:932:9)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:629:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'completed',
+    expected: 'failed',
+    operator: 'strictEqual'
+  }
+
+test at test/empty-bulk-terminal.test.cjs:94:1
+✖ disabled leases rollout still terminalizes an empty bulk result (36.936417ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+  
+  + 'completed'
+  - 'failed'
+  
+      at TestContext.<anonymous> (/Users/MattTaylor/Library/Caches/trepo-jill-implementation-20260924/empty-bulk-followup/candidates/capture/test/empty-bulk-terminal.test.cjs:96:23)
+      at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+      at async Test.run (node:internal/test_runner/test:932:9)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:629:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'completed',
+    expected: 'failed',
+    operator: 'strictEqual'
+  }

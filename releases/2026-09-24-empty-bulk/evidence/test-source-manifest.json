@@ -1,0 +1,110 @@
+{
+  "test_count": 90,
+  "test_files": [
+    "candidates/capture/test/async-terminal-replay.test.cjs",
+    "candidates/capture/test/bulkcommit.idempotency.test.mjs",
+    "candidates/capture/test/capture-outcome.test.cjs",
+    "candidates/capture/test/capture-recovery-admission.test.cjs",
+    "candidates/capture/test/capture-recovery-runtime.test.cjs",
+    "candidates/capture/test/capture-recovery.test.cjs",
+    "candidates/capture/test/empty-bulk-terminal.test.cjs",
+    "candidates/capture/test/geminibulk.deepfallback.test.mjs",
+    "candidates/capture/test/scene-source-manifest.test.cjs",
+    "tests/job-poll.test.cjs",
+    "tests/serving-restoration.test.cjs"
+  ],
+  "runtime_used": "Node v23.6.1; deployed runtime nodejs20.x (parent cloud gate pending)",
+  "required_services": [
+    "DynamoDB Local on 127.0.0.1:38001; each test owns and removes unique tables"
+  ],
+  "other_dependencies": {
+    "typescript": "5.9.3 bundled parser/license; not shipped",
+    "aws_sdk": "from capture.zip; every node_modules file of GetSessions independently compared byte-identical to capture.zip subset"
+  },
+  "files": {
+    "run-tests.sh": {
+      "sha256": "49470120782172295661fa29f15ced32a843fb9fbc7d452bdf512d1d90f94ad0",
+      "bytes": 354
+    },
+    "candidates/capture/test/capture-recovery-runtime.test.cjs": {
+      "sha256": "9785b5a5e4e859f1c616e31f3e44938e952d4e1a4a82188cb6499fc1f18fd050",
+      "bytes": 4576
+    },
+    "candidates/capture/test/bulkcommit.idempotency.test.mjs": {
+      "sha256": "369350a9fc16865b3a6d6fd6cebacfa1fab2088f999a3146639bc2379d530d06",
+      "bytes": 3065
+    },
+    "candidates/capture/test/geminibulk.deepfallback.test.mjs": {
+      "sha256": "6a67dd3100dbcf38554581c0588566f4a81bd0b47f9e82adf25c7df6f9c7ad0c",
+      "bytes": 2270
+    },
+    "candidates/capture/test/async-terminal-replay.test.cjs": {
+      "sha256": "2b5f3761eb62aaa156c9fc2faa990e8c26838217415c2fb2162d397eb95e3647",
+      "bytes": 12392
+    },
+    "candidates/capture/test/scene-source-manifest.test.cjs": {
+      "sha256": "25324102de891e104ad73f87518670090a98449bb03128d5434e91bb4703786d",
+      "bytes": 4584
+    },
+    "candidates/capture/test/empty-bulk-terminal.test.cjs": {
+      "sha256": "f6f7d0df0c7c608b61ed8e0e65b154556822bac0c10fb405d4eedf342c675ad9",
+      "bytes": 12065
+    },
+    "candidates/capture/test/capture-outcome.test.cjs": {
+      "sha256": "a0217b36766e5e1464c472fb4779f1c3e56519cd65a4bac3388c43dd5149aff8",
+      "bytes": 3258
+    },
+    "candidates/capture/test/capture-recovery-admission.test.cjs": {
+      "sha256": "2e2fcf0d74f17e43a711fb3052f03a731162bf728274ab609fc8fa87baaa94f9",
+      "bytes": 6157
+    },
+    "candidates/capture/test/capture-recovery.test.cjs": {
+      "sha256": "a794d62c1e62b646e33d6c8c7dc3f20b517d4e64c2a72c88e4311599430b0957",
+      "bytes": 4775
+    },
+    "test-dependencies/typescript/package.json": {
+      "sha256": "822ef7ca6452205657b6288b066481ecf508bfbf43455d715cf7d3ec457561e6",
+      "bytes": 3620
+    },
+    "test-dependencies/typescript/LICENSE.txt": {
+      "sha256": "a7d00bfd54525bc694b6e32f64c7ebcf5e6b7ae3657be5cc12767bce74654a47",
+      "bytes": 9197
+    },
+    "test-dependencies/typescript/lib/typescript.js": {
+      "sha256": "3ae902c92cc44dace175c0e69e13a4b0899f6983c6121d76b9ab8dd5795e7675",
+      "bytes": 9112572
+    },
+    "tests/job-poll.test.cjs": {
+      "sha256": "e5d5615d867457cda0049d6b48a690abf115fdb7328d01d8218eecf756d652e1",
+      "bytes": 3634
+    },
+    "tests/serving-restoration.test.cjs": {
+      "sha256": "4e58a7b0a967f2be0c2f42ef0a533e5820d98abf3d37fd52146636a2f468024e",
+      "bytes": 6212
+    },
+    "baseline/getSessions/sessionStore.js": {
+      "sha256": "1fb7a8199efc1c9cac2044c4d0fad0d65b5dd935a6ff8fcf51e2bf0ac9138cb9",
+      "bytes": 5798
+    },
+    "baseline/getSessions/reviewInbox.js": {
+      "sha256": "2ce70ab54cdeae54e91aa59f87262deaa598e16cf478b6e5bde2aad9efcbbfe3",
+      "bytes": 6151
+    },
+    "baseline/getSessions/package.json": {
+      "sha256": "28ac0cff9e0b4c8e21807a9e9c3c969ea4f5f487297e603ec7aa38d01bb98cb2",
+      "bytes": 1393
+    },
+    "baseline/getSessions/reviewInboxHandler.js": {
+      "sha256": "e08b1f06a442b25cffb880f54eb7dca4d7dba2e13f9560bbf4ae5aa3c4c5fc80",
+      "bytes": 1703
+    },
+    "baseline/getSessions/bulkCommit/auth.js": {
+      "sha256": "8ed01ed0b763c11ab81556aa37eeeefa4c9fe86ba7f30e2fa87bca406559d9c3",
+      "bytes": 3166
+    },
+    "baseline/getSessions/getSessions/app.js": {
+      "sha256": "028f9f6a0c852d1857a3def7ddf12788abcc642baa71bf1714a32f191408de22",
+      "bytes": 1554
+    }
+  }
+}

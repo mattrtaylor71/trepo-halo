@@ -1,0 +1,16 @@
+{
+  "at": "2026-09-25T03:08:10.157498+00:00",
+  "owned_dynamodb_pid": 82543,
+  "owned_dynamodb_endpoint": "127.0.0.1:38001",
+  "tables_before_stop": [],
+  "action": "SIGTERM exact owned process",
+  "mysql_33317_pid": 2186,
+  "mysql_action": "left running for parent native fixture",
+  "cloud_mutations": false,
+  "reconstruction_fixture": {
+    "pid": 90606,
+    "tables_before_stop": [],
+    "action": "SIGTERM exact owned process",
+    "at": "2026-09-25T03:11:05.622246+00:00"
+  }
+}

@@ -1,0 +1,44 @@
+TAP version 13
+# [GetSessions] Event received
+# Subtest: actual deployed discovery omits already-completed empty bulk and preserves stored jobs
+ok 1 - actual deployed discovery omits already-completed empty bulk and preserves stored jobs
+  ---
+  duration_ms: 159.654042
+  ...
+# [GetSessions] Event received
+# [GetSessions] Event received
+# [GetSessions] Event received
+# Subtest: actual deployed discovery is owner-scoped and rejects unsigned or cross-owner requests
+ok 2 - actual deployed discovery is owner-scoped and rejects unsigned or cross-owner requests
+  ---
+  duration_ms: 20.840209
+  ...
+# [GetSessions] Event received
+# [GetSessions] Event received
+# [GetSessions] Event received
+# Subtest: empty filtered page keeps cursor so a subsequent valid job is discoverable; cursor cannot cross owner
+ok 3 - empty filtered page keeps cursor so a subsequent valid job is discoverable; cursor cannot cross owner
+  ---
+  duration_ms: 19.927292
+  ...
+# [GetSessions] Event received
+# Subtest: pending and processing remain discoverable while failed empty jobs do not
+ok 4 - pending and processing remain discoverable while failed empty jobs do not
+  ---
+  duration_ms: 17.734625
+  ...
+# [GetSessions] Event received
+# Subtest: legacy sessions path preserves owner query and its existing payload without introducing customer writes
+ok 5 - legacy sessions path preserves owner query and its existing payload without introducing customer writes
+  ---
+  duration_ms: 33.086833
+  ...
+1..5
+# tests 5
+# suites 0
+# pass 5
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 373.665292

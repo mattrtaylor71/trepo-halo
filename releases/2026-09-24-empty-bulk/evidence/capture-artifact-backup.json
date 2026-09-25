@@ -1,0 +1,15 @@
+{
+  "at": "2026-09-25T03:09:56.162622+00:00",
+  "service": "capture",
+  "status": "candidate archived; deployment separately recorded",
+  "bucket": "aws-sam-cli-managed-default-samclisourcebucket-3lbnr8ujbdol",
+  "key": "trepo-incident-releases/2026-09-24-journey/release/capture/9b4b34e3a7288083fc984ec9cfe22b22b4944a968a4f523a5270694c73ce11ee.zip",
+  "version_id": "9Avf6.K5sO6LRBdiwYYz5dm6z8glTWwd",
+  "sha256": "9b4b34e3a7288083fc984ec9cfe22b22b4944a968a4f523a5270694c73ce11ee",
+  "code_sha256": "m0s046cogIP8mE7Jz+IrIrSUSpaKT1I6UnBpTHPOEe4=",
+  "bytes": 48650538,
+  "encryption": "aws:kms",
+  "verified_download_sha256": "9b4b34e3a7288083fc984ec9cfe22b22b4944a968a4f523a5270694c73ce11ee",
+  "existing_private_versioned_bucket": true,
+  "no_access_or_bucket_configuration_changes": true
+}

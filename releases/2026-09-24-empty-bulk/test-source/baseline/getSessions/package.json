@@ -1,0 +1,48 @@
+{
+  "name": "grocery-identifier",
+  "version": "1.0.0",
+  "description": "Identify grocery items from images with brand, price, ingredients, and alternatives",
+  "main": "dist/server.js",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx watch src/server.ts",
+    "start": "node dist/server.js",
+    "evaluate:grocery-bulk": "node evals/runGroceryAccuracyBakeoff.js",
+    "evaluate:stock-images": "npm run build && node dist/evals/evaluateStockImages.js",
+    "sam:build": "npm run build && sam build",
+    "sam:deploy": "sam deploy",
+    "test:characterization": "node --experimental-test-module-mocks --test test/*.test.mjs"
+  },
+  "keywords": [
+    "grocery",
+    "openai",
+    "product-identification"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.969.0",
+    "@aws-sdk/client-lambda": "^3.994.0",
+    "@aws-sdk/client-s3": "^3.1027.0",
+    "@aws-sdk/lib-dynamodb": "^3.969.0",
+    "dotenv": "^16.4.1",
+    "express": "^4.18.2",
+    "jimp": "^1.6.0",
+    "multer": "^1.4.5-lts.1",
+    "node-fetch": "^2.7.0",
+    "openai": "^6.27.0",
+    "sharp": "^0.34.5",
+    "zod": "^3.22.4"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/multer": "^1.4.11",
+    "@types/node": "^20.11.5",
+    "@types/node-fetch": "^2.6.11",
+    "tsx": "^4.7.1",
+    "typescript": "^5.3.3"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

@@ -1,0 +1,485 @@
+TAP version 13
+# Subtest: legacy completed empty bulk projects failed on successful HTTP for 1.16 polling without mutating source
+ok 1 - legacy completed empty bulk projects failed on successful HTTP for 1.16 polling without mutating source
+  ---
+  duration_ms: 2.021583
+  ...
+# Subtest: new empty-bulk failure remains HTTP200 while generic provider failure keeps HTTP500
+ok 2 - new empty-bulk failure remains HTTP200 while generic provider failure keeps HTTP500
+  ---
+  duration_ms: 0.65
+  ...
+# Subtest: empty receipt_inventory_deep retains existing completed semantics
+ok 3 - empty receipt_inventory_deep retains existing completed semantics
+  ---
+  duration_ms: 1.101416
+  ...
+# Subtest: empty quick_identify_deep retains existing completed semantics
+ok 4 - empty quick_identify_deep retains existing completed semantics
+  ---
+  duration_ms: 0.4525
+  ...
+# Subtest: empty product_analysis retains existing completed semantics
+ok 5 - empty product_analysis retains existing completed semantics
+  ---
+  duration_ms: 0.294542
+  ...
+# Subtest: nonempty bulk retains exact result, status and owner
+ok 6 - nonempty bulk retains exact result, status and owner
+  ---
+  duration_ms: 0.340084
+  ...
+# Subtest: pending and processing stay accepted even with intermediate empty items
+ok 7 - pending and processing stay accepted even with intermediate empty items
+  ---
+  duration_ms: 0.61425
+  ...
+# Subtest: absent malformed result and committed history are not reinterpreted as a detected empty result
+ok 8 - absent malformed result and committed history are not reinterpreted as a detected empty result
+  ---
+  duration_ms: 0.936167
+  ...
+# Subtest: missing job remains404 and never creates a replacement
+ok 9 - missing job remains404 and never creates a replacement
+  ---
+  duration_ms: 0.88275
+  ...
+# [GetSessions] Event received
+# Subtest: actual deployed discovery omits already-completed empty bulk and preserves stored jobs
+ok 10 - actual deployed discovery omits already-completed empty bulk and preserves stored jobs
+  ---
+  duration_ms: 2253.159125
+  ...
+# [GetSessions] Event received
+# [GetSessions] Event received
+# [GetSessions] Event received
+# Subtest: actual deployed discovery is owner-scoped and rejects unsigned or cross-owner requests
+ok 11 - actual deployed discovery is owner-scoped and rejects unsigned or cross-owner requests
+  ---
+  duration_ms: 577.262958
+  ...
+# [GetSessions] Event received
+# [GetSessions] Event received
+# [GetSessions] Event received
+# Subtest: empty filtered page keeps cursor so a subsequent valid job is discoverable; cursor cannot cross owner
+ok 12 - empty filtered page keeps cursor so a subsequent valid job is discoverable; cursor cannot cross owner
+  ---
+  duration_ms: 217.13825
+  ...
+# [GetSessions] Event received
+# Subtest: pending and processing remain discoverable while failed empty jobs do not
+ok 13 - pending and processing remain discoverable while failed empty jobs do not
+  ---
+  duration_ms: 58.969875
+  ...
+# [GetSessions] Event received
+# Subtest: legacy sessions path preserves owner query and its existing payload without introducing customer writes
+ok 14 - legacy sessions path preserves owner query and its existing payload without introducing customer writes
+  ---
+  duration_ms: 78.681334
+  ...
+# Subtest: completed replay preserves the old polling payload without another provider call or notification
+ok 15 - completed replay preserves the old polling payload without another provider call or notification
+  ---
+  duration_ms: 2156.833917
+  ...
+# Subtest: only the durable completion winner emits the ready notification
+ok 16 - only the durable completion winner emits the ready notification
+  ---
+  duration_ms: 902.539958
+  ...
+# Subtest: atomic update outcomes distinguish the winner, terminal replay and missing job
+ok 17 - atomic update outcomes distinguish the winner, terminal replay and missing job
+  ---
+  duration_ms: 80.980916
+  ...
+# Subtest: failed and removed legacy jobs do not produce work or replacement records
+ok 18 - failed and removed legacy jobs do not produce work or replacement records
+  ---
+  duration_ms: 61.834334
+  ...
+# Subtest: a losing failed attempt cannot mark a successfully completed session job failed
+ok 19 - a losing failed attempt cannot mark a successfully completed session job failed
+  ---
+  duration_ms: 193.503084
+  ...
+# Subtest: the genuine failure winner still records the error and session failure
+ok 20 - the genuine failure winner still records the error and session failure
+  ---
+  duration_ms: 73.395125
+  ...
+# Subtest: overlapping active deliveries perform provider work once
+ok 21 - overlapping active deliveries perform provider work once
+  ---
+  duration_ms: 98.341125
+  ...
+# Subtest: retry dispatch can hand off before its acknowledgement without dropping work
+ok 22 - retry dispatch can hand off before its acknowledgement without dropping work
+  ---
+  duration_ms: 176.0255
+  ...
+# Subtest: lost retry acknowledgement cannot overwrite the new worker successful result
+ok 23 - lost retry acknowledgement cannot overwrite the new worker successful result
+  ---
+  duration_ms: 144.602916
+  ...
+# Subtest: disabled rollout flag preserves the installed-client processing path
+ok 24 - disabled rollout flag preserves the installed-client processing path
+  ---
+  duration_ms: 50.38125
+  ...
+# Subtest: internal coordination outages remain Lambda errors so accepted work can retry
+ok 25 - internal coordination outages remain Lambda errors so accepted work can retry
+  ---
+  duration_ms: 5.401042
+  ...
+# Subtest: retained receipt 1 photo(s) retries the serving worker without a new review identity
+ok 26 - retained receipt 1 photo(s) retries the serving worker without a new review identity
+  ---
+  duration_ms: 82.39775
+  ...
+# Subtest: retained receipt 2 photo(s) retries the serving worker without a new review identity
+ok 27 - retained receipt 2 photo(s) retries the serving worker without a new review identity
+  ---
+  duration_ms: 85.349417
+  ...
+# (node:90831) ExperimentalWarning: Module mocking is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# [BulkCommit] Event received
+# [CommitReconcile] {"event":"bulk_commit_persisted","source_job_id":"src-1","commit_job_id":"job-1","owner_id":"ownerA","source_analysis_mode":"bulk_inventory_deep","item_job_id_prefix":"job-1:bulk:","source_item_count":1,"confirmed_item_count":1,"persisted_count":0,"created_count":0,"duplicate_count":0,"persistence_errors":0,"committed_at":"2026-09-25T03:10:29.593Z"}
+# [BulkCommit] Event received
+# [BulkCommit] Duplicate commit ignored for source_job_id=src-1 (commit_status=committed). No second write.
+# Subtest: first commit (claim acquired) persists confirmed items exactly once
+ok 28 - first commit (claim acquired) persists confirmed items exactly once
+  ---
+  duration_ms: 55.584917
+  ...
+# Subtest: duplicate commit (claim lost) writes NOTHING a second time
+ok 29 - duplicate commit (claim lost) writes NOTHING a second time
+  ---
+  duration_ms: 0.283333
+  ...
+# Subtest: zero items is a completed analysis, never saved/committed inventory
+ok 30 - zero items is a completed analysis, never saved/committed inventory
+  ---
+  duration_ms: 0.389709
+  ...
+# Subtest: mixed receipt batches retain the failing photo outcome next to real items
+ok 31 - mixed receipt batches retain the failing photo outcome next to real items
+  ---
+  duration_ms: 0.074042
+  ...
+# Subtest: untrusted labels never become recovery instructions
+ok 32 - untrusted labels never become recovery instructions
+  ---
+  duration_ms: 0.684583
+  ...
+# Subtest: recovery capability is per photo and does not alter classification or existing items
+ok 33 - recovery capability is per photo and does not alter classification or existing items
+  ---
+  duration_ms: 1.438041
+  ...
+# Subtest: disabled or unverifiable recovery never accepts a provider capability
+ok 34 - disabled or unverifiable recovery never accepts a provider capability
+  ---
+  duration_ms: 0.569375
+  ...
+# Subtest: serving-compatible retained-photo recovery: twenty taps, one accepted worker, same review ID after restart
+ok 35 - serving-compatible retained-photo recovery: twenty taps, one accepted worker, same review ID after restart
+  ---
+  duration_ms: 3316.77175
+  ...
+# {"event":"capture_recovery_failed","failure_type":"Error"}
+# Subtest: failed acknowledgement is not reported as accepted and retry preserves child identity
+ok 36 - failed acknowledgement is not reported as accepted and retry preserves child identity
+  ---
+  duration_ms: 119.50225
+  ...
+# Subtest: lost acknowledgement after the worker starts is verified from authoritative status
+ok 37 - lost acknowledgement after the worker starts is verified from authoritative status
+  ---
+  duration_ms: 50.285166
+  ...
+# {"event":"capture_recovery_failed","failure_type":"Error"}
+# Subtest: lost acknowledgement before worker start stays retryable
+ok 38 - lost acknowledgement before worker start stays retryable
+  ---
+  duration_ms: 152.848542
+  ...
+# Subtest: source failure never creates a verified manifest or accepted worker
+ok 39 - source failure never creates a verified manifest or accepted worker
+  ---
+  duration_ms: 3.709125
+  ...
+# Subtest: invalid identity cannot write photos; terminated source cannot gain a manifest
+ok 40 - invalid identity cannot write photos; terminated source cannot gain a manifest
+  ---
+  duration_ms: 9.815459
+  ...
+# Subtest: actual Dynamo transaction admits one manifest-backed review identity across twenty simultaneous taps
+ok 41 - actual Dynamo transaction admits one manifest-backed review identity across twenty simultaneous taps
+  ---
+  duration_ms: 3080.909083
+  ...
+# {"event":"capture_recovery_failed","failure_type":"TransactionCanceledException"}
+# Subtest: source dismissal between read and child admission fails the real conditional transaction
+ok 42 - source dismissal between read and child admission fails the real conditional transaction
+  ---
+  duration_ms: 131.310959
+  ...
+# {"event":"capture_recovery_failed","failure_type":"Error"}
+# {"event":"capture_recovery_failed","failure_type":"TransactionCanceledException"}
+# Subtest: source mutation race rejects child even when another child already exists
+ok 43 - source mutation race rejects child even when another child already exists
+  ---
+  duration_ms: 138.838708
+  ...
+# {"event":"capture_recovery_failed","failure_type":"Error"}
+# Subtest: incorrect source bytes never create a recoverable review job
+ok 44 - incorrect source bytes never create a recoverable review job
+  ---
+  duration_ms: 25.9095
+  ...
+# {"event":"capture_recovery_failed","failure_type":"Error"}
+# {"event":"capture_recovery_failed","failure_type":"Error"}
+# Subtest: double tap/restart admits one child; review is required and original identity survives
+ok 45 - double tap/restart admits one child; review is required and original identity survives
+  ---
+  duration_ms: 2.057792
+  ...
+# Subtest: foreign cannot reprocess or mutate inventory
+ok 46 - foreign cannot reprocess or mutate inventory
+  ---
+  duration_ms: 0.13625
+  ...
+# Subtest: deleted cannot reprocess or mutate inventory
+ok 47 - deleted cannot reprocess or mutate inventory
+  ---
+  duration_ms: 0.127917
+  ...
+# Subtest: committed cannot reprocess or mutate inventory
+ok 48 - committed cannot reprocess or mutate inventory
+  ---
+  duration_ms: 0.073375
+  ...
+# Subtest: dismissed cannot reprocess or mutate inventory
+ok 49 - dismissed cannot reprocess or mutate inventory
+  ---
+  duration_ms: 0.058084
+  ...
+# Subtest: unfinished cannot reprocess or mutate inventory
+ok 50 - unfinished cannot reprocess or mutate inventory
+  ---
+  duration_ms: 0.050959
+  ...
+# Subtest: real-items cannot reprocess or mutate inventory
+ok 51 - real-items cannot reprocess or mutate inventory
+  ---
+  duration_ms: 0.103208
+  ...
+# Subtest: lost-source cannot reprocess or mutate inventory
+ok 52 - lost-source cannot reprocess or mutate inventory
+  ---
+  duration_ms: 0.055917
+  ...
+# Subtest: authentication failure cannot inspect another source
+ok 53 - authentication failure cannot inspect another source
+  ---
+  duration_ms: 0.292542
+  ...
+# Subtest: expired image offers a retake without creating an orphan
+ok 54 - expired image offers a retake without creating an orphan
+  ---
+  duration_ms: 0.332959
+  ...
+# Subtest: stored image digest and requested index are verified
+ok 55 - stored image digest and requested index are verified
+  ---
+  duration_ms: 0.462208
+  ...
+# Subtest: mixed batch recovers only its empty photo
+ok 56 - mixed batch recovers only its empty photo
+  ---
+  duration_ms: 0.169625
+  ...
+# Subtest: crash after child creation retries that child instead of generating a new ID
+ok 57 - crash after child creation retries that child instead of generating a new ID
+  ---
+  duration_ms: 0.4735
+  ...
+# Subtest: completed jobs recover from the retained manifest after dispatch cleanup
+ok 58 - completed jobs recover from the retained manifest after dispatch cleanup
+  ---
+  duration_ms: 0.367667
+  ...
+# Subtest: a modified manifest cannot fall back to another dispatch source
+ok 59 - a modified manifest cannot fall back to another dispatch source
+  ---
+  duration_ms: 0.077833
+  ...
+# Subtest: empty bulk is a terminal failed job with no ready effect and no automatic redrive
+ok 60 - empty bulk is a terminal failed job with no ready effect and no automatic redrive
+  ---
+  duration_ms: 3025.30775
+  ...
+# Subtest: empty bulk settles the session as failed without ready notification for an all-empty session
+ok 61 - empty bulk settles the session as failed without ready notification for an all-empty session
+  ---
+  duration_ms: 150.654333
+  ...
+# Subtest: an empty last photo still completes a mixed session with the valid photos reviewable
+ok 62 - an empty last photo still completes a mixed session with the valid photos reviewable
+  ---
+  duration_ms: 187.643459
+  ...
+# Subtest: nonempty bulk keeps completed and ready semantics
+ok 63 - nonempty bulk keeps completed and ready semantics
+  ---
+  duration_ms: 105.332541
+  ...
+# Subtest: empty typed receipt is not converted to empty bulk failure
+ok 64 - empty typed receipt is not converted to empty bulk failure
+  ---
+  duration_ms: 64.145625
+  ...
+# Subtest: empty noninventory analysis is not converted to empty bulk failure
+ok 65 - empty noninventory analysis is not converted to empty bulk failure
+  ---
+  duration_ms: 136.387416
+  ...
+# Subtest: a stale empty worker cannot fail a concurrent nonempty completion or its session
+ok 66 - a stale empty worker cannot fail a concurrent nonempty completion or its session
+  ---
+  duration_ms: 50.959375
+  ...
+# Subtest: overlapping empty deliveries analyze once and settle without duplicate effects
+ok 67 - overlapping empty deliveries analyze once and settle without duplicate effects
+  ---
+  duration_ms: 52.727459
+  ...
+# Subtest: disabled leases rollout still terminalizes an empty bulk result
+ok 68 - disabled leases rollout still terminalizes an empty bulk result
+  ---
+  duration_ms: 39.776875
+  ...
+# Subtest: actual session store keeps empty jobs terminal without consuming the later valid photo notification
+ok 69 - actual session store keeps empty jobs terminal without consuming the later valid photo notification
+  ---
+  duration_ms: 185.705208
+  ...
+# (node:90837) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+# (Use `node --trace-deprecation ...` to show where the warning was created)
+# Subtest: flag OFF => never falls back (inert)
+ok 70 - flag OFF => never falls back (inert)
+  ---
+  duration_ms: 0.321542
+  ...
+# Subtest: flag ON + transient + budget => fall back to secondary with capped timeout
+ok 71 - flag ON + transient + budget => fall back to secondary with capped timeout
+  ---
+  duration_ms: 0.095209
+  ...
+# Subtest: flag ON + NON-transient error => no fallback (don't retry hard failures)
+ok 72 - flag ON + NON-transient error => no fallback (don't retry hard failures)
+  ---
+  duration_ms: 0.044625
+  ...
+# Subtest: flag ON + transient but budget exhausted => no fallback (protect the 900s Lambda budget)
+ok 73 - flag ON + transient but budget exhausted => no fallback (protect the 900s Lambda budget)
+  ---
+  duration_ms: 0.045208
+  ...
+# Subtest: fallback timeout shrinks with elapsed time (budget-aware)
+ok 74 - fallback timeout shrinks with elapsed time (budget-aware)
+  ---
+  duration_ms: 0.0425
+  ...
+# Subtest: verified single-image manifest survives removal of dispatch payload
+ok 75 - verified single-image manifest survives removal of dispatch payload
+  ---
+  duration_ms: 1.511167
+  ...
+# Subtest: single receipt source and one indexed receipt page are both supported
+ok 76 - single receipt source and one indexed receipt page are both supported
+  ---
+  duration_ms: 0.219042
+  ...
+# Subtest: multiple receipt pages retain provenance but no item page is guessed
+ok 77 - multiple receipt pages retain provenance but no item page is guessed
+  ---
+  duration_ms: 0.087083
+  ...
+# Subtest: unverified source withheld: owner
+ok 78 - unverified source withheld: owner
+  ---
+  duration_ms: 0.077625
+  ...
+# Subtest: unverified source withheld: job
+ok 79 - unverified source withheld: job
+  ---
+  duration_ms: 0.053666
+  ...
+# Subtest: unverified source withheld: mode
+ok 80 - unverified source withheld: mode
+  ---
+  duration_ms: 0.042
+  ...
+# Subtest: unverified source withheld: bucket
+ok 81 - unverified source withheld: bucket
+  ---
+  duration_ms: 0.096458
+  ...
+# Subtest: unverified source withheld: digest
+ok 82 - unverified source withheld: digest
+  ---
+  duration_ms: 0.044417
+  ...
+# Subtest: unverified source withheld: key
+ok 83 - unverified source withheld: key
+  ---
+  duration_ms: 0.216708
+  ...
+# Subtest: unverified source withheld: status
+ok 84 - unverified source withheld: status
+  ---
+  duration_ms: 0.223542
+  ...
+# Subtest: unverified source withheld: deleted
+ok 85 - unverified source withheld: deleted
+  ---
+  duration_ms: 0.092709
+  ...
+# Subtest: unverified source withheld: dismissed
+ok 86 - unverified source withheld: dismissed
+  ---
+  duration_ms: 0.03225
+  ...
+# Subtest: unverified source withheld: malformed_deleted
+ok 87 - unverified source withheld: malformed_deleted
+  ---
+  duration_ms: 0.025
+  ...
+# Subtest: legacy and anonymous jobs do not acquire invented provenance
+ok 88 - legacy and anonymous jobs do not acquire invented provenance
+  ---
+  duration_ms: 0.079417
+  ...
+# Subtest: serving writer keeps photo reuse disabled for scanned and manual rows
+ok 89 - serving writer keeps photo reuse disabled for scanned and manual rows
+  ---
+  duration_ms: 97.899458
+  ...
+# Subtest: public job response omits internal source manifest
+ok 90 - public job response omits internal source manifest
+  ---
+  duration_ms: 0.691125
+  ...
+1..90
+# tests 90
+# suites 0
+# pass 90
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 4211.936542

@@ -1,0 +1,15 @@
+{
+  "at": "2026-09-25T02:57:15.563584+00:00",
+  "service": "getJob",
+  "status": "Original live getJob archive; rollback only",
+  "bucket": "aws-sam-cli-managed-default-samclisourcebucket-3lbnr8ujbdol",
+  "key": "trepo-incident-releases/2026-09-24-journey/rollback/getJob/d816a66c1c842b57845ff66be8919778329ca30bccfef3c26662727f84c84bf8.zip",
+  "version_id": "..Exqzxv.it6JpXi64gSWslpEHUbhXxv",
+  "sha256": "d816a66c1c842b57845ff66be8919778329ca30bccfef3c26662727f84c84bf8",
+  "code_sha256": "2BambByEK1eEX/Zr6JGXeDKcowvM/vPCZmJyf4TIS/g=",
+  "bytes": 33381360,
+  "encryption": "aws:kms",
+  "verified_download_sha256": "d816a66c1c842b57845ff66be8919778329ca30bccfef3c26662727f84c84bf8",
+  "existing_private_versioned_bucket": true,
+  "no_access_or_bucket_configuration_changes": true
+}

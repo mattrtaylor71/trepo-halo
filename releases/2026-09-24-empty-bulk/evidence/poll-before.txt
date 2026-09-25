@@ -1,0 +1,83 @@
+✖ legacy completed empty bulk projects failed on successful HTTP for 1.16 polling without mutating source (2.323166ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+  
+  + 'completed'
+  - 'failed'
+  
+      at TestContext.<anonymous> (/Users/MattTaylor/Library/Caches/trepo-jill-implementation-20260924/empty-bulk-followup/tests/job-poll.test.cjs:5:266)
+      at async Test.run (node:internal/test_runner/test:932:9)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:297:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'completed',
+    expected: 'failed',
+    operator: 'strictEqual'
+  }
+
+✖ new empty-bulk failure remains HTTP200 while generic provider failure keeps HTTP500 (0.504292ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  500 !== 200
+  
+      at TestContext.<anonymous> (/Users/MattTaylor/Library/Caches/trepo-jill-implementation-20260924/empty-bulk-followup/tests/job-poll.test.cjs:6:274)
+      at async Test.run (node:internal/test_runner/test:932:9)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:629:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 500,
+    expected: 200,
+    operator: 'strictEqual'
+  }
+
+✔ empty receipt_inventory_deep retains existing completed semantics (0.55825ms)
+✔ empty quick_identify_deep retains existing completed semantics (0.864417ms)
+✔ empty product_analysis retains existing completed semantics (0.463625ms)
+✔ nonempty bulk retains exact result, status and owner (0.320292ms)
+✔ pending and processing stay accepted even with intermediate empty items (0.730583ms)
+✔ absent malformed result and committed history are not reinterpreted as a detected empty result (1.05225ms)
+✔ missing job remains404 and never creates a replacement (0.457792ms)
+ℹ tests 9
+ℹ suites 0
+ℹ pass 7
+ℹ fail 2
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 44.562667
+
+✖ failing tests:
+
+test at tests/job-poll.test.cjs:5:1
+✖ legacy completed empty bulk projects failed on successful HTTP for 1.16 polling without mutating source (2.323166ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+  
+  + 'completed'
+  - 'failed'
+  
+      at TestContext.<anonymous> (/Users/MattTaylor/Library/Caches/trepo-jill-implementation-20260924/empty-bulk-followup/tests/job-poll.test.cjs:5:266)
+      at async Test.run (node:internal/test_runner/test:932:9)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:297:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'completed',
+    expected: 'failed',
+    operator: 'strictEqual'
+  }
+
+test at tests/job-poll.test.cjs:6:1
+✖ new empty-bulk failure remains HTTP200 while generic provider failure keeps HTTP500 (0.504292ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  500 !== 200
+  
+      at TestContext.<anonymous> (/Users/MattTaylor/Library/Caches/trepo-jill-implementation-20260924/empty-bulk-followup/tests/job-poll.test.cjs:6:274)
+      at async Test.run (node:internal/test_runner/test:932:9)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:629:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 500,
+    expected: 200,
+    operator: 'strictEqual'
+  }
