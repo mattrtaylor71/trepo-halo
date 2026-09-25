@@ -1,0 +1,8 @@
+{
+  "budget_seconds": 0.04,
+  "elapsed_seconds": 0.3127,
+  "provider_started_on_main_thread": false,
+  "provider_finished_after_budget": true,
+  "missing_count": 1,
+  "thread_alive_after_return": false
+}

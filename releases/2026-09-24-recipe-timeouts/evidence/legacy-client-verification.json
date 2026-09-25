@@ -1,0 +1,24 @@
+{
+  "candidate_source_sha256": {
+    "app.py": "7ec3a867cafaabbe86e4fcae1120e1f2db941e10f75e6a700ee4ba9bee1a625d",
+    "recipe_inventory_llm.py": "b74ec0b075e265d01abdf5a60d61030537a66d6e9dd7cb9bb73e056f8266a03d",
+    "recipe_work_budget.py": "77432c2fbb608ec5fb1daa8e90bb37291e2af0c1b53b342e95e58eafd1161116"
+  },
+  "source_fixture_test_count": 11,
+  "source_fixture_tests_passed": true,
+  "actual_200_201_envelopes": 5,
+  "wire_fixture_sha256": "ac7c31ec3e9314e0d23e7ecde69e0cb11bbac64b5f6edbcfcfaa0d2ed711f84a",
+  "clients": {
+    "116": {
+      "parser_source_sha256": "00b86079fca8d244eb4b6f62d284290c5ec45326999c89673318b19a08ff2d6f",
+      "assertions_passed": 20,
+      "failed": 0
+    },
+    "117": {
+      "parser_source_sha256": "3f71ac4e500c701606e469c6a8aad267e403f9896da70fdfabd8c2fbac2f7d7a",
+      "assertions_passed": 20,
+      "failed": 0
+    }
+  },
+  "scope": "Frozen actual Swift model parsers; not full old-client UI or networking qualification."
+}

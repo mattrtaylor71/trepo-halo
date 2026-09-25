@@ -1,11 +1,12 @@
 {
-  "started_at": "2026-09-25T02:06:33.199869+00:00",
+  "started_at": "2026-09-25T02:31:57.817829+00:00",
   "function": "trepo-journey-qa-20260924-recipe-budget",
-  "probe_code_sha256": "2UXnScdpZWAfUJeYzeFDaQFC9I59jln2LGpFCLsI7GU=",
-  "production_candidate": "treyNhmCDGhD8c/kll5rOn1/FXtgwwVFGEpFq/3oUuo=",
+  "probe_code_sha256": "rYbBcA/S0PZnjaYFrPefbP2lW2abFkEsjOFkboCg8oQ=",
+  "production_candidate": "0aaNoc7cx/LNzuOdPbgHYC5uQ6RqR2upxiKew4YCmao=",
   "scope": "Exact deployed runtime/layers, unchanged candidate code plus isolated unshipped probe handler; no production database/customer mutations.",
   "source_hashes": {
-    "app.py": "ea2240582b9841dbb64793534a9b937a32ba7a5f90f788121b8bf896464e2de4",
+    "app.py": "7ec3a867cafaabbe86e4fcae1120e1f2db941e10f75e6a700ee4ba9bee1a625d",
+    "recipe_inventory_llm.py": "b74ec0b075e265d01abdf5a60d61030537a66d6e9dd7cb9bb73e056f8266a03d",
     "recipe_work_budget.py": "77432c2fbb608ec5fb1daa8e90bb37291e2af0c1b53b342e95e58eafd1161116"
   },
   "audio_sha256": "e77c661e9751ad165df1c0bdc09522b790705ce3880d4a4e6b41cdc5d121fde2",
@@ -23,6 +24,19 @@
         "runtime": "python3.9"
       }
     },
+    "availability": {
+      "status": 200,
+      "function_error": null,
+      "body": {
+        "ok": true,
+        "elapsed_seconds": 0.06,
+        "provider_ran_on_main_thread": true,
+        "late_provider_work": false,
+        "deterministic_missing_count": 1,
+        "timer_and_context_restored": true,
+        "no_network_or_database": true
+      }
+    },
     "valid_audio": {
       "status": 200,
       "function_error": null,
@@ -31,8 +45,8 @@
         "actual_recipe_refinement": true,
         "ingredient_count": 3,
         "instruction_count": 4,
-        "elapsed_s": 5.268,
-        "work_remaining_s": 99.732,
+        "elapsed_s": 6.285,
+        "work_remaining_s": 98.715,
         "source": "10-second synthetic recipe narration",
         "customer_mutations": false
       }
@@ -41,5 +55,5 @@
   "passed": true,
   "temporary_function_deleted_and_absent": true,
   "synthetic_audio_version_deleted_and_absent": true,
-  "finished_at": "2026-09-25T02:06:55.155376+00:00"
+  "finished_at": "2026-09-25T02:32:21.359942+00:00"
 }

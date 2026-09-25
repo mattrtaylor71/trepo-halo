@@ -1,57 +1,38 @@
 {
-  "created_at": "2026-09-25T02:03:15.894284+00:00",
-  "base_code_sha256": "odOt6M9EH7awMZrZftlBEAEn9VmMtYyODjM1G6rsohg=",
-  "code_sha256": "716RcowIqd13QQirRFUOyKmFapn6npXraky9FsnHq0k=",
-  "zip_sha256": "ef5e91728c08a9dd774108ab44550ec8a9856a99fa9e95eb6a4cbd16c9c7ab49",
-  "changes": [
-    {
-      "path": "app.py",
-      "sha256": "ea2240582b9841dbb64793534a9b937a32ba7a5f90f788121b8bf896464e2de4",
-      "kind": "modified",
-      "base_sha256": "f1812316143056c00ce5f2597098f76a4699ffa3287c065783505280098aa19c"
-    },
-    {
-      "path": "recipe_work_budget.py",
-      "sha256": "77432c2fbb608ec5fb1daa8e90bb37291e2af0c1b53b342e95e58eafd1161116",
-      "kind": "added",
-      "base_sha256": null
-    }
+  "created_at": "2026-09-25T02:32:31.440256+00:00",
+  "base_agent_v2_code_sha256": "kWrPSL7NY8d7d7rFeJT2uCUSqM4UTSggipB8hQ7pQmk=",
+  "code_sha256": "2Ayfml12YXGNBK5DqyoTFoNbvv5AB7z/NBePO30K+RE=",
+  "zip_sha256": "d80c9f9a5d7661718d04ae43ab2a1316835bbefe4007bcff34178f3b7d0af911",
+  "source_sha256": {
+    "app.py": "7ec3a867cafaabbe86e4fcae1120e1f2db941e10f75e6a700ee4ba9bee1a625d",
+    "recipe_inventory_llm.py": "b74ec0b075e265d01abdf5a60d61030537a66d6e9dd7cb9bb73e056f8266a03d",
+    "recipe_work_budget.py": "77432c2fbb608ec5fb1daa8e90bb37291e2af0c1b53b342e95e58eafd1161116"
+  },
+  "changed_from_v2": [
+    "app.py",
+    "recipe_inventory_llm.py"
   ],
+  "helper_unchanged": true,
   "all_other_zip_entries_byte_identical": true,
   "configuration_changed": false,
-  "no_deployment_performed": true,
-  "runtime_probe_excluded": true,
+  "deployed_by_agent": false,
+  "committed_by_agent": false,
   "focused_tests": {
-    "passed": 224,
+    "passed": 243,
     "failed": 0,
     "skipped": 0,
-    "log": "focused-final2.txt"
+    "log": "focused-final.txt"
   },
-  "host_runtime": "Python 3.8; Python 3.9 syntax verified; cloud Python 3.9 probe owned by parent",
-  "sql_dynamo_timeout_roundtrip_passed": true,
-  "new_regression_cases": {
-    "count": 28,
-    "before_failed": 22,
-    "before_passed": 6,
-    "after_passed": 28,
-    "before_log": "before-complete.txt"
+  "new_tests": {
+    "count": 8,
+    "after_passed": 8,
+    "deadline_before_failed": 2,
+    "deadline_before_control_passed": 1,
+    "before_log": "availability-before.txt",
+    "after_log": "availability-after-final.txt"
   },
-  "test_source_sha256": {
-    "tests/test_media_budget.py": "885d9198f35dc06cd3c6f8271d357bb8756f299c527bab8f27a5550e64c6d88d",
-    "tests/test_recipe_batch_recovery.py": "781fcd0669aa1e6fd18bc8c9b78a58a3ae8a25a0145bbbbaa0f0ce8a8cecba7e",
-    "tests/test_recipe_checkpoint.py": "add8eeeda7cd1ac63b035a48fcadadaa39aacccf35b2ae26308beaea3fee3f76",
-    "tests/test_recipe_completion_contract.py": "91638996475803a2d16c9d1a9dcdb9b90f6acbe415bb21ca5214173032d21a31",
-    "tests/test_recipe_explicit_recovery.py": "27fd21de559ca518e1d9f81d9b7f4af17d4f84e5ad7c3a77e65c945fe86cc548",
-    "tests/test_recipe_image_download.py": "adb4dd2f4499d4b2eee577bb098a19256a385b05bf8761f5df191495dd81aa75",
-    "tests/test_recipe_image_failure_policy.py": "4de87f2b9db42ee74a6a49ea3eb527727130ad709534540e83a90546f6259606",
-    "tests/test_recipe_provider_budget.py": "33005647ccf0794260ec1fe6cf1e0c5c5b71da04ff5f1d7b376929410f615ced",
-    "tests/test_recipe_recovery_web.py": "327a2d25f6b529c889b302642b0fa9e8f3bcc5bba273c14111fd3b8572dffbe8",
-    "tests/test_recipe_repair_preservation.py": "4d6224855c0c1aef91225b0517893cfd5d7011ac88509010531c8fcc837539b3",
-    "tests/test_saved_recipe_edit_atomic.py": "0b733a2b265cd3b99bfd225f6e0375c91ebe1fb0062c4cf5cf8f6a94c97cdf36",
-    "tests/test_saved_recipes_async_batch.py": "d5a11471b8ef032b03917735dd552d22d414a8a12974de9a7145d19a5be63906",
-    "tests/test_saved_recipes_dualwrite.py": "fe0ae78bac4153337b44a51c7edf801bdb2314f1c7998df0e38082ffaa1bc130",
-    "tests/test_saved_recipes_image_mirroring.py": "c78b0eb4199ec65902f623b5a4c600515b4cb176eacf8991a5ce5d958f82ec2f",
-    "tests/test_saved_recipes_manual_inputs.py": "24bd2619f9a1b5305dee010863dbbb0d563e44f90059bb81570d80abd623581d",
-    "tests/test_transcription_format_selection.py": "6ed972f159133724f427770379452bdcb26940a26909208d01bd0abafa1ddae5"
-  }
+  "python39_syntax_verified": true,
+  "test_host_python": "3.8",
+  "v2_frozen_source_unchanged": true,
+  "unshipped_probe": "availability_runtime_probe.py"
 }

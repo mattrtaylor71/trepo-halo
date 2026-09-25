@@ -1,4 +1,6 @@
 {
+  "test_inline_availability_budget.py": "a003abf52c770c8b4c863a3140e7c9902f7807bfd41a09298bb325860738ae57",
+  "test_legacy_work_limit.py": "0481846c71fbcfdbbbcc08a623d3bd5a6055dfa9c690456b1ef6d6e7444a1b9b",
   "test_media_budget.py": "885d9198f35dc06cd3c6f8271d357bb8756f299c527bab8f27a5550e64c6d88d",
   "test_recipe_batch_recovery.py": "781fcd0669aa1e6fd18bc8c9b78a58a3ae8a25a0145bbbbaa0f0ce8a8cecba7e",
   "test_recipe_checkpoint.py": "add8eeeda7cd1ac63b035a48fcadadaa39aacccf35b2ae26308beaea3fee3f76",

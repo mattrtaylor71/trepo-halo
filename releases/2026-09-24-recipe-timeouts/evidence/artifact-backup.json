@@ -1,0 +1,15 @@
+{
+  "at": "2026-09-25T02:32:33.128038+00:00",
+  "service": "recipes",
+  "status": "candidate archived; deployment separately recorded",
+  "bucket": "aws-sam-cli-managed-default-samclisourcebucket-3lbnr8ujbdol",
+  "key": "trepo-incident-releases/2026-09-24-journey/release/recipes/d1a68da1cedcc7f2cdcee39d3db807602e6e43a46a476ba9c6229ec3860299aa.zip",
+  "version_id": "XIgxU7tMX78WKy.8F1q_EojDnEn0TdaV",
+  "sha256": "d1a68da1cedcc7f2cdcee39d3db807602e6e43a46a476ba9c6229ec3860299aa",
+  "code_sha256": "0aaNoc7cx/LNzuOdPbgHYC5uQ6RqR2upxiKew4YCmao=",
+  "bytes": 31142710,
+  "encryption": "aws:kms",
+  "verified_download_sha256": "d1a68da1cedcc7f2cdcee39d3db807602e6e43a46a476ba9c6229ec3860299aa",
+  "existing_private_versioned_bucket": true,
+  "no_access_or_bucket_configuration_changes": true
+}

@@ -1487,6 +1487,7 @@ def _compute_recipe_availability(recipe_ingredients, kitchen_context, request_id
                 log_fn=_log_inventory_match_event,
                 source_label='saved',
                 substitution_callback=_suggest_saved_recipe_substitutions,
+                inline_single=True,
             )
             result = availability_map.get(recipe_payload['id']) or recipe_inventory_llm.deterministic_availability(
                 recipe_payload,
@@ -6945,10 +6946,30 @@ def _post_saved_recipe(owner, body, request_id=None):
                     async_job=job.get('job_id'),
                 )
                 return _build_saved_recipe_batch_accept_response(owner, job, event=body.get('_event'))
+            source_deferred = False
             if extraction is None:
-                extraction = _extract_content(submission['url'], request_id=request_id)
+                try:
+                    extraction = _extract_content(submission['url'], request_id=request_id)
+                except recipe_work_budget.WorkLimit:
+                    # Legacy URL clients accept a recipe receipt, not an async job.
+                    # Retain only an input that passes the existing pure validators;
+                    # the sync budget may then defer one longer repair attempt.
+                    normalized_url = _normalize_url(submission['url'])
+                    platform = _detect_platform(normalized_url, raw_url=submission['url'], request_id=request_id)
+                    extraction = {'url': normalized_url, 'resolved_url': normalized_url, 'platform': platform,
+                                  'title': 'Recipe', 'caption': '', 'content': '', 'source': 'deadline_retained'}
+                    source_deferred = True
             result, _ = _save_saved_recipe_record(conn, owner, extraction, request_id=request_id)
-            response = _build_saved_recipe_post_response(owner, [result])
+            if source_deferred and not recipe_content_complete(result.get('recipe')):
+                # 200/201 acknowledges the retained link, never ready recipe content.
+                retained = result['recipe']
+                response = _success({'owner': owner, 'recipe': retained,
+                    'deduped': bool(result.get('deduped')), 'code': 'recipe_content_incomplete',
+                    'content_outcome': recipe_content_outcome(retained),
+                    'recovery': recipe_content_recovery(retained)},
+                    status=200 if result.get('deduped') else 201)
+            else:
+                response = _build_saved_recipe_post_response(owner, [result])
             response_result_count = 1
         elif submission['kind'] == 'content':
             extraction = _build_text_recipe_extraction(
@@ -7240,6 +7261,8 @@ def _recover_saved_recipe(owner, item_id, body, request_id=None):
             from recovery_web import recovery_budget
             with recovery_budget():
                 structured, resolved = _extract_recovery_source(url, request_id=request_id)
+        except recipe_work_budget.WorkLimit:
+            return _error(422, 'This is taking too long. Your saved recipe has not changed. Try again or paste its recipe text.')
         except ValueError as exc:
             return _error(422, str(exc))
         source_updates = {'source_url':url, 'resolved_url':resolved, 'resolved_url_hash':_resolved_url_hash(resolved)}
@@ -7253,6 +7276,8 @@ def _recover_saved_recipe(owner, item_id, body, request_id=None):
             from recovery_web import recovery_budget
             with recovery_budget():
                 _, structured = _recipe_response_from_content(text, request_id=request_id)
+        except recipe_work_budget.WorkLimit:
+            return _error(422, 'This is taking too long. Your saved recipe has not changed. Try again or paste its recipe text.')
         except ValueError as exc:
             return _error(422, str(exc))
         structured = structured or {}

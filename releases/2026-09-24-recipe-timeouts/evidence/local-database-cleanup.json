@@ -1,11 +1,10 @@
 {
-  "recorded_at": "2026-09-25T02:03:48.293487+00:00",
-  "owned_dynamo_pid": 52412,
+  "owned_dynamo_pid": 69015,
   "owned_dynamo_port": 38001,
   "owned_dynamo_stopped": true,
   "telemetry_disabled": true,
-  "leftover_dynamo_fixture_tables": 0,
+  "leftover_dynamo_tables": 0,
   "mysql33317_left_running": true,
-  "mysql_existing_recipe_fixture_schema_count": 1,
-  "note": "Existing native fixture schemas were not removed."
+  "existing_native_fixture_schema_count": 1,
+  "existing_native_fixtures_unmodified": true
 }

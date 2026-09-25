@@ -21,7 +21,7 @@
          table = _saved_recipes_table(owner)
          with conn.cursor() as cur:
              cur.execute(
-@@ -1473,19 +1478,23 @@
+@@ -1473,19 +1478,24 @@
          'title': _safe_text((recipe or {}).get('title')),
          'ingredients': _clean_string_list((recipe or {}).get('ingredients') or recipe_ingredients or []),
      }
@@ -47,6 +47,7 @@
 +                log_fn=_log_inventory_match_event,
 +                source_label='saved',
 +                substitution_callback=_suggest_saved_recipe_substitutions,
++                inline_single=True,
 +            )
 +            result = availability_map.get(recipe_payload['id']) or recipe_inventory_llm.deterministic_availability(
 +                recipe_payload,
@@ -58,7 +59,7 @@
      return _local_deterministic_merge(result, kitchen_context)
  
  
-@@ -2659,6 +2668,7 @@
+@@ -2659,6 +2669,7 @@
      return extraction, prepared_image
  
  
@@ -66,7 +67,7 @@
  def _extract_recipe_from_social_preview_images(extraction, request_id=None):
      candidate_urls = _unique_texts([
          extraction.get('image_url'),
-@@ -3611,6 +3621,8 @@
+@@ -3611,6 +3622,8 @@
      if outtmpl:
          options['outtmpl'] = outtmpl
      if download:
@@ -75,7 +76,7 @@
          options['format'] = 'bestaudio/best'
          host = (urlparse(resolved_url).hostname or '').lower()
          if host == 'tiktok.com' or host.endswith('.tiktok.com'):
-@@ -3626,6 +3638,8 @@
+@@ -3626,6 +3639,8 @@
          try:
              with yt_dlp.YoutubeDL(options) as ydl:
                  return ydl.extract_info(resolved_url, download=download)
@@ -84,7 +85,7 @@
          except Exception as exc:
              last_exc = exc
              if attempt >= _YTDLP_MAX_ATTEMPTS or not _is_ytdlp_retryable_error(exc):
-@@ -3725,6 +3739,7 @@
+@@ -3725,6 +3740,7 @@
      }
  
  
@@ -92,7 +93,7 @@
  def _extract_recipe_text_via_rekognition(image_urls, request_id=None):
      """Fast/cheap OCR over carousel slide images via AWS Rekognition DetectText.
      Used for TikTok photo slideshows whose recipe lives in the slide text (not the
-@@ -3831,6 +3846,7 @@
+@@ -3831,6 +3847,7 @@
      _APIFY_IG_ATTEMPT_CACHE[cache_key] = (outcome, payload)
  
  
@@ -100,7 +101,7 @@
  def _extract_instagram_apify(resolved_url, request_id=None):
      token = _safe_text(os.getenv(_APIFY_TOKEN_ENV))
      if not token:
-@@ -4298,6 +4314,7 @@
+@@ -4298,6 +4315,7 @@
      raise ServiceError(f'Could not extract content from this {platform} URL.', status_code=502, extra={'warnings': warnings})
  
  
@@ -108,7 +109,7 @@
  def _extract_content(url, request_id=None):
      normalized_url = _normalize_url(url)
      resolved_url = _resolve_url(normalized_url, request_id=request_id)
-@@ -4376,10 +4393,8 @@
+@@ -4376,10 +4394,8 @@
  # on every saved-recipes route (verified across all 29 integrations), so a slow sync save
  # can cross the ceiling and 504/503 — losing the very recoveries phase-1 added.
  #
@@ -121,7 +122,7 @@
  #
  # A skipped attempt is NOT a lost recovery: the job is self-heal captured (payload_s3_key +
  # input_refs + ttl), and scripts/redrive_failed_saves.py speaks the async path — so an
-@@ -4470,9 +4485,14 @@
+@@ -4470,9 +4486,14 @@
  
      Returns (fits, remaining, needed) so the caller can log why it skipped."""
      remaining = _sync_time_remaining()
@@ -136,7 +137,7 @@
      return remaining >= needed, remaining, needed
  
  
-@@ -4559,18 +4579,21 @@
+@@ -4559,18 +4580,21 @@
  def _download_media_to(temp_dir, media_url):
      """Stream a direct CDN media link to disk. Bounded so a surprise large asset can't
      blow the Lambda's /tmp or Whisper's 25MB upload ceiling."""
@@ -162,7 +163,7 @@
                  handle.write(chunk)
      if not total:
          raise RuntimeError('Media download was empty.')
-@@ -4588,11 +4611,6 @@
+@@ -4588,11 +4612,6 @@
      media_url = _safe_text((source_context or {}).get('media_url'))
      media_source = 'apify_media' if media_url else 'yt-dlp'
      try:
@@ -174,7 +175,7 @@
          with tempfile.TemporaryDirectory() as temp_dir_name:
              temp_dir = Path(temp_dir_name)
              if media_url:
-@@ -4600,18 +4618,28 @@
+@@ -4600,18 +4619,28 @@
                  # binary in the deployment package and no layer providing one).
                  media_path = _download_media_to(temp_dir, media_url)
              else:
@@ -214,7 +215,7 @@
          transcript = _safe_text(getattr(response, 'text', ''))
          segments = getattr(response, 'segments', None) or []
          if isinstance(segments, list):
-@@ -4895,6 +4923,7 @@
+@@ -4895,6 +4924,7 @@
      return bool(_RECIPE_SIGNAL_RE.search(text))
  
  
@@ -222,7 +223,7 @@
  def _recipe_response_from_content(content, request_id=None, source_context=None):
      if not _content_can_support_a_recipe(content):
          _log_event(request_id, 'recipe_refine_refused_ungrounded',
-@@ -6327,17 +6356,19 @@
+@@ -6327,17 +6357,19 @@
          recipe_response = {'recipe': _format_recipe_text(structured_recipe), 'model': 'explore',
                             'recipe_source_used': 'explore'}
      else:
@@ -247,7 +248,7 @@
  
      # A save can also come back GROUNDED but incomplete: a video whose caption lists the
      # ingredients while the method is only ever spoken aloud. Those pass the grounding check,
-@@ -6361,7 +6392,7 @@
+@@ -6361,7 +6393,7 @@
          structured_recipe = {
              'title': _safe_text(extraction.get('title')) or _safe_text(structured_recipe and structured_recipe.get('title')) or 'Recipe',
              'ingredients': [], 'instructions': [],
@@ -256,7 +257,7 @@
          }
          recipe_response = {'recipe': _format_recipe_text(structured_recipe), 'model': None}
  
-@@ -6384,12 +6415,20 @@
+@@ -6384,12 +6416,20 @@
              source_image_urls = [hinted] + list(source_image_urls or [])
          image_fields = _build_source_backed_saved_recipe_image_fields(source_image_urls=source_image_urls)
      else:
@@ -283,7 +284,58 @@
  
      table = _saved_recipes_table(owner)
      try:
-@@ -7408,6 +7447,8 @@
+@@ -6906,10 +6946,30 @@
+                     async_job=job.get('job_id'),
+                 )
+                 return _build_saved_recipe_batch_accept_response(owner, job, event=body.get('_event'))
++            source_deferred = False
+             if extraction is None:
+-                extraction = _extract_content(submission['url'], request_id=request_id)
++                try:
++                    extraction = _extract_content(submission['url'], request_id=request_id)
++                except recipe_work_budget.WorkLimit:
++                    # Legacy URL clients accept a recipe receipt, not an async job.
++                    # Retain only an input that passes the existing pure validators;
++                    # the sync budget may then defer one longer repair attempt.
++                    normalized_url = _normalize_url(submission['url'])
++                    platform = _detect_platform(normalized_url, raw_url=submission['url'], request_id=request_id)
++                    extraction = {'url': normalized_url, 'resolved_url': normalized_url, 'platform': platform,
++                                  'title': 'Recipe', 'caption': '', 'content': '', 'source': 'deadline_retained'}
++                    source_deferred = True
+             result, _ = _save_saved_recipe_record(conn, owner, extraction, request_id=request_id)
+-            response = _build_saved_recipe_post_response(owner, [result])
++            if source_deferred and not recipe_content_complete(result.get('recipe')):
++                # 200/201 acknowledges the retained link, never ready recipe content.
++                retained = result['recipe']
++                response = _success({'owner': owner, 'recipe': retained,
++                    'deduped': bool(result.get('deduped')), 'code': 'recipe_content_incomplete',
++                    'content_outcome': recipe_content_outcome(retained),
++                    'recovery': recipe_content_recovery(retained)},
++                    status=200 if result.get('deduped') else 201)
++            else:
++                response = _build_saved_recipe_post_response(owner, [result])
+             response_result_count = 1
+         elif submission['kind'] == 'content':
+             extraction = _build_text_recipe_extraction(
+@@ -7201,6 +7261,8 @@
+             from recovery_web import recovery_budget
+             with recovery_budget():
+                 structured, resolved = _extract_recovery_source(url, request_id=request_id)
++        except recipe_work_budget.WorkLimit:
++            return _error(422, 'This is taking too long. Your saved recipe has not changed. Try again or paste its recipe text.')
+         except ValueError as exc:
+             return _error(422, str(exc))
+         source_updates = {'source_url':url, 'resolved_url':resolved, 'resolved_url_hash':_resolved_url_hash(resolved)}
+@@ -7214,6 +7276,8 @@
+             from recovery_web import recovery_budget
+             with recovery_budget():
+                 _, structured = _recipe_response_from_content(text, request_id=request_id)
++        except recipe_work_budget.WorkLimit:
++            return _error(422, 'This is taking too long. Your saved recipe has not changed. Try again or paste its recipe text.')
+         except ValueError as exc:
+             return _error(422, str(exc))
+         structured = structured or {}
+@@ -7408,6 +7472,8 @@
  
  def _is_transient_failure(exc):
      """True when the failure looks like infrastructure, not content."""
@@ -292,7 +344,7 @@
      if isinstance(exc, ServiceError):
          # Upstream refusing us (bot wall) is not transient — a retry hits the same wall.
          if _is_upstream_block(exc):
-@@ -7465,9 +7506,18 @@
+@@ -7465,9 +7531,18 @@
          if extraction is None:
              # Transient-only retry: a provider 5xx/timeout/throttle gets 2 more goes with
              # backoff; a content 422 raises straight through and waits for a fix + sweep.
@@ -314,7 +366,7 @@
          result, _ = _save_saved_recipe_record(conn, owner, extraction, request_id=request_id)
          recipe_id = ((result or {}).get('recipe') or {}).get('id')
          if not _safe_text(recipe_id):
-@@ -8785,8 +8835,7 @@
+@@ -8785,8 +8860,7 @@
      except Exception:
          pass
  
@@ -324,7 +376,7 @@
      try:
          _mark_sync_request_start(
              fields.get('invocation') == 'http' and not _safe_text((event or {}).get('async_task'))
-@@ -8797,7 +8846,8 @@
+@@ -8797,7 +8871,8 @@
      outcome = 'exception'
      status_code = None
      try:
@@ -334,11 +386,77 @@
          outcome = 'returned'
          if isinstance(result, dict):
              status_code = result.get('statusCode')
-@@ -8883,4 +8933,3 @@
+@@ -8883,4 +8958,3 @@
                           'ingredient_matches': availability['ingredient_matches']})
      except ConfirmationRejected as error:
          return _error(error.status, error.code)
 -
+--- a/recipe_inventory_llm.py
++++ b/recipe_inventory_llm.py
+@@ -933,9 +933,16 @@
+     return result
+ 
+ 
+-def match_recipes_fast(recipes, kitchen_context, request_id=None, log_fn=None, source_label='inventory', substitution_callback=None):
+-    """Hybrid matching: deterministic first, then parallel compact LLM calls per recipe."""
++def match_recipes_fast(recipes, kitchen_context, request_id=None, log_fn=None, source_label='inventory', substitution_callback=None, *, inline_single=False):
++    """Hybrid matching; an opt-in single call can stay under its caller's deadline.
++
++    A main-thread timer cannot interrupt a provider in an executor worker: executor
++    shutdown waits for it. Keep optional single-recipe enrichment on the caller's
++    thread. Existing batch callers retain their parallel execution by default.
++    """
+     recipes = [dict(recipe or {}) for recipe in (recipes or []) if _safe_text((recipe or {}).get('id') or (recipe or {}).get('_id'))]
++    if inline_single and len(recipes) > 1:
++        raise ValueError('inline_single requires at most one recipe')
+     meta = {
+         'used_llm': False,
+         'used_fallback': False,
+@@ -987,21 +994,29 @@
+     normalized = dict(deterministic_results)  # start with deterministic, upgrade with LLM
+     llm_success_count = 0
+ 
+-    max_workers = min(len(recipes), int(os.getenv('OPENAI_INVENTORY_MAX_WORKERS', '24')))
+-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+-        futures = {
+-            executor.submit(
+-                _compact_llm_call_single, client, model, kitchen_items, recipe, kitchen_context, substitution_callback
+-            ): recipe
+-            for recipe in recipes
+-        }
+-        for future in as_completed(futures):
+-            recipe_id, llm_result = future.result()
+-            if llm_result is not None:
+-                # Merge: if either LLM or deterministic says "have", it's "have"
+-                det_result = deterministic_results.get(recipe_id)
+-                normalized[recipe_id] = _merge_availability(det_result, llm_result) if det_result else llm_result
+-                llm_success_count += 1
++    def keep_result(result):
++        nonlocal llm_success_count
++        recipe_id, llm_result = result
++        if llm_result is not None:
++            # Merge: if either LLM or deterministic says "have", it's "have"
++            det_result = deterministic_results.get(recipe_id)
++            normalized[recipe_id] = _merge_availability(det_result, llm_result) if det_result else llm_result
++            llm_success_count += 1
++
++    if inline_single:
++        keep_result(_compact_llm_call_single(
++            client, model, kitchen_items, recipes[0], kitchen_context, substitution_callback))
++    else:
++        max_workers = min(len(recipes), int(os.getenv('OPENAI_INVENTORY_MAX_WORKERS', '24')))
++        with ThreadPoolExecutor(max_workers=max_workers) as executor:
++            futures = {
++                executor.submit(
++                    _compact_llm_call_single, client, model, kitchen_items, recipe, kitchen_context, substitution_callback
++                ): recipe
++                for recipe in recipes
++            }
++            for future in as_completed(futures):
++                keep_result(future.result())
+ 
+     meta['latency_ms'] = int((time.monotonic() - started_at) * 1000)
+     meta['used_llm'] = llm_success_count > 0
 --- a/recipe_work_budget.py
 +++ b/recipe_work_budget.py
 @@ -0,0 +1,126 @@

@@ -1,0 +1,286 @@
+[
+  {
+    "case": "test_legacy_timeout_receipt_retries_retain_one_identity_and_schedule_at_most_once[True]",
+    "http_status": 201,
+    "body": {
+      "owner": "acting",
+      "recipe": {
+        "_owner": "acting",
+        "title": "Recipe",
+        "ingredients": [],
+        "instructions": [],
+        "notes": [
+          "We couldn't read the full recipe from this post yet \u2014 we're still working on it."
+        ],
+        "_updatedDate": null,
+        "source_type": "web_recipe",
+        "source_url": "https://example.invalid/new-slow-recipe",
+        "resolved_url": "https://example.invalid/new-slow-recipe",
+        "resolved_url_hash": "b7d8a7dbeacc6c3ccd026dd10dd384b7d6951d6879c7c88636f0599314bb5f2e",
+        "image_url": null,
+        "image_urls": [],
+        "source_image_url": null,
+        "source_image_urls": [],
+        "image_storage_key": null,
+        "raw_caption": "",
+        "raw_content": "",
+        "extraction_source": "deadline_retained",
+        "recipe_source_used": null,
+        "author_name": null,
+        "caption_field": null,
+        "status": "repairing",
+        "meal_category": null,
+        "_createdDate": "2026-09-24T19:32:17",
+        "id": "e4228b4e-0119-4cc7-b673-cd36459cf68f",
+        "platform": "web_recipe",
+        "content": null,
+        "caption": null,
+        "content_outcome": "processing",
+        "content_revision": "fa02fee6426f7602db16f8ab3b606530d69f14b427679e083cf543621c10faf3",
+        "recovery": {
+          "recipe_id": "e4228b4e-0119-4cc7-b673-cd36459cf68f",
+          "actions": [
+            "replace_source",
+            "paste_recipe",
+            "open_original"
+          ]
+        }
+      },
+      "deduped": false,
+      "code": "recipe_content_incomplete",
+      "content_outcome": "processing",
+      "recovery": {
+        "recipe_id": "e4228b4e-0119-4cc7-b673-cd36459cf68f",
+        "actions": [
+          "replace_source",
+          "paste_recipe",
+          "open_original"
+        ]
+      }
+    }
+  },
+  {
+    "case": "test_legacy_timeout_receipt_retries_retain_one_identity_and_schedule_at_most_once[True]",
+    "http_status": 200,
+    "body": {
+      "owner": "acting",
+      "recipe": {
+        "_owner": "acting",
+        "title": "Recipe",
+        "ingredients": [],
+        "instructions": [],
+        "notes": [
+          "We couldn't read the full recipe from this post yet \u2014 we're still working on it."
+        ],
+        "_updatedDate": null,
+        "source_type": "web_recipe",
+        "source_url": "https://example.invalid/new-slow-recipe",
+        "resolved_url": "https://example.invalid/new-slow-recipe",
+        "resolved_url_hash": "b7d8a7dbeacc6c3ccd026dd10dd384b7d6951d6879c7c88636f0599314bb5f2e",
+        "image_url": null,
+        "image_urls": [],
+        "source_image_url": null,
+        "source_image_urls": [],
+        "image_storage_key": null,
+        "raw_caption": "",
+        "raw_content": "",
+        "extraction_source": "deadline_retained",
+        "recipe_source_used": null,
+        "author_name": null,
+        "caption_field": null,
+        "status": "repairing",
+        "meal_category": "other",
+        "_createdDate": "2026-09-24T19:32:17",
+        "id": "e4228b4e-0119-4cc7-b673-cd36459cf68f",
+        "platform": "web_recipe",
+        "content": null,
+        "caption": null,
+        "content_outcome": "processing",
+        "content_revision": "fa02fee6426f7602db16f8ab3b606530d69f14b427679e083cf543621c10faf3",
+        "recovery": {
+          "recipe_id": "e4228b4e-0119-4cc7-b673-cd36459cf68f",
+          "actions": [
+            "replace_source",
+            "paste_recipe",
+            "open_original"
+          ]
+        }
+      },
+      "deduped": true,
+      "code": "recipe_content_incomplete",
+      "content_outcome": "processing",
+      "recovery": {
+        "recipe_id": "e4228b4e-0119-4cc7-b673-cd36459cf68f",
+        "actions": [
+          "replace_source",
+          "paste_recipe",
+          "open_original"
+        ]
+      }
+    }
+  },
+  {
+    "case": "test_legacy_timeout_receipt_retries_retain_one_identity_and_schedule_at_most_once[False]",
+    "http_status": 201,
+    "body": {
+      "owner": "acting",
+      "recipe": {
+        "_owner": "acting",
+        "title": "Recipe",
+        "ingredients": [],
+        "instructions": [],
+        "notes": [
+          "We couldn't read the full recipe from this post yet \u2014 we're still working on it."
+        ],
+        "_updatedDate": null,
+        "source_type": "web_recipe",
+        "source_url": "https://example.invalid/new-slow-recipe",
+        "resolved_url": "https://example.invalid/new-slow-recipe",
+        "resolved_url_hash": "b7d8a7dbeacc6c3ccd026dd10dd384b7d6951d6879c7c88636f0599314bb5f2e",
+        "image_url": null,
+        "image_urls": [],
+        "source_image_url": null,
+        "source_image_urls": [],
+        "image_storage_key": null,
+        "raw_caption": "",
+        "raw_content": "",
+        "extraction_source": "deadline_retained",
+        "recipe_source_used": null,
+        "author_name": null,
+        "caption_field": null,
+        "status": "failed",
+        "meal_category": null,
+        "_createdDate": "2026-09-24T19:32:17",
+        "id": "0a8e8332-0613-4be9-8d7c-d4794d917044",
+        "platform": "web_recipe",
+        "content": null,
+        "caption": null,
+        "content_outcome": "link_retained",
+        "content_revision": "98339aade49b8ec61a26230f4d22757c358b454761649a8df1b70034011a600d",
+        "recovery": {
+          "recipe_id": "0a8e8332-0613-4be9-8d7c-d4794d917044",
+          "actions": [
+            "replace_source",
+            "paste_recipe",
+            "open_original"
+          ]
+        }
+      },
+      "deduped": false,
+      "code": "recipe_content_incomplete",
+      "content_outcome": "link_retained",
+      "recovery": {
+        "recipe_id": "0a8e8332-0613-4be9-8d7c-d4794d917044",
+        "actions": [
+          "replace_source",
+          "paste_recipe",
+          "open_original"
+        ]
+      }
+    }
+  },
+  {
+    "case": "test_legacy_timeout_receipt_retries_retain_one_identity_and_schedule_at_most_once[False]",
+    "http_status": 200,
+    "body": {
+      "owner": "acting",
+      "recipe": {
+        "_owner": "acting",
+        "title": "Recipe",
+        "ingredients": [],
+        "instructions": [],
+        "notes": [
+          "We couldn't read the full recipe from this post yet \u2014 we're still working on it."
+        ],
+        "_updatedDate": null,
+        "source_type": "web_recipe",
+        "source_url": "https://example.invalid/new-slow-recipe",
+        "resolved_url": "https://example.invalid/new-slow-recipe",
+        "resolved_url_hash": "b7d8a7dbeacc6c3ccd026dd10dd384b7d6951d6879c7c88636f0599314bb5f2e",
+        "image_url": null,
+        "image_urls": [],
+        "source_image_url": null,
+        "source_image_urls": [],
+        "image_storage_key": null,
+        "raw_caption": "",
+        "raw_content": "",
+        "extraction_source": "deadline_retained",
+        "recipe_source_used": null,
+        "author_name": null,
+        "caption_field": null,
+        "status": "failed",
+        "meal_category": "other",
+        "_createdDate": "2026-09-24T19:32:17",
+        "id": "0a8e8332-0613-4be9-8d7c-d4794d917044",
+        "platform": "web_recipe",
+        "content": null,
+        "caption": null,
+        "content_outcome": "link_retained",
+        "content_revision": "98339aade49b8ec61a26230f4d22757c358b454761649a8df1b70034011a600d",
+        "recovery": {
+          "recipe_id": "0a8e8332-0613-4be9-8d7c-d4794d917044",
+          "actions": [
+            "replace_source",
+            "paste_recipe",
+            "open_original"
+          ]
+        }
+      },
+      "deduped": true,
+      "code": "recipe_content_incomplete",
+      "content_outcome": "link_retained",
+      "recovery": {
+        "recipe_id": "0a8e8332-0613-4be9-8d7c-d4794d917044",
+        "actions": [
+          "replace_source",
+          "paste_recipe",
+          "open_original"
+        ]
+      }
+    }
+  },
+  {
+    "case": "test_legacy_timeout_dedupe_preserves_existing_complete_recipe",
+    "http_status": 200,
+    "body": {
+      "owner": "acting",
+      "recipe": {
+        "_owner": "acting",
+        "title": "Before",
+        "ingredients": [
+          "beef"
+        ],
+        "instructions": [
+          "cook"
+        ],
+        "notes": [],
+        "_updatedDate": "2026-09-24T19:32:17",
+        "source_type": "manual",
+        "source_url": "https://example.invalid/fixture/acting",
+        "resolved_url": "https://example.invalid/fixture/acting",
+        "resolved_url_hash": "69e4f95b978da53e9a09e7f04715efac44670ccf8ac789ff8e7eace994107c71",
+        "image_url": null,
+        "image_urls": [],
+        "source_image_url": null,
+        "source_image_urls": [],
+        "image_storage_key": null,
+        "raw_caption": null,
+        "raw_content": null,
+        "extraction_source": null,
+        "recipe_source_used": null,
+        "author_name": null,
+        "caption_field": null,
+        "status": "ready",
+        "meal_category": null,
+        "_createdDate": "2026-09-24T19:32:17",
+        "id": "recipe",
+        "platform": "manual",
+        "content": null,
+        "caption": null,
+        "content_outcome": "ready",
+        "content_revision": "4ad087e5179842dde6fc9732cdd3f09a716a3effd3754ce8eba4c315285e53e9"
+      },
+      "deduped": true
+    }
+  }
+]
