@@ -1,0 +1,470 @@
+--- a/app.py
++++ b/app.py
+@@ -2,6 +2,7 @@
+ from safe_logging import safe_print as print, redact_text
+ import base64
+ import recipe_batch_checkpoint
++import recipe_work_budget
+ import admission
+ from types import SimpleNamespace
+ import hashlib
+@@ -1061,7 +1062,11 @@
+         if provided in RECIPE_MEAL_CATEGORIES:
+             category = provided
+         else:
+-            category = _classify_meal_category(title, ingredients, request_id=request_id)
++            try:
++                with recipe_work_budget.phase(max_seconds=6):
++                    category = _classify_meal_category(title, ingredients, request_id=request_id)
++            except recipe_work_budget.WorkLimit:
++                category = _meal_category_heuristic(title, ingredients) or 'other'
+         table = _saved_recipes_table(owner)
+         with conn.cursor() as cur:
+             cur.execute(
+@@ -1473,19 +1478,23 @@
+         'title': _safe_text((recipe or {}).get('title')),
+         'ingredients': _clean_string_list((recipe or {}).get('ingredients') or recipe_ingredients or []),
+     }
+-    availability_map, _ = recipe_inventory_llm.match_recipes_fast(
+-        [recipe_payload],
+-        kitchen_context,
+-        request_id=request_id,
+-        log_fn=_log_inventory_match_event,
+-        source_label='saved',
+-        substitution_callback=_suggest_saved_recipe_substitutions,
+-    )
+-    result = availability_map.get(recipe_payload['id']) or recipe_inventory_llm.deterministic_availability(
+-        recipe_payload,
+-        kitchen_context,
+-        substitution_callback=_suggest_saved_recipe_substitutions,
+-    )
++    try:
++        with recipe_work_budget.phase():
++            availability_map, _ = recipe_inventory_llm.match_recipes_fast(
++                [recipe_payload],
++                kitchen_context,
++                request_id=request_id,
++                log_fn=_log_inventory_match_event,
++                source_label='saved',
++                substitution_callback=_suggest_saved_recipe_substitutions,
++            )
++            result = availability_map.get(recipe_payload['id']) or recipe_inventory_llm.deterministic_availability(
++                recipe_payload,
++                kitchen_context,
++                substitution_callback=_suggest_saved_recipe_substitutions,
++            )
++    except recipe_work_budget.WorkLimit:
++        result = recipe_inventory_llm.deterministic_availability(recipe_payload, kitchen_context)
+     return _local_deterministic_merge(result, kitchen_context)
+ 
+ 
+@@ -2659,6 +2668,7 @@
+     return extraction, prepared_image
+ 
+ 
++@recipe_work_budget.bounded
+ def _extract_recipe_from_social_preview_images(extraction, request_id=None):
+     candidate_urls = _unique_texts([
+         extraction.get('image_url'),
+@@ -3611,6 +3621,8 @@
+     if outtmpl:
+         options['outtmpl'] = outtmpl
+     if download:
++        options.update(max_filesize=recipe_work_budget.MAX_MEDIA_BYTES,
++                       progress_hooks=[recipe_work_budget.download_progress], noprogress=True)
+         options['format'] = 'bestaudio/best'
+         host = (urlparse(resolved_url).hostname or '').lower()
+         if host == 'tiktok.com' or host.endswith('.tiktok.com'):
+@@ -3626,6 +3638,8 @@
+         try:
+             with yt_dlp.YoutubeDL(options) as ydl:
+                 return ydl.extract_info(resolved_url, download=download)
++        except recipe_work_budget.WorkLimit:
++            raise
+         except Exception as exc:
+             last_exc = exc
+             if attempt >= _YTDLP_MAX_ATTEMPTS or not _is_ytdlp_retryable_error(exc):
+@@ -3725,6 +3739,7 @@
+     }
+ 
+ 
++@recipe_work_budget.bounded
+ def _extract_recipe_text_via_rekognition(image_urls, request_id=None):
+     """Fast/cheap OCR over carousel slide images via AWS Rekognition DetectText.
+     Used for TikTok photo slideshows whose recipe lives in the slide text (not the
+@@ -3831,6 +3846,7 @@
+     _APIFY_IG_ATTEMPT_CACHE[cache_key] = (outcome, payload)
+ 
+ 
++@recipe_work_budget.bounded
+ def _extract_instagram_apify(resolved_url, request_id=None):
+     token = _safe_text(os.getenv(_APIFY_TOKEN_ENV))
+     if not token:
+@@ -4298,6 +4314,7 @@
+     raise ServiceError(f'Could not extract content from this {platform} URL.', status_code=502, extra={'warnings': warnings})
+ 
+ 
++@recipe_work_budget.bounded
+ def _extract_content(url, request_id=None):
+     normalized_url = _normalize_url(url)
+     resolved_url = _resolve_url(normalized_url, request_id=request_id)
+@@ -4376,10 +4393,8 @@
+ # on every saved-recipes route (verified across all 29 integrations), so a slow sync save
+ # can cross the ceiling and 504/503 — losing the very recoveries phase-1 added.
+ #
+-# ASYNC invocations are exempt: a job worker has the Lambda's 120s and no gateway in front
+-# of it, so it must always attempt the audio leg. The budget applies ONLY to a synchronous
+-# HTTP request, where blowing the ceiling turns a would-be 422 into a 503 and a would-be
+-# recovery into nothing at all.
++# Async work has a separate native Lambda deadline (recipe_work_budget). Both paths
++# reserve time to persist an honest terminal outcome before their response deadline.
+ #
+ # A skipped attempt is NOT a lost recovery: the job is self-heal captured (payload_s3_key +
+ # input_refs + ttl), and scripts/redrive_failed_saves.py speaks the async path — so an
+@@ -4470,9 +4485,14 @@
+ 
+     Returns (fits, remaining, needed) so the caller can log why it skipped."""
+     remaining = _sync_time_remaining()
++    native_work = recipe_work_budget.remaining()
++    if native_work is not None:
++        remaining = min(remaining, native_work) if remaining is not None else native_work
+     if remaining is None:
+         return True, None, None
+     needed = _RUNG_COST_SECONDS.get(rung, 5.0) + _RESERVE_AFTER_LADDER_SECONDS
++    if remaining < needed:
++        recipe_work_budget.note_rung_skip()
+     return remaining >= needed, remaining, needed
+ 
+ 
+@@ -4559,18 +4579,21 @@
+ def _download_media_to(temp_dir, media_url):
+     """Stream a direct CDN media link to disk. Bounded so a surprise large asset can't
+     blow the Lambda's /tmp or Whisper's 25MB upload ceiling."""
+-    limit = int(os.getenv('TRANSCRIBE_MEDIA_MAX_BYTES', str(24 * 1024 * 1024)))
++    limit = min(recipe_work_budget.MAX_MEDIA_BYTES, int(os.getenv('TRANSCRIBE_MEDIA_MAX_BYTES', str(recipe_work_budget.MAX_MEDIA_BYTES))))
+     path = temp_dir / 'apify_media.mp4'
+     total = 0
+-    with requests.get(media_url, stream=True, timeout=_REQUEST_TIMEOUT_SECONDS) as resp:
++    with recipe_work_budget.phase(recipe_work_budget.DOWNLOAD_SECONDS), requests.get(media_url, stream=True, timeout=min(_REQUEST_TIMEOUT_SECONDS, recipe_work_budget.phase_seconds(recipe_work_budget.DOWNLOAD_SECONDS))) as resp:
+         resp.raise_for_status()
++        try:
++            recipe_work_budget.check_bytes(int(resp.headers.get('Content-Length', 0)), limit)
++        except (TypeError, ValueError):
++            pass
+         with path.open('wb') as handle:
+             for chunk in resp.iter_content(chunk_size=262144):
+                 if not chunk:
+                     continue
+                 total += len(chunk)
+-                if total > limit:
+-                    raise RuntimeError(f'Media exceeded {limit} bytes; refusing to transcribe.')
++                recipe_work_budget.check_bytes(total, limit)
+                 handle.write(chunk)
+     if not total:
+         raise RuntimeError('Media download was empty.')
+@@ -4588,11 +4611,6 @@
+     media_url = _safe_text((source_context or {}).get('media_url'))
+     media_source = 'apify_media' if media_url else 'yt-dlp'
+     try:
+-        client = OpenAI(
+-            api_key=os.getenv('OPENAI_API_KEY'),
+-            timeout=_OPENAI_TIMEOUT_SECONDS,
+-            max_retries=_OPENAI_MAX_RETRIES,
+-        )
+         with tempfile.TemporaryDirectory() as temp_dir_name:
+             temp_dir = Path(temp_dir_name)
+             if media_url:
+@@ -4600,18 +4618,28 @@
+                 # binary in the deployment package and no layer providing one).
+                 media_path = _download_media_to(temp_dir, media_url)
+             else:
+-                info = _extract_ytdlp_info(
+-                    resolved_url,
+-                    download=True,
+-                    outtmpl=str(temp_dir / '%(id)s.%(ext)s'),
++                with recipe_work_budget.phase(recipe_work_budget.DOWNLOAD_SECONDS):
++                    info = _extract_ytdlp_info(
++                        resolved_url,
++                        download=True,
++                        outtmpl=str(temp_dir / '%(id)s.%(ext)s'),
++                    )
++                recipe_work_budget.check_bytes(info.get('filesize'))
++                media_path = _choose_downloaded_media_file(temp_dir, info)
++            # Both download routes must pass the same final guard before upload.
++            recipe_work_budget.check_bytes(media_path.stat().st_size)
++            with recipe_work_budget.phase(recipe_work_budget.TRANSCRIBE_SECONDS, reserve=5), media_path.open('rb') as media_file:
++                client = OpenAI(
++                    api_key=os.getenv('OPENAI_API_KEY'),
++                    timeout=recipe_work_budget.phase_seconds(recipe_work_budget.TRANSCRIBE_SECONDS, reserve=5),
++                    max_retries=0,
+                 )
+-                media_path = _choose_downloaded_media_file(temp_dir, info)
+-            with media_path.open('rb') as media_file:
+-                response = client.audio.transcriptions.create(
+-                    model=_DEFAULT_TRANSCRIPTION_MODEL,
+-                    file=media_file,
+-                    response_format='verbose_json',
+-                )
++                try:
++                    response = client.audio.transcriptions.create(
++                        model=_DEFAULT_TRANSCRIPTION_MODEL, file=media_file, response_format='verbose_json',
++                    )
++                finally:
++                    client.close()
+         transcript = _safe_text(getattr(response, 'text', ''))
+         segments = getattr(response, 'segments', None) or []
+         if isinstance(segments, list):
+@@ -4895,6 +4923,7 @@
+     return bool(_RECIPE_SIGNAL_RE.search(text))
+ 
+ 
++@recipe_work_budget.bounded
+ def _recipe_response_from_content(content, request_id=None, source_context=None):
+     if not _content_can_support_a_recipe(content):
+         _log_event(request_id, 'recipe_refine_refused_ungrounded',
+@@ -6327,17 +6356,19 @@
+         recipe_response = {'recipe': _format_recipe_text(structured_recipe), 'model': 'explore',
+                            'recipe_source_used': 'explore'}
+     else:
+-        recipe_response, structured_recipe = _analyze_extraction(
+-            extraction,
+-            request_id=request_id,
+-        )
++        try:
++            recipe_response, structured_recipe = _analyze_extraction(extraction, request_id=request_id)
++        except recipe_work_budget.WorkLimit:
++            recipe_response = {'recipe': 'Not enough recipe information.', 'model': None}
++            structured_recipe = {}
+     # Nothing usable in the source. Do NOT invent a recipe, and do NOT throw the save away
+     # either: keep what is genuinely known (title, link, image), mark it honestly, and hand it
+     # to the repair agent, which can spend minutes on audio transcription that a 29s request
+     # cannot. The user keeps their save and gets the real recipe shortly after, instead of
+     # either losing it or being handed a confident fabrication.
+     ungrounded = recipe_response['recipe'] == 'Not enough recipe information.'
+-    _repairable_platform = extraction.get('platform') not in {'text', 'image', 'explore'}
++    terminal_reason = recipe_work_budget.terminal_reason() or extraction.get('terminal_work_reason')
++    _repairable_platform = extraction.get('platform') not in {'text', 'image', 'explore'} and not terminal_reason
+ 
+     # A save can also come back GROUNDED but incomplete: a video whose caption lists the
+     # ingredients while the method is only ever spoken aloud. Those pass the grounding check,
+@@ -6361,7 +6392,7 @@
+         structured_recipe = {
+             'title': _safe_text(extraction.get('title')) or _safe_text(structured_recipe and structured_recipe.get('title')) or 'Recipe',
+             'ingredients': [], 'instructions': [],
+-            'notes': ["We couldn't read the full recipe from this post yet — we're still working on it."],
++            'notes': [] if terminal_reason else ["We couldn't read the full recipe from this post yet — we're still working on it."],
+         }
+         recipe_response = {'recipe': _format_recipe_text(structured_recipe), 'model': None}
+ 
+@@ -6384,12 +6415,20 @@
+             source_image_urls = [hinted] + list(source_image_urls or [])
+         image_fields = _build_source_backed_saved_recipe_image_fields(source_image_urls=source_image_urls)
+     else:
+-        image_fields = _prepare_saved_recipe_image_fields(
+-            owner,
+-            recipe_id,
+-            extraction,
+-            request_id=request_id,
+-        )
++        try:
++            with recipe_work_budget.phase(max_seconds=6):
++                image_fields = _prepare_saved_recipe_image_fields(owner, recipe_id, extraction, request_id=request_id)
++        except recipe_work_budget.WorkLimit:
++            image_fields = _build_source_backed_saved_recipe_image_fields(
++                source_image_urls=_unique_texts(extraction.get('image_urls') or [extraction.get('image_url')]))
++
++    # Image enrichment can consume the remaining provider budget after analysis.
++    # Recheck before choosing status or scheduling repair; sync may still defer.
++    terminal_reason = terminal_reason or recipe_work_budget.terminal_reason()
++    if terminal_reason:
++        _repairable_platform = False
++        if ungrounded:
++            structured_recipe['notes'] = []
+ 
+     table = _saved_recipes_table(owner)
+     try:
+@@ -7408,6 +7447,8 @@
+ 
+ def _is_transient_failure(exc):
+     """True when the failure looks like infrastructure, not content."""
++    if isinstance(exc, recipe_work_budget.WorkLimit):
++        return False
+     if isinstance(exc, ServiceError):
+         # Upstream refusing us (bot wall) is not transient — a retry hits the same wall.
+         if _is_upstream_block(exc):
+@@ -7465,9 +7506,18 @@
+         if extraction is None:
+             # Transient-only retry: a provider 5xx/timeout/throttle gets 2 more goes with
+             # backoff; a content 422 raises straight through and waits for a fix + sweep.
+-            extraction = _run_with_transient_retry(
+-                lambda: _extract_content(url, request_id=request_id),
+-                request_id=request_id, label='extract_content')
++            try:
++                extraction = _run_with_transient_retry(
++                    lambda: _extract_content(url, request_id=request_id),
++                    request_id=request_id, label='extract_content')
++            except recipe_work_budget.WorkLimit as exc:
++                # Keep the accepted link even when its provider never responds.
++                # No network here: budget expiry must not bypass input validation.
++                normalized_url = _normalize_url(url)
++                platform = _detect_platform(normalized_url, raw_url=url, request_id=request_id)
++                extraction = {'url': normalized_url, 'resolved_url': normalized_url, 'platform': platform,
++                              'title': 'Recipe', 'caption': '', 'content': '',
++                              'source': 'deadline_retained', 'terminal_work_reason': exc.reason}
+         result, _ = _save_saved_recipe_record(conn, owner, extraction, request_id=request_id)
+         recipe_id = ((result or {}).get('recipe') or {}).get('id')
+         if not _safe_text(recipe_id):
+@@ -8785,8 +8835,7 @@
+     except Exception:
+         pass
+ 
+-    # Arm the audio time budget for SYNC HTTP requests only. An async_task invocation runs
+-    # behind a job with no gateway in front of it and must never be budget-limited.
++    # Keep gateway timing; recipe_work_budget also bounds native async invocations.
+     try:
+         _mark_sync_request_start(
+             fields.get('invocation') == 'http' and not _safe_text((event or {}).get('async_task'))
+@@ -8797,7 +8846,8 @@
+     outcome = 'exception'
+     status_code = None
+     try:
+-        result = _handler_impl(event, context)
++        with recipe_work_budget.invocation(context, fields.get('invocation') == 'http'):
++            result = _handler_impl(event, context)
+         outcome = 'returned'
+         if isinstance(result, dict):
+             status_code = result.get('statusCode')
+@@ -8883,4 +8933,3 @@
+                          'ingredient_matches': availability['ingredient_matches']})
+     except ConfirmationRejected as error:
+         return _error(error.status, error.code)
+-
+--- a/recipe_work_budget.py
++++ b/recipe_work_budget.py
+@@ -0,0 +1,126 @@
++"""Bound URL provider work before Lambda expiry, leaving time to retain the link.
++
++Timers cover network work only. Persistence runs after these boundaries unwind;
++no background extraction can outlive a deadline and later overwrite a recipe.
++"""
++import contextvars
++import functools
++import signal
++import threading
++import time
++from contextlib import contextmanager
++
++_state = contextvars.ContextVar('recipe_url_work_budget', default=None)
++DOWNLOAD_SECONDS = 30.0
++TRANSCRIBE_SECONDS = 45.0
++MAX_MEDIA_BYTES = 24_000_000  # leave multipart headroom below the 25 MB API limit
++
++
++class WorkLimit(RuntimeError):
++    def __init__(self, reason='deadline'):
++        self.reason = reason
++        super().__init__('Recipe source work stopped: ' + reason)
++
++
++class _Expired(BaseException):
++    """Escape requests/SDK/provider retry handlers at the timed boundary."""
++
++
++@contextmanager
++def invocation(context, is_sync):
++    get_remaining = getattr(context, 'get_remaining_time_in_millis', None)
++    native = max(0.0, float(get_remaining()) / 1000.0) if callable(get_remaining) else 120.0
++    # Existing image checkpointing keeps its separate stage budget. This state is
++    # consulted only by the URL extraction/refinement boundaries below.
++    seconds = min(native - 15.0, 24.0) if is_sync else native - 15.0
++    token = _state.set({'deadline': time.monotonic() + max(0.0, seconds),
++                        'is_sync': is_sync, 'reason': None})
++    try:
++        yield
++    finally:
++        _state.reset(token)
++
++
++def remaining():
++    state = _state.get()
++    return None if state is None else max(0.0, state['deadline'] - time.monotonic())
++
++
++def stop(reason):
++    state = _state.get()
++    if state is not None:
++        state['reason'] = reason
++    raise WorkLimit(reason)
++
++
++def terminal_reason():
++    state = _state.get()
++    if not state:
++        return None
++    if state['reason'] == 'media_too_large':
++        return state['reason']
++    # A gateway-limited save can still use one longer async repair attempt.
++    if not state['is_sync'] and (state['reason'] or remaining() <= 0):
++        return state['reason'] or 'deadline'
++    return None
++
++
++def note_rung_skip():
++    state = _state.get()
++    if state is not None and not state['is_sync'] and not state['reason']:
++        state['reason'] = 'deadline'
++
++
++def phase_seconds(max_seconds=None, reserve=0):
++    available = remaining()
++    available = 105.0 if available is None else available
++    return max(0.0, min(available - reserve, max_seconds if max_seconds is not None else available))
++
++
++@contextmanager
++def phase(max_seconds=None, reserve=0):
++    seconds = phase_seconds(max_seconds, reserve)
++    if seconds <= 0:
++        stop('deadline')
++    if threading.current_thread() is not threading.main_thread() or not hasattr(signal, 'setitimer'):
++        stop('deadline_unavailable')
++    prior_handler = signal.getsignal(signal.SIGALRM)
++    prior_timer = signal.getitimer(signal.ITIMER_REAL)
++    started = time.monotonic()
++    budget = min(seconds, prior_timer[0]) if prior_timer[0] else seconds
++
++    def expire(*_):
++        raise _Expired()
++
++    signal.signal(signal.SIGALRM, expire)
++    signal.setitimer(signal.ITIMER_REAL, budget)
++    try:
++        yield
++    except _Expired:
++        stop('deadline')
++    finally:
++        signal.setitimer(signal.ITIMER_REAL, 0)
++        signal.signal(signal.SIGALRM, prior_handler)
++        if prior_timer[0]:
++            signal.setitimer(signal.ITIMER_REAL, max(0.001, prior_timer[0] - (time.monotonic() - started)), prior_timer[1])
++
++
++def bounded(function):
++    @functools.wraps(function)
++    def call(*args, **kwargs):
++        with phase():
++            return function(*args, **kwargs)
++    return call
++
++
++def check_bytes(count, limit=MAX_MEDIA_BYTES):
++    if count and count > limit:
++        stop('media_too_large')
++
++
++def download_progress(progress):
++    check_bytes(progress.get('downloaded_bytes'))
++    check_bytes(progress.get('total_bytes'))
++    # Estimates are advisory: rejecting an overestimate loses valid spoken recipes.
++    if remaining() is not None and remaining() <= 0:
++        stop('deadline')

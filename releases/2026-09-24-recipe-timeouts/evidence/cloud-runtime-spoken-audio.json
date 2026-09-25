@@ -1,0 +1,45 @@
+{
+  "started_at": "2026-09-25T02:06:33.199869+00:00",
+  "function": "trepo-journey-qa-20260924-recipe-budget",
+  "probe_code_sha256": "2UXnScdpZWAfUJeYzeFDaQFC9I59jln2LGpFCLsI7GU=",
+  "production_candidate": "treyNhmCDGhD8c/kll5rOn1/FXtgwwVFGEpFq/3oUuo=",
+  "scope": "Exact deployed runtime/layers, unchanged candidate code plus isolated unshipped probe handler; no production database/customer mutations.",
+  "source_hashes": {
+    "app.py": "ea2240582b9841dbb64793534a9b937a32ba7a5f90f788121b8bf896464e2de4",
+    "recipe_work_budget.py": "77432c2fbb608ec5fb1daa8e90bb37291e2af0c1b53b342e95e58eafd1161116"
+  },
+  "audio_sha256": "e77c661e9751ad165df1c0bdc09522b790705ce3880d4a4e6b41cdc5d121fde2",
+  "results": {
+    "synthetic": {
+      "status": 200,
+      "function_error": null,
+      "body": {
+        "native_context": true,
+        "async_rung_rejected": true,
+        "download_seconds": 0.051,
+        "transcribe_seconds": 0.052,
+        "oversize_rejected": true,
+        "timer_restored": true,
+        "runtime": "python3.9"
+      }
+    },
+    "valid_audio": {
+      "status": 200,
+      "function_error": null,
+      "body": {
+        "actual_transcription": true,
+        "actual_recipe_refinement": true,
+        "ingredient_count": 3,
+        "instruction_count": 4,
+        "elapsed_s": 5.268,
+        "work_remaining_s": 99.732,
+        "source": "10-second synthetic recipe narration",
+        "customer_mutations": false
+      }
+    }
+  },
+  "passed": true,
+  "temporary_function_deleted_and_absent": true,
+  "synthetic_audio_version_deleted_and_absent": true,
+  "finished_at": "2026-09-25T02:06:55.155376+00:00"
+}

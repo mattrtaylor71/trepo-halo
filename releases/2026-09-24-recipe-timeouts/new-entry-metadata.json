@@ -1,0 +1,23 @@
+{
+  "recipes": {
+    "recipe_work_budget.py": {
+      "date_time": [
+        2026,
+        9,
+        24,
+        0,
+        0,
+        0
+      ],
+      "compress_type": 8,
+      "create_system": 3,
+      "create_version": 20,
+      "extract_version": 20,
+      "external_attr": 2175008768,
+      "internal_attr": 0,
+      "flag_bits": 0,
+      "extra_b64": "",
+      "comment_b64": ""
+    }
+  }
+}

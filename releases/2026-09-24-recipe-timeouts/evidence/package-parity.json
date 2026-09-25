@@ -1,0 +1,7 @@
+{
+  "entry_count": 3812,
+  "all_uncompressed_entries_identical": true,
+  "agent_code_sha256": "716RcowIqd13QQirRFUOyKmFapn6npXraky9FsnHq0k=",
+  "parent_cloud_qualified_code_sha256": "treyNhmCDGhD8c/kll5rOn1/FXtgwwVFGEpFq/3oUuo=",
+  "difference": "ZIP metadata for new helper; source and dependencies identical"
+}

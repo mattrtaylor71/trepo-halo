@@ -1,0 +1,25 @@
+{
+  "recipes": {
+    "base": {
+      "FunctionName": "trepo-grocery-backend-dev-SavedRecipesApiFunction-a7aWuWlJvEF2",
+      "CodeSha256": "odOt6M9EH7awMZrZftlBEAEn9VmMtYyODjM1G6rsohg=",
+      "RevisionId": "41e54944-7aac-4d45-bebb-5464d3f9c4e1"
+    },
+    "code_sha256": "treyNhmCDGhD8c/kll5rOn1/FXtgwwVFGEpFq/3oUuo=",
+    "zip_sha256": "b6b7b23619820c6843f1cfe4965e6b3a7d7f157b60c30545184a45abfde852ea",
+    "changes": [
+      {
+        "path": "app.py",
+        "sha256": "ea2240582b9841dbb64793534a9b937a32ba7a5f90f788121b8bf896464e2de4",
+        "previous_sha256": "f1812316143056c00ce5f2597098f76a4699ffa3287c065783505280098aa19c",
+        "kind": "modified"
+      },
+      {
+        "path": "recipe_work_budget.py",
+        "sha256": "77432c2fbb608ec5fb1daa8e90bb37291e2af0c1b53b342e95e58eafd1161116",
+        "previous_sha256": null,
+        "kind": "added"
+      }
+    ]
+  }
+}

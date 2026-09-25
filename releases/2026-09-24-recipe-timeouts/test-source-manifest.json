@@ -1,0 +1,18 @@
+{
+  "test_media_budget.py": "885d9198f35dc06cd3c6f8271d357bb8756f299c527bab8f27a5550e64c6d88d",
+  "test_recipe_batch_recovery.py": "781fcd0669aa1e6fd18bc8c9b78a58a3ae8a25a0145bbbbaa0f0ce8a8cecba7e",
+  "test_recipe_checkpoint.py": "add8eeeda7cd1ac63b035a48fcadadaa39aacccf35b2ae26308beaea3fee3f76",
+  "test_recipe_completion_contract.py": "91638996475803a2d16c9d1a9dcdb9b90f6acbe415bb21ca5214173032d21a31",
+  "test_recipe_explicit_recovery.py": "27fd21de559ca518e1d9f81d9b7f4af17d4f84e5ad7c3a77e65c945fe86cc548",
+  "test_recipe_image_download.py": "adb4dd2f4499d4b2eee577bb098a19256a385b05bf8761f5df191495dd81aa75",
+  "test_recipe_image_failure_policy.py": "4de87f2b9db42ee74a6a49ea3eb527727130ad709534540e83a90546f6259606",
+  "test_recipe_provider_budget.py": "33005647ccf0794260ec1fe6cf1e0c5c5b71da04ff5f1d7b376929410f615ced",
+  "test_recipe_recovery_web.py": "327a2d25f6b529c889b302642b0fa9e8f3bcc5bba273c14111fd3b8572dffbe8",
+  "test_recipe_repair_preservation.py": "4d6224855c0c1aef91225b0517893cfd5d7011ac88509010531c8fcc837539b3",
+  "test_saved_recipe_edit_atomic.py": "0b733a2b265cd3b99bfd225f6e0375c91ebe1fb0062c4cf5cf8f6a94c97cdf36",
+  "test_saved_recipes_async_batch.py": "d5a11471b8ef032b03917735dd552d22d414a8a12974de9a7145d19a5be63906",
+  "test_saved_recipes_dualwrite.py": "fe0ae78bac4153337b44a51c7edf801bdb2314f1c7998df0e38082ffaa1bc130",
+  "test_saved_recipes_image_mirroring.py": "c78b0eb4199ec65902f623b5a4c600515b4cb176eacf8991a5ce5d958f82ec2f",
+  "test_saved_recipes_manual_inputs.py": "24bd2619f9a1b5305dee010863dbbb0d563e44f90059bb81570d80abd623581d",
+  "test_transcription_format_selection.py": "6ed972f159133724f427770379452bdcb26940a26909208d01bd0abafa1ddae5"
+}
