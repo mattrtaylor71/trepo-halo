@@ -36,3 +36,7 @@ Older iOS and Android contract tests establish the tested wire formats. They do 
 For a service failure, first confirm its current CodeSha256 still equals this release. Restore only that service's retained original ZIP with the current RevisionId condition and verify the previous CodeSha256/configuration. Never roll back over a newer deployment or deploy an entire dirty development folder. No migrations need reversal.
 
 Future development should port an explicitly reviewed delta back to the canonical source paths, preserving the serving sync/stream/worker differences; then rebuild/test fresh artifacts. The original dirty checkout was preserved. Shared context: `apps/trepo/architecture`, `brand/trepo-brand-guidelines`, `brand/trepo-app-design-system`. Documentation is in Git; no automatic company-brain save was made.
+
+## Superseding follow-ups
+
+This folder remains the exact initial six-service record. The subsequently deployed recipe media limits are recorded in `../2026-09-24-recipe-timeouts/`; empty bulk terminal outcomes and the independently deployed GetJob reader are recorded in `../2026-09-24-empty-bulk/`. Their exact source, failed-before tests, reconstruction metadata, unchanged-configuration deployment receipts and real review-account canaries are preserved separately. The initial recipe timeout at18:22 Pacific remains historical evidence; follow-up observation windows must not erase it. Current serving rollout therefore includes seven distinct functions.
