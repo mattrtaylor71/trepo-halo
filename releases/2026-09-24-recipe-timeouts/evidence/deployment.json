@@ -1,0 +1,20 @@
+{
+  "name": "recipes",
+  "function": "trepo-grocery-backend-dev-SavedRecipesApiFunction-a7aWuWlJvEF2",
+  "before_code_sha256": "odOt6M9EH7awMZrZftlBEAEn9VmMtYyODjM1G6rsohg=",
+  "before_revision": "41e54944-7aac-4d45-bebb-5464d3f9c4e1",
+  "before_config_hash": "ab3b07777cb4891c90f0e920d8374a97a2f8b923499d26c01ad1f98f90ee39f3",
+  "candidate_code_sha256": "0aaNoc7cx/LNzuOdPbgHYC5uQ6RqR2upxiKew4YCmao=",
+  "started_at": "2026-09-25T03:12:39.258848+00:00",
+  "status": "deployed",
+  "purpose": "Bound pre-existing oversized/slow media imports; preserve initial six-service release history",
+  "native_baseline": {
+    "passed": 97,
+    "failed": 20,
+    "new_full_required": true,
+    "upload_blocked": true
+  },
+  "after_revision": "6a8b5e70-a58b-4f6c-bf93-0b18c90727d4",
+  "last_update_status": "Successful",
+  "completed_at": "2026-09-25T03:12:52.841907+00:00"
+}

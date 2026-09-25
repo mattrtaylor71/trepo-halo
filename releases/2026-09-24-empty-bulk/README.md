@@ -1,6 +1,6 @@
 # Empty bulk scan terminal outcomes — September 24, 2026
 
-Status: qualified source committed; serving deployment and live canaries are separate gates. See deployment receipts added after those gates, rather than treating this source commit as deployment proof.
+Status: source committed in `f369342`; both code-only deployments completed with unchanged configuration, and real Node20 cloud admission/polling canaries passed on September24. Final native qualification and TestFlight remain separate gates.
 
 This is a narrow follow-up to the customer journey release. A scan that identifies no grocery items must not claim that items are ready to review. The worker now stores a terminal no-items failure for ordinary bulk inventory scans and sends no empty-ready notification. The separately deployed polling handler projects retained legacy completed-empty jobs to the same terminal response, without rewriting their stored records. Receipt-specific typed recovery remains unchanged.
 
@@ -27,3 +27,9 @@ The complete portable test-source bundle, including the pinned TypeScript parser
 Deploy GetJob first, then identify-async, each with its pinned expected RevisionId and full unchanged configuration verification. Original ZIPs are privately archived and fully downloaded to verify their checksums. Rollback is code-only against the current revision, using those original artifacts; do not overwrite concurrent unrelated deployments. The final native full suite and health gate remain required before TestFlight upload.
 
 Company sources: `apps/trepo/architecture`, `brand/trepo-brand-guidelines` (source dated September 15), and `brand/trepo-app-design-system`. No brand exception, shared-memory save, external review service, or telemetry was used.
+
+## Live cloud verification
+
+Exact deployed artifacts matched the qualified ZIPs. Actual public HTTP admission and polling verified: a synthetic legacy completed-empty job projects to HTTP200/failed; a newly analyzed blank bulk photo stores failed/no_items; a fridge photograph returns three items; a receipt returns three items; and a blank receipt retains its typed no_items recovery result. Photo reuse remained OFF. Kitchen inventory IDs were unchanged. Every uniquely owned test job was deleted after terminal processing and absence verified; current offloaded source objects were removed where present. Existing bucket version retention is unchanged.
+
+The first live test used an overly broad whole-row equality assertion. The unchanged queue removes TTL from retained uncommitted review rows, so the corrected assertion allows only that exact pre-existing retention-metadata change and requires every other field to match. The failed attempt, original test, correction rationale and successful rerun are retained under `evidence/`. No serving code was changed to accommodate the test.

@@ -1,6 +1,6 @@
 # Saved Recipes media timeout follow-up — September 24, 2026
 
-Status: reviewed, regression-tested candidate. Deployment, final live canaries and final native Release checks are pending. This folder does not claim that its package is serving yet.
+Status: code-only deployment completed and configuration verified unchanged on September 24. All three controlled live canaries passed on the dedicated review account. Final native qualification and TestFlight upload remain separate pending gates. Exact deployment and canary receipts are under `evidence/`.
 
 During the journey release health check, one URL import exhausted the service's 120-second limit while downloading a 45.92 MiB social video. AWS retried it; a retained recipe eventually appeared after roughly three minutes. Other oversized videos reached transcription and received size errors. Comparing the relevant functions against the package serving before the journey release confirmed that this behavior predates that release. No affected customer's data was edited or replayed to investigate it.
 
@@ -53,3 +53,11 @@ Wait for the initial full native run to finish before changing its backend basel
 To roll back this follow-up alone, restore the checksum-pinned initial journey recipe ZIP with a current RevisionId condition, only if the function still serves this follow-up. To reverse the entire journey recipe release, use the earlier release's original serving ZIP instead. Never overwrite a newer deployment or deploy the whole dirty development checkout. Preserve both deployment histories.
 
 Company context: `apps/trepo/architecture`. No customer-facing design or brand exception is introduced. This is repository documentation; no automatic shared-brain save was made.
+
+## Post-deployment functional verification
+
+The deployed package is `0aaNoc7cx/LNzuOdPbgHYC5uQ6RqR2upxiKew4YCmao=`. The review-account canaries verified real text extraction, canonical Kitchen edits/replay/conflict handling, a legacy name-only edit, real same-ID pasted recipe recovery and preserved human title/notes. A public recipe article reached ready with real ingredients/steps, and a repeat legacy synchronous save returned the same recipe identity.
+
+The exact oversized TikTok source that originally hit the 120-second limit was exercised only as a new fixture on the review account. It returned one honest `link_retained` result in **15.503 seconds**, with stable identity on repeated polling and fresh reads. This proves bounded failure recovery, not successful extraction of that source. All newly created recipe/Kitchen fixtures were removed and their absence verified. Terminal async test jobs/sources follow existing service retention. No affected customer record was changed.
+
+During the full native run, another app-side issue was reproduced: a text save received202, and the backend completed in2.809 seconds, but the initial124 candidate treated its processing receipt as incomplete. The r2 app fix follows accepted IDs to readiness and preserves truthful pending state when the wait ends. This backend document does not claim that native fix is qualified.

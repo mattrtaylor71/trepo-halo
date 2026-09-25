@@ -1,0 +1,87 @@
+{
+  "run": "journey-timeout-d6a1c91674",
+  "owner": "8fcb37c1-0927-4c31-856a-5b761efc226c",
+  "started_at": "2026-09-25T03:20:36.200608+00:00",
+  "events": [
+    {
+      "method": "GET",
+      "path": "/saved-recipes/8fcb37c1-0927-4c31-856a-5b761efc226c",
+      "status": 200,
+      "seconds": 0.84
+    },
+    {
+      "method": "POST",
+      "path": "/saved-recipes/8fcb37c1-0927-4c31-856a-5b761efc226c",
+      "status": 202,
+      "seconds": 0.436
+    },
+    {
+      "method": "GET",
+      "path": "/saved-recipes/8fcb37c1-0927-4c31-856a-5b761efc226c/jobs/1fcdad10885c4d2e974a03cc87f2f64e",
+      "status": 200,
+      "seconds": 3.909
+    },
+    {
+      "method": "GET",
+      "path": "/saved-recipes/8fcb37c1-0927-4c31-856a-5b761efc226c/jobs/1fcdad10885c4d2e974a03cc87f2f64e",
+      "status": 200,
+      "seconds": 7.099
+    },
+    {
+      "method": "GET",
+      "path": "/saved-recipes/8fcb37c1-0927-4c31-856a-5b761efc226c",
+      "status": 200,
+      "seconds": 1.053
+    },
+    {
+      "check": "Original oversized-video source reaches one honest terminal recipe without waiting for a Lambda timeout",
+      "outcome": "link_retained",
+      "pass": true
+    },
+    {
+      "method": "GET",
+      "path": "/saved-recipes/8fcb37c1-0927-4c31-856a-5b761efc226c/jobs/1fcdad10885c4d2e974a03cc87f2f64e",
+      "status": 200,
+      "seconds": 1.043
+    },
+    {
+      "method": "GET",
+      "path": "/saved-recipes/8fcb37c1-0927-4c31-856a-5b761efc226c",
+      "status": 200,
+      "seconds": 0.929
+    },
+    {
+      "check": "Repeated polling and refreshed saved list preserve the same terminal recipe identity",
+      "pass": true
+    },
+    {
+      "method": "GET",
+      "path": "/saved-recipes/8fcb37c1-0927-4c31-856a-5b761efc226c",
+      "status": 200,
+      "seconds": 1.216
+    },
+    {
+      "method": "DELETE",
+      "path": "/saved-recipes/8fcb37c1-0927-4c31-856a-5b761efc226c/7127143b-2d45-4a65-a654-21ca34dc0b5e",
+      "status": 200,
+      "seconds": 3.961
+    },
+    {
+      "method": "GET",
+      "path": "/saved-recipes/8fcb37c1-0927-4c31-856a-5b761efc226c",
+      "status": 200,
+      "seconds": 1.039
+    }
+  ],
+  "async_job_id": "1fcdad10885c4d2e974a03cc87f2f64e",
+  "created_recipe_ids": [
+    "7127143b-2d45-4a65-a654-21ca34dc0b5e"
+  ],
+  "source_url_sha256": "0a554bb2c2f00453b3c92cd912891e19be696b8f0d5139eb5b210cfcc5b55230",
+  "outcome": "link_retained",
+  "accepted_to_terminal_seconds": 15.503,
+  "passed": true,
+  "fixture_recipe_absence_verified": true,
+  "job_retention": "Terminal test job/source use existing service retention; no customer data was touched.",
+  "finished_at": "2026-09-25T03:21:00.733411+00:00"
+}

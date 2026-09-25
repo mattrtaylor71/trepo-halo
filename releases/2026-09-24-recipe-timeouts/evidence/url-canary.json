@@ -1,0 +1,84 @@
+{
+  "run": "journey-timeout-f2b8cefb0a",
+  "owner": "8fcb37c1-0927-4c31-856a-5b761efc226c",
+  "started_at": "2026-09-25T03:14:10.343879+00:00",
+  "events": [
+    {
+      "method": "GET",
+      "path": "/saved-recipes/8fcb37c1-0927-4c31-856a-5b761efc226c",
+      "status": 200,
+      "seconds": 0.795
+    },
+    {
+      "method": "POST",
+      "path": "/saved-recipes/8fcb37c1-0927-4c31-856a-5b761efc226c",
+      "status": 202,
+      "seconds": 0.499
+    },
+    {
+      "method": "GET",
+      "path": "/saved-recipes/8fcb37c1-0927-4c31-856a-5b761efc226c/jobs/930f3d0bc6a24d71820a6f1e64b94505",
+      "status": 200,
+      "seconds": 4.001
+    },
+    {
+      "method": "GET",
+      "path": "/saved-recipes/8fcb37c1-0927-4c31-856a-5b761efc226c/jobs/930f3d0bc6a24d71820a6f1e64b94505",
+      "status": 200,
+      "seconds": 3.627
+    },
+    {
+      "method": "GET",
+      "path": "/saved-recipes/8fcb37c1-0927-4c31-856a-5b761efc226c",
+      "status": 200,
+      "seconds": 0.855
+    },
+    {
+      "check": "Async public URL yields one ready recipe with real ingredients and steps",
+      "pass": true
+    },
+    {
+      "method": "POST",
+      "path": "/saved-recipes/8fcb37c1-0927-4c31-856a-5b761efc226c",
+      "status": 200,
+      "seconds": 1.794
+    },
+    {
+      "method": "GET",
+      "path": "/saved-recipes/8fcb37c1-0927-4c31-856a-5b761efc226c",
+      "status": 200,
+      "seconds": 0.814
+    },
+    {
+      "check": "Legacy URL save stays synchronous and preserves existing recipe identity",
+      "status": 200,
+      "pass": true
+    },
+    {
+      "method": "GET",
+      "path": "/saved-recipes/8fcb37c1-0927-4c31-856a-5b761efc226c",
+      "status": 200,
+      "seconds": 0.905
+    },
+    {
+      "method": "DELETE",
+      "path": "/saved-recipes/8fcb37c1-0927-4c31-856a-5b761efc226c/bb422a0d-a9d6-497b-943a-5aa3d42ca718",
+      "status": 200,
+      "seconds": 2.551
+    },
+    {
+      "method": "GET",
+      "path": "/saved-recipes/8fcb37c1-0927-4c31-856a-5b761efc226c",
+      "status": 200,
+      "seconds": 0.733
+    }
+  ],
+  "async_job_id": "930f3d0bc6a24d71820a6f1e64b94505",
+  "created_recipe_ids": [
+    "bb422a0d-a9d6-497b-943a-5aa3d42ca718"
+  ],
+  "passed": true,
+  "fixture_recipe_absence_verified": true,
+  "job_retention": "Terminal test job/source use existing service retention; no customer data was touched.",
+  "finished_at": "2026-09-25T03:14:29.931260+00:00"
+}

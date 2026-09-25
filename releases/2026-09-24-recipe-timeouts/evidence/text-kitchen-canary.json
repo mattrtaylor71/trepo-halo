@@ -1,0 +1,152 @@
+{
+  "run": "journey-timeout-3e36b31832",
+  "owner": "8fcb37c1-0927-4c31-856a-5b761efc226c",
+  "fixtures": {
+    "kitchen": "338a0566-fd01-4028-8983-a0c18840e6b8",
+    "recipe": "a06fbda1-c6e6-4df4-953d-adafe06a4717"
+  },
+  "events": [
+    {
+      "method": "POST",
+      "path": "/kitchen/8fcb37c1-0927-4c31-856a-5b761efc226c",
+      "status": 201,
+      "duration_s": 0.62
+    },
+    {
+      "method": "GET",
+      "path": "/kitchen/8fcb37c1-0927-4c31-856a-5b761efc226c",
+      "status": 200,
+      "duration_s": 0.63
+    },
+    {
+      "method": "POST",
+      "path": "/kitchen/8fcb37c1-0927-4c31-856a-5b761efc226c?amount_operation=v1",
+      "status": 200,
+      "duration_s": 0.37
+    },
+    {
+      "method": "POST",
+      "path": "/kitchen/8fcb37c1-0927-4c31-856a-5b761efc226c?amount_operation=v1",
+      "status": 200,
+      "duration_s": 0.27
+    },
+    {
+      "method": "GET",
+      "path": "/kitchen/8fcb37c1-0927-4c31-856a-5b761efc226c",
+      "status": 200,
+      "duration_s": 1.02
+    },
+    {
+      "method": "POST",
+      "path": "/kitchen/8fcb37c1-0927-4c31-856a-5b761efc226c?amount_operation=v1",
+      "status": 409,
+      "duration_s": 0.29
+    },
+    {
+      "method": "GET",
+      "path": "/kitchen/8fcb37c1-0927-4c31-856a-5b761efc226c",
+      "status": 200,
+      "duration_s": 0.68
+    },
+    {
+      "method": "PUT",
+      "path": "/kitchen/8fcb37c1-0927-4c31-856a-5b761efc226c/338a0566-fd01-4028-8983-a0c18840e6b8",
+      "status": 409,
+      "duration_s": 0.25
+    },
+    {
+      "method": "PUT",
+      "path": "/kitchen/8fcb37c1-0927-4c31-856a-5b761efc226c/338a0566-fd01-4028-8983-a0c18840e6b8",
+      "status": 200,
+      "duration_s": 0.33
+    },
+    {
+      "method": "GET",
+      "path": "/kitchen/8fcb37c1-0927-4c31-856a-5b761efc226c",
+      "status": 200,
+      "duration_s": 0.62
+    },
+    {
+      "check": "canonical write, exact replay, changed payload rejection, legacy edit, refreshed readback",
+      "pass": true
+    },
+    {
+      "method": "POST",
+      "path": "/saved-recipes/8fcb37c1-0927-4c31-856a-5b761efc226c",
+      "status": 202,
+      "duration_s": 0.46
+    },
+    {
+      "method": "GET",
+      "path": "/saved-recipes/8fcb37c1-0927-4c31-856a-5b761efc226c",
+      "status": 200,
+      "duration_s": 3.31
+    },
+    {
+      "method": "PUT",
+      "path": "/saved-recipes/8fcb37c1-0927-4c31-856a-5b761efc226c/a06fbda1-c6e6-4df4-953d-adafe06a4717",
+      "status": 200,
+      "duration_s": 1.37
+    },
+    {
+      "method": "PUT",
+      "path": "/saved-recipes/8fcb37c1-0927-4c31-856a-5b761efc226c/a06fbda1-c6e6-4df4-953d-adafe06a4717",
+      "status": 409,
+      "duration_s": 0.32
+    },
+    {
+      "method": "GET",
+      "path": "/saved-recipes/8fcb37c1-0927-4c31-856a-5b761efc226c",
+      "status": 200,
+      "duration_s": 0.77
+    },
+    {
+      "method": "PUT",
+      "path": "/saved-recipes/8fcb37c1-0927-4c31-856a-5b761efc226c/a06fbda1-c6e6-4df4-953d-adafe06a4717",
+      "status": 200,
+      "duration_s": 1.85
+    },
+    {
+      "method": "GET",
+      "path": "/saved-recipes/8fcb37c1-0927-4c31-856a-5b761efc226c",
+      "status": 200,
+      "duration_s": 0.77
+    },
+    {
+      "check": "live text extraction, optimistic conflict, same-ID recovery, preserved title/notes, refreshed readback",
+      "pass": true
+    },
+    {
+      "method": "DELETE",
+      "path": "/saved-recipes/8fcb37c1-0927-4c31-856a-5b761efc226c/a06fbda1-c6e6-4df4-953d-adafe06a4717",
+      "status": 200,
+      "duration_s": 2.59
+    },
+    {
+      "method": "GET",
+      "path": "/saved-recipes/8fcb37c1-0927-4c31-856a-5b761efc226c",
+      "status": 200,
+      "duration_s": 0.71
+    },
+    {
+      "cleanup": "recipe",
+      "absence_verified": true
+    },
+    {
+      "method": "DELETE",
+      "path": "/kitchen/8fcb37c1-0927-4c31-856a-5b761efc226c/338a0566-fd01-4028-8983-a0c18840e6b8",
+      "status": 200,
+      "duration_s": 0.65
+    },
+    {
+      "method": "GET",
+      "path": "/kitchen/8fcb37c1-0927-4c31-856a-5b761efc226c",
+      "status": 200,
+      "duration_s": 0.85
+    },
+    {
+      "cleanup": "kitchen",
+      "absence_verified": true
+    }
+  ]
+}

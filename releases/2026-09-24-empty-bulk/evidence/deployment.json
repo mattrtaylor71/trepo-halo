@@ -1,0 +1,41 @@
+{
+  "started_at": "2026-09-25T03:21:46.606115+00:00",
+  "status": "deployed",
+  "native_baseline": {
+    "passed": 97,
+    "failed": 20,
+    "new_full_required": true,
+    "upload_blocked": true
+  },
+  "functions": {
+    "getJob": {
+      "name": "getJob",
+      "function": "grocery-identifier-dev-GetJobFunction-xL9ddcVmBIaC",
+      "before_code_sha256": "2BambByEK1eEX/Zr6JGXeDKcowvM/vPCZmJyf4TIS/g=",
+      "before_revision": "3cd6f42e-b17e-49bc-af6c-df972b299c7c",
+      "before_config_hash": "6174790f846d3a019c65872b633cd657e0c8320c6e9ccc710a70c83ba97ece21",
+      "before_full_config_hash": "2fa08be8f7c2e0fd85f3be5e69e596bcb4d95eabb7c9799d991b338156dd140e",
+      "candidate_code_sha256": "1S0Y+omz2yjGKwTeMHmaAHetd9fRU793pTnyiScOlSs=",
+      "started_at": "2026-09-25T03:21:46.870743+00:00",
+      "status": "deployed",
+      "after_revision": "33eba49d-c43c-4fd3-b9ee-e9450ecfacd4",
+      "completed_at": "2026-09-25T03:22:00.533693+00:00",
+      "last_update_status": "Successful"
+    },
+    "capture": {
+      "name": "capture",
+      "function": "grocery-identifier-dev-identify-async",
+      "before_code_sha256": "JthWAhstvZKTij/UjwSkYM7Wh73TWwAhxgE8pBrZXfc=",
+      "before_revision": "186ef2a2-f755-4da1-ab42-4be3cfb62bd7",
+      "before_config_hash": "466b5fcb4cddea4f0d657cd9fa1ea5ff8de51c51e6125e2ed67c1dbf01c01cc4",
+      "before_full_config_hash": "882fc4eee3775858c95a0e92ee5c0b872ab2d842ce13e70fa2fa8b8dcb7930ab",
+      "candidate_code_sha256": "m0s046cogIP8mE7Jz+IrIrSUSpaKT1I6UnBpTHPOEe4=",
+      "started_at": "2026-09-25T03:22:00.820930+00:00",
+      "status": "deployed",
+      "after_revision": "15f9de81-5b8d-4f5c-8c04-4484f335021a",
+      "completed_at": "2026-09-25T03:22:16.262761+00:00",
+      "last_update_status": "Successful"
+    }
+  },
+  "completed_at": "2026-09-25T03:22:16.312253+00:00"
+}

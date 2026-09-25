@@ -1,0 +1,170 @@
+{
+  "run": "empty-bulk-d2d38e4b2b",
+  "owner": "8fcb37c1-0927-4c31-856a-5b761efc226c",
+  "started_at": "2026-09-25T03:24:24.462208+00:00",
+  "events": [
+    {
+      "method": "GET",
+      "status": 200,
+      "seconds": 0.896
+    },
+    {
+      "method": "GET",
+      "status": 200,
+      "seconds": 0.478
+    },
+    {
+      "check": "Legacy completed-empty row is nonreviewable through actual HTTP without persisted rewrites",
+      "pass": true
+    },
+    {
+      "method": "POST",
+      "status": 202,
+      "seconds": 2.29
+    },
+    {
+      "method": "GET",
+      "status": 202,
+      "seconds": 0.352
+    },
+    {
+      "method": "GET",
+      "status": 200,
+      "seconds": 0.333
+    },
+    {
+      "check": "empty-bulk",
+      "job_id": "580506b2-10e5-446c-8af8-fc220f3494ba",
+      "status": "failed",
+      "item_count": 0,
+      "capture_outcome": "no_items",
+      "pass": true
+    },
+    {
+      "method": "POST",
+      "status": 202,
+      "seconds": 1.264
+    },
+    {
+      "method": "GET",
+      "status": 202,
+      "seconds": 0.269
+    },
+    {
+      "method": "GET",
+      "status": 202,
+      "seconds": 0.27
+    },
+    {
+      "method": "GET",
+      "status": 200,
+      "seconds": 0.323
+    },
+    {
+      "check": "valid-fridge",
+      "job_id": "599eb6c2-a13a-4697-8f98-5f09746710ae",
+      "status": "completed",
+      "item_count": 3,
+      "capture_outcome": null,
+      "pass": true
+    },
+    {
+      "method": "POST",
+      "status": 202,
+      "seconds": 0.583
+    },
+    {
+      "method": "GET",
+      "status": 202,
+      "seconds": 0.313
+    },
+    {
+      "method": "GET",
+      "status": 202,
+      "seconds": 0.269
+    },
+    {
+      "method": "GET",
+      "status": 200,
+      "seconds": 0.297
+    },
+    {
+      "check": "receipt",
+      "job_id": "b5403f41-d7e1-4e59-8787-6de66a8935f6",
+      "status": "completed",
+      "item_count": 3,
+      "capture_outcome": "items_identified",
+      "pass": true
+    },
+    {
+      "method": "POST",
+      "status": 202,
+      "seconds": 0.288
+    },
+    {
+      "method": "GET",
+      "status": 202,
+      "seconds": 0.345
+    },
+    {
+      "method": "GET",
+      "status": 202,
+      "seconds": 0.295
+    },
+    {
+      "method": "GET",
+      "status": 200,
+      "seconds": 0.278
+    },
+    {
+      "check": "empty-receipt",
+      "job_id": "1269193c-0a03-486b-bd13-c4319f341702",
+      "status": "completed",
+      "item_count": 0,
+      "capture_outcome": "no_items",
+      "pass": true
+    },
+    {
+      "method": "GET",
+      "status": 200,
+      "seconds": 1.044
+    },
+    {
+      "cleanup_job": "e5bdff68-0cf9-4ec6-add0-1906fb30fbe7",
+      "absence_verified": true,
+      "current_source_objects_removed": 0
+    },
+    {
+      "cleanup_job": "580506b2-10e5-446c-8af8-fc220f3494ba",
+      "absence_verified": true,
+      "current_source_objects_removed": 0
+    },
+    {
+      "cleanup_job": "599eb6c2-a13a-4697-8f98-5f09746710ae",
+      "absence_verified": true,
+      "current_source_objects_removed": 1
+    },
+    {
+      "cleanup_job": "b5403f41-d7e1-4e59-8787-6de66a8935f6",
+      "absence_verified": true,
+      "current_source_objects_removed": 0
+    },
+    {
+      "cleanup_job": "1269193c-0a03-486b-bd13-c4319f341702",
+      "absence_verified": true,
+      "current_source_objects_removed": 0
+    }
+  ],
+  "jobs": [
+    "e5bdff68-0cf9-4ec6-add0-1906fb30fbe7",
+    "580506b2-10e5-446c-8af8-fc220f3494ba",
+    "599eb6c2-a13a-4697-8f98-5f09746710ae",
+    "b5403f41-d7e1-4e59-8787-6de66a8935f6",
+    "1269193c-0a03-486b-bd13-c4319f341702"
+  ],
+  "legacy_ttl_retention_observed": true,
+  "inventory_unchanged": true,
+  "passed": true,
+  "cleanup_errors": [],
+  "finished_at": "2026-09-25T03:24:59.285938+00:00"
+}

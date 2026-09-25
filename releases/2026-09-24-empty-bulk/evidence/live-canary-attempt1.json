@@ -1,0 +1,29 @@
+{
+  "run": "empty-bulk-fd7f67e32c",
+  "owner": "8fcb37c1-0927-4c31-856a-5b761efc226c",
+  "started_at": "2026-09-25T03:23:11.842622+00:00",
+  "events": [
+    {
+      "method": "GET",
+      "status": 200,
+      "seconds": 1.11
+    },
+    {
+      "method": "GET",
+      "status": 200,
+      "seconds": 1.523
+    },
+    {
+      "cleanup_job": "08ecd032-7e59-402f-b50f-74b175405e42",
+      "absence_verified": true,
+      "current_source_objects_removed": 0
+    }
+  ],
+  "jobs": [
+    "08ecd032-7e59-402f-b50f-74b175405e42"
+  ],
+  "passed": false,
+  "failure_type": "AssertionError",
+  "cleanup_errors": [],
+  "finished_at": "2026-09-25T03:23:16.002944+00:00"
+}
