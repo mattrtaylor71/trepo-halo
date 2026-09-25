@@ -1,0 +1,334 @@
+✔ wrong target and amount cannot borrow a successful same-domain tool (2.624125ms)
+✔ every claimed domain is checked; one real action cannot validate another (3.13225ms)
+✔ negated sentence does not suppress a separate false positive confirmation (0.071625ms)
+✔ a historical read stays helpful without a repair or mutation (0.10575ms)
+✔ false read-answer claim is repaired once with no action executor (0.077375ms)
+✔ a repair repeating an unbacked claim gets an honest terminal answer (0.108875ms)
+✔ repair outage never creates a corrective mutation or repeated model loop (0.074083ms)
+✔ actual failures survive upbeat text, with successful targets retained (0.155834ms)
+✔ confirmation uses returned entity and quantity, never requested values (1.270791ms)
+✔ successful result for a different target ID cannot confirm requested mutation (0.090708ms)
+✔ outer ok cannot hide a failed or mismatched tool result (0.3135ms)
+✔ partial batch confirms only successful named target IDs (0.116ms)
+✔ nested kitchen batches retain IDs and exclude requested-but-missing items (0.146875ms)
+✔ 404,403 and timeout never become confirmations or instructions to retry automatically (0.145583ms)
+✔ read result and unnamed count are not proof of a write (0.449833ms)
+✔ blocked unrequested writes do not overwrite a valid informational answer (0.061ms)
+✔ async recipe placeholder without recipe ID does not say saved (0.250334ms)
+✔ standalone Halo add defaults to shopping, including polite and multiple-item speech (2.203ms)
+✔ explicit kitchen destinations and check-in retain kitchen single/batch eligibility (0.168542ms)
+✔ noncommands, questions, negations, and explicit other destinations keep existing routing (0.108583ms)
+✔ compound action scopes are not collapsed into one destination (0.058375ms)
+✔ destination guard blocks misrouted writes on every model turn, allowing reads and both list add tools (0.057333ms)
+✔ app and unknown surfaces remain unchanged (0.04575ms)
+✔ fresh Halo add clears a retained pantry task but app/label continuation is preserved (2.828583ms)
+(node:8435) ExperimentalWarning: Module mocking is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+[DEBUG] assistant turn start: {"transcript":"add lime juice","ownerId":"fixture-owner","userId":"fixture-user","tableOwnerId":"fixture-owner","shoppingNamespace":null,"sessionMessageCount":0,"responseSurface":"halo"}
+[DEBUG] forcing tool_choice on first turn: {"type":"function","function":{"name":"add_many_to_shopping_list"}}
+[DEBUG] assistant requested tool: {"toolName":"check_in_item","args":{"item_name":"Lime juice"}}
+{"evt":"assistant_tool_intent_blocked","reason":"halo_add_requires_shopping","tool":"check_in_item","allowed_tool":null,"userId":"fixture-user"}
+[DEBUG] assistant requested tool: {"toolName":"add_many_to_shopping_list","args":{"items":[{"item_name":"Lime juice"}]}}
+[DEBUG] assistant final response: {"text":"Added to your shopping list:\n- Lime juice","type":"action_ack","quickItems":["Lime juice"],"toolCount":2}
+{"evt":"ai_op","service":"thyme","op":"chat_halo","owner_id":"fixture-user","model":"gpt-5.4-2026-03-05","latency_ms":61,"status":"success","outcome":{"version":"1","answer":"complete","actions":"confirmed","contract":"not_applicable","reason":null,"delivery":"unknown","client_render":"unknown"},"request_id":"42c02787-b67f-4273-9648-d8bc72a56cfe","input":"add lime juice","output":"Added to your shopping list:\n- Lime juice [tools: check_in_item, add_many_to_shopping_list]","error":""}
+[DEBUG] assistant turn start: {"transcript":"add lime juice and eggs","ownerId":"fixture-owner","userId":"fixture-user","tableOwnerId":"fixture-owner","shoppingNamespace":null,"sessionMessageCount":0,"responseSurface":"halo"}
+[DEBUG] forcing tool_choice on first turn: {"type":"function","function":{"name":"add_many_to_shopping_list"}}
+[DEBUG] assistant requested tool: {"toolName":"check_in_many_items","args":{"items":[{"item_name":"Lime juice"},{"item_name":"Eggs"}]}}
+{"evt":"assistant_tool_intent_blocked","reason":"halo_add_requires_shopping","tool":"check_in_many_items","allowed_tool":null,"userId":"fixture-user"}
+[DEBUG] assistant requested tool: {"toolName":"add_many_to_shopping_list","args":{"items":[{"item_name":"Lime juice"},{"item_name":"Eggs"}]}}
+[DEBUG] assistant final response: {"text":"Added to your shopping list:\n- Lime juice\n- Eggs","type":"action_ack","quickItems":["Lime juice","Eggs"],"toolCount":2}
+{"evt":"ai_op","service":"thyme","op":"chat_halo","owner_id":"fixture-user","model":"gpt-5.4-2026-03-05","latency_ms":4,"status":"success","outcome":{"version":"1","answer":"complete","actions":"confirmed","contract":"not_applicable","reason":null,"delivery":"unknown","client_render":"unknown"},"request_id":"a83e52ae-036b-404b-85be-dafba8f1e874","input":"add lime juice and eggs","output":"Added to your shopping list:\n- Lime juice\n- Eggs [tools: check_in_many_items, add_many_to_shopping_list]","error":""}
+[DEBUG] assistant turn start: {"transcript":"add kitchen towels","ownerId":"fixture-owner","userId":"fixture-user","tableOwnerId":"fixture-owner","shoppingNamespace":null,"sessionMessageCount":0,"responseSurface":"halo"}
+[DEBUG] forcing tool_choice on first turn: {"type":"function","function":{"name":"add_many_to_shopping_list"}}
+[DEBUG] assistant requested tool: {"toolName":"add_many_to_shopping_list","args":{"items":[{"item_name":"Kitchen towels"}]}}
+{"evt":"assistant_false_confirm","tool":"check_in_item","domain":"kitchen_add","userId":"fixture-user","recovered":false,"reason":"original_intent_not_authorized"}
+[DEBUG] assistant final response: {"text":"Added to your shopping list:\n- Kitchen towels","type":"action_ack","quickItems":["Kitchen towels"],"toolCount":1}
+{"evt":"ai_op","service":"thyme","op":"chat_halo","owner_id":"fixture-user","model":"gpt-5.4-2026-03-05","latency_ms":4,"status":"success","outcome":{"version":"1","answer":"complete","actions":"confirmed","contract":"not_applicable","reason":null,"delivery":"unknown","client_render":"unknown"},"request_id":"4baa74f1-b7ea-4713-9186-d2bbae19f5ce","input":"add kitchen towels","output":"Added to your shopping list:\n- Kitchen towels [tools: add_many_to_shopping_list]","error":""}
+[DEBUG] assistant turn start: {"transcript":"add lime juice to my kitchen","ownerId":"fixture-owner","userId":"fixture-user","tableOwnerId":"fixture-owner","shoppingNamespace":null,"sessionMessageCount":0,"responseSurface":"halo"}
+[DEBUG] forcing tool_choice on first turn: "required"
+[DEBUG] assistant requested tool: {"toolName":"check_in_item","args":{"item_name":"Lime juice"}}
+[DEBUG] assistant final response: {"text":"Added to your kitchen:\n- Lime juice","type":"action_ack","quickItems":[],"toolCount":1}
+{"evt":"ai_op","service":"thyme","op":"chat_halo","owner_id":"fixture-user","model":"gpt-5.4-2026-03-05","latency_ms":4,"status":"success","outcome":{"version":"1","answer":"complete","actions":"confirmed","contract":"not_applicable","reason":null,"delivery":"unknown","client_render":"unknown"},"request_id":"e785ea6c-b10d-453b-8f78-5577701f730e","input":"add lime juice to my kitchen","output":"Added to your kitchen:\n- Lime juice [tools: check_in_item]","error":""}
+[DEBUG] assistant turn start: {"transcript":"check in lime juice and eggs","ownerId":"fixture-owner","userId":"fixture-user","tableOwnerId":"fixture-owner","shoppingNamespace":null,"sessionMessageCount":0,"responseSurface":"halo"}
+[DEBUG] forcing tool_choice on first turn: "required"
+[DEBUG] assistant requested tool: {"toolName":"check_in_many_items","args":{"items":[{"item_name":"Lime juice"},{"item_name":"Eggs"}]}}
+[DEBUG] assistant final response: {"text":"Added to your kitchen:\n- Lime juice\n- Eggs","type":"action_ack","quickItems":[],"toolCount":1}
+{"evt":"ai_op","service":"thyme","op":"chat_halo","owner_id":"fixture-user","model":"gpt-5.4-2026-03-05","latency_ms":2,"status":"success","outcome":{"version":"1","answer":"complete","actions":"confirmed","contract":"not_applicable","reason":null,"delivery":"unknown","client_render":"unknown"},"request_id":"98f6bf48-a648-4197-8a26-ade9bfad3e69","input":"check in lime juice and eggs","output":"Added to your kitchen:\n- Lime juice\n- Eggs [tools: check_in_many_items]","error":""}
+[DEBUG] assistant turn start: {"transcript":"add lime juice","ownerId":"fixture-owner","userId":"fixture-user","tableOwnerId":"fixture-owner","shoppingNamespace":null,"sessionMessageCount":0,"responseSurface":"app"}
+[DEBUG] assistant requested tool: {"toolName":"check_in_item","args":{"item_name":"Lime juice"}}
+[DEBUG] assistant final response: {"text":"Added to your kitchen:\n- Lime juice","type":"action_ack","quickItems":[],"toolCount":1}
+{"evt":"ai_op","service":"thyme","op":"chat_app","owner_id":"fixture-user","model":"gpt-5.4-2026-03-05","latency_ms":2,"status":"success","outcome":{"version":"1","answer":"complete","actions":"confirmed","contract":"not_applicable","reason":null,"delivery":"unknown","client_render":"unknown"},"request_id":"50fbe4e5-e511-4e46-9daf-a0a6b0d567ff","input":"add lime juice","output":"Added to your kitchen:\n- Lime juice [tools: check_in_item]","error":""}
+[DEBUG] assistant turn start: {"transcript":"add lime juice and eggs to my shopping list","ownerId":"fixture-owner","userId":"fixture-user","tableOwnerId":"fixture-owner","shoppingNamespace":null,"sessionMessageCount":0,"responseSurface":"app"}
+[DEBUG] forcing tool_choice on first turn: {"type":"function","function":{"name":"add_to_shopping_list"}}
+[DEBUG] assistant requested tool: {"toolName":"add_many_to_shopping_list","args":{"items":[{"item_name":"Lime juice"},{"item_name":"Eggs"}]}}
+[DEBUG] assistant final response: {"text":"Added to your shopping list:\n- Lime juice\n- Eggs","type":"action_ack","quickItems":["Lime juice","Eggs"],"toolCount":1}
+{"evt":"ai_op","service":"thyme","op":"chat_app","owner_id":"fixture-user","model":"gpt-5.4-2026-03-05","latency_ms":11,"status":"success","outcome":{"version":"1","answer":"complete","actions":"confirmed","contract":"not_applicable","reason":null,"delivery":"unknown","client_render":"unknown"},"request_id":"8ffdc7b9-8c8b-47cd-b296-dd93970798c8","input":"add lime juice and eggs to my shopping list","output":"Added to your shopping list:\n- Lime juice\n- Eggs [tools: add_many_to_shopping_list]","error":""}
+[DEBUG] assistant turn start: {"transcript":"How much lime juice should I add?","ownerId":"fixture-owner","userId":"fixture-user","tableOwnerId":"fixture-owner","shoppingNamespace":null,"sessionMessageCount":0,"responseSurface":"halo"}
+[DEBUG] assistant requested tool: {"toolName":"check_in_item","args":{"item_name":"Lime juice"}}
+{"evt":"assistant_tool_intent_blocked","reason":"write_not_authorized_by_question","tool":"check_in_item","allowed_tool":null,"userId":"fixture-user"}
+[DEBUG] assistant requested tool: {"toolName":"add_many_to_shopping_list","args":{"items":[{"item_name":"Lime juice"}]}}
+{"evt":"assistant_tool_intent_blocked","reason":"write_not_authorized_by_question","tool":"add_many_to_shopping_list","allowed_tool":null,"userId":"fixture-user"}
+[DEBUG] assistant final response: {"text":"Use a small squeeze and adjust to taste.","type":"info_answer","quickItems":[],"toolCount":2}
+{"evt":"ai_op","service":"thyme","op":"chat_halo","owner_id":"fixture-user","model":"gpt-5.4-2026-03-05","latency_ms":3,"status":"success","outcome":{"version":"1","answer":"complete","actions":"none","contract":"not_applicable","reason":null,"delivery":"unknown","client_render":"unknown"},"request_id":"3d242419-5354-44a0-9fec-2ac9d3d72d2e","input":"How much lime juice should I add?","output":"Use a small squeeze and adjust to taste. [tools: check_in_item, add_many_to_shopping_list]","error":""}
+[DEBUG] assistant turn start: {"transcript":"How much lime juice should I add?","ownerId":"fixture-owner","userId":"fixture-user","tableOwnerId":"fixture-owner","shoppingNamespace":null,"sessionMessageCount":0,"responseSurface":"app"}
+[DEBUG] assistant requested tool: {"toolName":"check_in_item","args":{"item_name":"Lime juice"}}
+{"evt":"assistant_tool_intent_blocked","reason":"write_not_authorized_by_question","tool":"check_in_item","allowed_tool":null,"userId":"fixture-user"}
+[DEBUG] assistant requested tool: {"toolName":"add_many_to_shopping_list","args":{"items":[{"item_name":"Lime juice"}]}}
+{"evt":"assistant_tool_intent_blocked","reason":"write_not_authorized_by_question","tool":"add_many_to_shopping_list","allowed_tool":null,"userId":"fixture-user"}
+[DEBUG] assistant final response: {"text":"Use a small squeeze and adjust to taste.","type":"info_answer","quickItems":[],"toolCount":2}
+{"evt":"ai_op","service":"thyme","op":"chat_app","owner_id":"fixture-user","model":"gpt-5.4-2026-03-05","latency_ms":2,"status":"success","outcome":{"version":"1","answer":"complete","actions":"none","contract":"not_applicable","reason":null,"delivery":"unknown","client_render":"unknown"},"request_id":"823faeae-8bb3-4d4d-975e-2037bad8db77","input":"How much lime juice should I add?","output":"Use a small squeeze and adjust to taste. [tools: check_in_item, add_many_to_shopping_list]","error":""}
+{"evt":"assistant_tool_intent_blocked","reason":"halo_add_requires_shopping","tool":"check_in_item","allowed_tool":null,"userId":"fixture-user"}
+{"evt":"ai_op","service":"thyme","op":"chat_halo","owner_id":"fixture-user","model":"gpt-5.4-2026-03-05","latency_ms":5,"status":"success","outcome":{"version":"1","answer":"complete","actions":"confirmed","contract":"not_applicable","reason":null,"delivery":"unknown","client_render":"unknown"},"request_id":"93d4d26f-5eed-490e-a0d2-272a951dcd17","input":"add lime juice","output":"Added to your shopping list:\n- Lime juice [tools: check_in_item, add_many_to_shopping_list]","error":""}
+{"evt":"assistant_tool_intent_blocked","reason":"halo_add_requires_shopping","tool":"check_in_many_items","allowed_tool":null,"userId":"fixture-user"}
+{"evt":"ai_op","service":"thyme","op":"chat_halo","owner_id":"fixture-user","model":"gpt-5.4-2026-03-05","latency_ms":3,"status":"success","outcome":{"version":"1","answer":"complete","actions":"confirmed","contract":"not_applicable","reason":null,"delivery":"unknown","client_render":"unknown"},"request_id":"83e5abf8-8313-42cc-b950-b72465635be3","input":"add lime juice and eggs","output":"Added to your shopping list:\n- Lime juice\n- Eggs [tools: check_in_many_items, add_many_to_shopping_list]","error":""}
+{"evt":"assistant_false_confirm","tool":"check_in_item","domain":"kitchen_add","userId":"fixture-user","recovered":false,"reason":"original_intent_not_authorized"}
+{"evt":"ai_op","service":"thyme","op":"chat_halo","owner_id":"fixture-user","model":"gpt-5.4-2026-03-05","latency_ms":2,"status":"success","outcome":{"version":"1","answer":"complete","actions":"confirmed","contract":"not_applicable","reason":null,"delivery":"unknown","client_render":"unknown"},"request_id":"7fc79217-429b-4bed-adf9-74b090c0c9a5","input":"add kitchen towels","output":"Added to your shopping list:\n- Kitchen towels [tools: add_many_to_shopping_list]","error":""}
+{"evt":"ai_op","service":"thyme","op":"chat_halo","owner_id":"fixture-user","model":"gpt-5.4-2026-03-05","latency_ms":2,"status":"success","outcome":{"version":"1","answer":"complete","actions":"confirmed","contract":"not_applicable","reason":null,"delivery":"unknown","client_render":"unknown"},"request_id":"a51e6808-19c0-434a-a0c6-56ebfd77c38e","input":"add lime juice to my kitchen","output":"Added to your kitchen:\n- Lime juice [tools: check_in_item]","error":""}
+{"evt":"ai_op","service":"thyme","op":"chat_halo","owner_id":"fixture-user","model":"gpt-5.4-2026-03-05","latency_ms":2,"status":"success","outcome":{"version":"1","answer":"complete","actions":"confirmed","contract":"not_applicable","reason":null,"delivery":"unknown","client_render":"unknown"},"request_id":"7384adff-64a5-4830-b0a3-d9b41aaa8508","input":"check in lime juice and eggs","output":"Added to your kitchen:\n- Lime juice\n- Eggs [tools: check_in_many_items]","error":""}
+{"evt":"ai_op","service":"thyme","op":"chat_app","owner_id":"fixture-user","model":"gpt-5.4-2026-03-05","latency_ms":2,"status":"success","outcome":{"version":"1","answer":"complete","actions":"confirmed","contract":"not_applicable","reason":null,"delivery":"unknown","client_render":"unknown"},"request_id":"57623b6a-f4ef-4dd5-a972-452a898f7c47","input":"add lime juice","output":"Added to your kitchen:\n- Lime juice [tools: check_in_item]","error":""}
+{"evt":"ai_op","service":"thyme","op":"chat_app","owner_id":"fixture-user","model":"gpt-5.4-2026-03-05","latency_ms":1,"status":"success","outcome":{"version":"1","answer":"complete","actions":"confirmed","contract":"not_applicable","reason":null,"delivery":"unknown","client_render":"unknown"},"request_id":"ddc52d3d-49d0-4665-8d70-b3d2f033f012","input":"add lime juice and eggs to my shopping list","output":"Added to your shopping list:\n- Lime juice\n- Eggs [tools: add_many_to_shopping_list]","error":""}
+{"evt":"assistant_tool_intent_blocked","reason":"write_not_authorized_by_question","tool":"check_in_item","allowed_tool":null,"userId":"fixture-user"}
+{"evt":"assistant_tool_intent_blocked","reason":"write_not_authorized_by_question","tool":"add_many_to_shopping_list","allowed_tool":null,"userId":"fixture-user"}
+{"evt":"ai_op","service":"thyme","op":"chat_halo","owner_id":"fixture-user","model":"gpt-5.4-2026-03-05","latency_ms":26,"status":"success","outcome":{"version":"1","answer":"complete","actions":"none","contract":"not_applicable","reason":null,"delivery":"unknown","client_render":"unknown"},"request_id":"f7a11112-3e65-4bcc-b832-8b3156786dd5","input":"How much lime juice should I add?","output":"Use a small squeeze and adjust to taste. [tools: check_in_item, add_many_to_shopping_list]","error":""}
+{"evt":"assistant_tool_intent_blocked","reason":"write_not_authorized_by_question","tool":"check_in_item","allowed_tool":null,"userId":"fixture-user"}
+{"evt":"assistant_tool_intent_blocked","reason":"write_not_authorized_by_question","tool":"add_many_to_shopping_list","allowed_tool":null,"userId":"fixture-user"}
+{"evt":"ai_op","service":"thyme","op":"chat_app","owner_id":"fixture-user","model":"gpt-5.4-2026-03-05","latency_ms":1,"status":"success","outcome":{"version":"1","answer":"complete","actions":"none","contract":"not_applicable","reason":null,"delivery":"unknown","client_render":"unknown"},"request_id":"498ed27f-8559-4113-b90c-ab2efd4db671","input":"How much lime juice should I add?","output":"Use a small squeeze and adjust to taste. [tools: check_in_item, add_many_to_shopping_list]","error":""}
+✔ sync: Halo plain add blocks attempted kitchen write then accepts shopping batch (317.845292ms)
+✔ sync: Halo plain multi-add preserves both items and denies batch kitchen write (5.583125ms)
+✔ sync: Halo kitchen towels confirmation cannot escalate shopping into a kitchen write (11.579459ms)
+✔ sync: explicit Halo kitchen destination preserves kitchen check-in (5.550791ms)
+✔ sync: explicit Halo check-in preserves multiple kitchen items (3.129333ms)
+✔ sync: app plain-add routing is unchanged (3.221084ms)
+✔ sync: app explicit shopping still accepts all requested items (11.615542ms)
+✔ sync: halo question cannot write kitchen or shopping (34.8755ms)
+✔ sync: app question cannot write kitchen or shopping (3.152416ms)
+✔ streaming: Halo plain add blocks attempted kitchen write then accepts shopping batch (5.472083ms)
+✔ streaming: Halo plain multi-add preserves both items and denies batch kitchen write (3.241ms)
+✔ streaming: Halo kitchen towels confirmation cannot escalate shopping into a kitchen write (1.938291ms)
+✔ streaming: explicit Halo kitchen destination preserves kitchen check-in (2.006083ms)
+✔ streaming: explicit Halo check-in preserves multiple kitchen items (1.751833ms)
+✔ streaming: app plain-add routing is unchanged (1.630292ms)
+✔ streaming: app explicit shopping still accepts all requested items (1.672875ms)
+✔ streaming: halo question cannot write kitchen or shopping (25.856375ms)
+✔ streaming: app question cannot write kitchen or shopping (1.927625ms)
+[DEBUG] kitchen row insert propagation: {"ownerId":"7fee6a27-a8c2-473a-b2aa-2f1e2e989a6a","userId":"7fee6a27-a8c2-473a-b2aa-2f1e2e989a6a","tableOwnerId":"7fee6a27-a8c2-473a-b2aa-2f1e2e989a6a","householdMemberIds":["7fee6a27-a8c2-473a-b2aa-2f1e2e989a6a"],"householdSize":1,"mode":"direct","row_id":"59409bc8-9043-4837-a9dd-5907474e24b8","item_name":"Ground Beef"}
+[DEBUG] kitchen item checked in: {"ownerId":"7fee6a27-a8c2-473a-b2aa-2f1e2e989a6a","userId":"7fee6a27-a8c2-473a-b2aa-2f1e2e989a6a","item_name":"Ground Beef","row_id":"59409bc8-9043-4837-a9dd-5907474e24b8","location":null}
+[DEBUG] kitchen row propagation: {"ownerId":"7fee6a27-a8c2-473a-b2aa-2f1e2e989a6a","userId":"7fee6a27-a8c2-473a-b2aa-2f1e2e989a6a","tableOwnerId":"7fee6a27-a8c2-473a-b2aa-2f1e2e989a6a","householdMemberIds":["7fee6a27-a8c2-473a-b2aa-2f1e2e989a6a"],"householdSize":1,"mode":"direct","row_id":"59409bc8-9043-4837-a9dd-5907474e24b8","fields":["remaining_quantity","quantity_value","quantity_unit","fill_percent"]}
+[DEBUG] kitchen item quantity updated: {"ownerId":"7fee6a27-a8c2-473a-b2aa-2f1e2e989a6a","userId":"7fee6a27-a8c2-473a-b2aa-2f1e2e989a6a","item_name":"Ground Beef","affected_count":1,"row_ids":["59409bc8-9043-4837-a9dd-5907474e24b8"],"remaining_quantity":"12.5 oz","fill_percent":null}
+[DEBUG] kitchen row insert propagation: {"ownerId":"57c0e670-56f9-4478-8633-7de295e5c0e7","userId":"57c0e670-56f9-4478-8633-7de295e5c0e7","tableOwnerId":"57c0e670-56f9-4478-8633-7de295e5c0e7","householdMemberIds":["57c0e670-56f9-4478-8633-7de295e5c0e7"],"householdSize":1,"mode":"direct","row_id":"80b3695a-40b8-4476-b13f-94677d31ff56","item_name":"Ground Beef"}
+✔ quantity text persists exactly: "12.5 oz" (217.877417ms)
+[DEBUG] kitchen item checked in: {"ownerId":"57c0e670-56f9-4478-8633-7de295e5c0e7","userId":"57c0e670-56f9-4478-8633-7de295e5c0e7","item_name":"Ground Beef","row_id":"80b3695a-40b8-4476-b13f-94677d31ff56","location":null}
+[DEBUG] kitchen row propagation: {"ownerId":"57c0e670-56f9-4478-8633-7de295e5c0e7","userId":"57c0e670-56f9-4478-8633-7de295e5c0e7","tableOwnerId":"57c0e670-56f9-4478-8633-7de295e5c0e7","householdMemberIds":["57c0e670-56f9-4478-8633-7de295e5c0e7"],"householdSize":1,"mode":"direct","row_id":"80b3695a-40b8-4476-b13f-94677d31ff56","fields":["remaining_quantity","quantity_value","quantity_unit","fill_percent"]}
+[DEBUG] kitchen item quantity updated: {"ownerId":"57c0e670-56f9-4478-8633-7de295e5c0e7","userId":"57c0e670-56f9-4478-8633-7de295e5c0e7","item_name":"Ground Beef","affected_count":1,"row_ids":["80b3695a-40b8-4476-b13f-94677d31ff56"],"remaining_quantity":"1/2 cup","fill_percent":null}
+[DEBUG] kitchen row insert propagation: {"ownerId":"b4f21c9a-7c95-4c7c-8753-f2b168f4d02b","userId":"b4f21c9a-7c95-4c7c-8753-f2b168f4d02b","tableOwnerId":"b4f21c9a-7c95-4c7c-8753-f2b168f4d02b","householdMemberIds":["b4f21c9a-7c95-4c7c-8753-f2b168f4d02b"],"householdSize":1,"mode":"direct","row_id":"9beb6c9f-47ec-4da0-9a5c-1d31d0db9dd2","item_name":"Ground Beef"}
+✔ quantity text persists exactly: "1/2 cup" (74.781041ms)
+[DEBUG] kitchen item checked in: {"ownerId":"b4f21c9a-7c95-4c7c-8753-f2b168f4d02b","userId":"b4f21c9a-7c95-4c7c-8753-f2b168f4d02b","item_name":"Ground Beef","row_id":"9beb6c9f-47ec-4da0-9a5c-1d31d0db9dd2","location":null}
+[DEBUG] kitchen row propagation: {"ownerId":"b4f21c9a-7c95-4c7c-8753-f2b168f4d02b","userId":"b4f21c9a-7c95-4c7c-8753-f2b168f4d02b","tableOwnerId":"b4f21c9a-7c95-4c7c-8753-f2b168f4d02b","householdMemberIds":["b4f21c9a-7c95-4c7c-8753-f2b168f4d02b"],"householdSize":1,"mode":"direct","row_id":"9beb6c9f-47ec-4da0-9a5c-1d31d0db9dd2","fields":["remaining_quantity","quantity_value","quantity_unit","fill_percent"]}
+[DEBUG] kitchen item quantity updated: {"ownerId":"b4f21c9a-7c95-4c7c-8753-f2b168f4d02b","userId":"b4f21c9a-7c95-4c7c-8753-f2b168f4d02b","item_name":"Ground Beef","affected_count":1,"row_ids":["9beb6c9f-47ec-4da0-9a5c-1d31d0db9dd2"],"remaining_quantity":"1 1/2 cups","fill_percent":null}
+[DEBUG] kitchen row insert propagation: {"ownerId":"b8c27de3-5033-4f23-bbc4-f4a874fffefe","userId":"b8c27de3-5033-4f23-bbc4-f4a874fffefe","tableOwnerId":"b8c27de3-5033-4f23-bbc4-f4a874fffefe","householdMemberIds":["b8c27de3-5033-4f23-bbc4-f4a874fffefe"],"householdSize":1,"mode":"direct","row_id":"947b4221-bbd0-401e-b199-ee599ad4b692","item_name":"Ground Beef"}
+✔ quantity text persists exactly: "1 1/2 cups" (70.989458ms)
+[DEBUG] kitchen item checked in: {"ownerId":"b8c27de3-5033-4f23-bbc4-f4a874fffefe","userId":"b8c27de3-5033-4f23-bbc4-f4a874fffefe","item_name":"Ground Beef","row_id":"947b4221-bbd0-401e-b199-ee599ad4b692","location":null}
+[DEBUG] kitchen row propagation: {"ownerId":"b8c27de3-5033-4f23-bbc4-f4a874fffefe","userId":"b8c27de3-5033-4f23-bbc4-f4a874fffefe","tableOwnerId":"b8c27de3-5033-4f23-bbc4-f4a874fffefe","householdMemberIds":["b8c27de3-5033-4f23-bbc4-f4a874fffefe"],"householdSize":1,"mode":"direct","row_id":"947b4221-bbd0-401e-b199-ee599ad4b692","fields":["remaining_quantity","quantity_value","quantity_unit","fill_percent"]}
+[DEBUG] kitchen item quantity updated: {"ownerId":"b8c27de3-5033-4f23-bbc4-f4a874fffefe","userId":"b8c27de3-5033-4f23-bbc4-f4a874fffefe","item_name":"Ground Beef","affected_count":1,"row_ids":["947b4221-bbd0-401e-b199-ee599ad4b692"],"remaining_quantity":"½ cup","fill_percent":null}
+[DEBUG] kitchen row insert propagation: {"ownerId":"a9aa2b76-0f41-47e1-bc03-379778205d7c","userId":"a9aa2b76-0f41-47e1-bc03-379778205d7c","tableOwnerId":"a9aa2b76-0f41-47e1-bc03-379778205d7c","householdMemberIds":["a9aa2b76-0f41-47e1-bc03-379778205d7c"],"householdSize":1,"mode":"direct","row_id":"d99e3703-2b2d-4c11-95f6-6dca8ed05d67","item_name":"Ground Beef"}
+✔ quantity text persists exactly: "½ cup" (34.573125ms)
+[DEBUG] kitchen item checked in: {"ownerId":"a9aa2b76-0f41-47e1-bc03-379778205d7c","userId":"a9aa2b76-0f41-47e1-bc03-379778205d7c","item_name":"Ground Beef","row_id":"d99e3703-2b2d-4c11-95f6-6dca8ed05d67","location":null}
+[DEBUG] kitchen row propagation: {"ownerId":"a9aa2b76-0f41-47e1-bc03-379778205d7c","userId":"a9aa2b76-0f41-47e1-bc03-379778205d7c","tableOwnerId":"a9aa2b76-0f41-47e1-bc03-379778205d7c","householdMemberIds":["a9aa2b76-0f41-47e1-bc03-379778205d7c"],"householdSize":1,"mode":"direct","row_id":"d99e3703-2b2d-4c11-95f6-6dca8ed05d67","fields":["remaining_quantity","quantity_value","quantity_unit","fill_percent"]}
+[DEBUG] kitchen item quantity updated: {"ownerId":"a9aa2b76-0f41-47e1-bc03-379778205d7c","userId":"a9aa2b76-0f41-47e1-bc03-379778205d7c","item_name":"Ground Beef","affected_count":1,"row_ids":["d99e3703-2b2d-4c11-95f6-6dca8ed05d67"],"remaining_quantity":"half a cup","fill_percent":null}
+[DEBUG] kitchen row insert propagation: {"ownerId":"ee374315-587f-41b9-ba42-491411070577","userId":"ee374315-587f-41b9-ba42-491411070577","tableOwnerId":"ee374315-587f-41b9-ba42-491411070577","householdMemberIds":["ee374315-587f-41b9-ba42-491411070577"],"householdSize":1,"mode":"direct","row_id":"73cbdf87-f0b2-456e-98d7-6f09be8579bc","item_name":"Ground Beef"}
+✔ quantity text persists exactly: "half a cup" (29.001583ms)
+[DEBUG] kitchen item checked in: {"ownerId":"ee374315-587f-41b9-ba42-491411070577","userId":"ee374315-587f-41b9-ba42-491411070577","item_name":"Ground Beef","row_id":"73cbdf87-f0b2-456e-98d7-6f09be8579bc","location":null}
+[DEBUG] kitchen row propagation: {"ownerId":"ee374315-587f-41b9-ba42-491411070577","userId":"ee374315-587f-41b9-ba42-491411070577","tableOwnerId":"ee374315-587f-41b9-ba42-491411070577","householdMemberIds":["ee374315-587f-41b9-ba42-491411070577"],"householdSize":1,"mode":"direct","row_id":"73cbdf87-f0b2-456e-98d7-6f09be8579bc","fields":["remaining_quantity","quantity_value","quantity_unit","fill_percent"]}
+[DEBUG] kitchen item quantity updated: {"ownerId":"ee374315-587f-41b9-ba42-491411070577","userId":"ee374315-587f-41b9-ba42-491411070577","item_name":"Ground Beef","affected_count":1,"row_ids":["73cbdf87-f0b2-456e-98d7-6f09be8579bc"],"remaining_quantity":"125 g","fill_percent":null}
+[DEBUG] kitchen row insert propagation: {"ownerId":"3e22095d-a784-4ded-8641-d8a4c88fd52e","userId":"3e22095d-a784-4ded-8641-d8a4c88fd52e","tableOwnerId":"3e22095d-a784-4ded-8641-d8a4c88fd52e","householdMemberIds":["3e22095d-a784-4ded-8641-d8a4c88fd52e"],"householdSize":1,"mode":"direct","row_id":"eddb5195-3e2a-4ce0-8a5a-106fccc905fe","item_name":"Ground Beef"}
+✔ quantity text persists exactly: "125 g" (30.264417ms)
+[DEBUG] kitchen item checked in: {"ownerId":"3e22095d-a784-4ded-8641-d8a4c88fd52e","userId":"3e22095d-a784-4ded-8641-d8a4c88fd52e","item_name":"Ground Beef","row_id":"eddb5195-3e2a-4ce0-8a5a-106fccc905fe","location":null}
+[DEBUG] kitchen row propagation: {"ownerId":"3e22095d-a784-4ded-8641-d8a4c88fd52e","userId":"3e22095d-a784-4ded-8641-d8a4c88fd52e","tableOwnerId":"3e22095d-a784-4ded-8641-d8a4c88fd52e","householdMemberIds":["3e22095d-a784-4ded-8641-d8a4c88fd52e"],"householdSize":1,"mode":"direct","row_id":"eddb5195-3e2a-4ce0-8a5a-106fccc905fe","fields":["remaining_quantity","quantity_value","quantity_unit","fill_percent"]}
+[DEBUG] kitchen item quantity updated: {"ownerId":"3e22095d-a784-4ded-8641-d8a4c88fd52e","userId":"3e22095d-a784-4ded-8641-d8a4c88fd52e","item_name":"Ground Beef","affected_count":1,"row_ids":["eddb5195-3e2a-4ce0-8a5a-106fccc905fe"],"remaining_quantity":"2 items left","fill_percent":null}
+[DEBUG] kitchen row insert propagation: {"ownerId":"5d768da9-997a-4248-ad94-1dc5c7f5f9b2","userId":"5d768da9-997a-4248-ad94-1dc5c7f5f9b2","tableOwnerId":"5d768da9-997a-4248-ad94-1dc5c7f5f9b2","householdMemberIds":["5d768da9-997a-4248-ad94-1dc5c7f5f9b2"],"householdSize":1,"mode":"direct","row_id":"64d22d3e-d6e5-4301-b75d-c596f5f2c18c","item_name":"Ground Beef"}
+✔ quantity text persists exactly: "2 items left" (36.352708ms)
+[DEBUG] kitchen item checked in: {"ownerId":"5d768da9-997a-4248-ad94-1dc5c7f5f9b2","userId":"5d768da9-997a-4248-ad94-1dc5c7f5f9b2","item_name":"Ground Beef","row_id":"64d22d3e-d6e5-4301-b75d-c596f5f2c18c","location":null}
+[DEBUG] kitchen row propagation: {"ownerId":"5d768da9-997a-4248-ad94-1dc5c7f5f9b2","userId":"5d768da9-997a-4248-ad94-1dc5c7f5f9b2","tableOwnerId":"5d768da9-997a-4248-ad94-1dc5c7f5f9b2","householdMemberIds":["5d768da9-997a-4248-ad94-1dc5c7f5f9b2"],"householdSize":1,"mode":"direct","row_id":"64d22d3e-d6e5-4301-b75d-c596f5f2c18c","fields":["remaining_quantity","quantity_value","quantity_unit","fill_percent"]}
+[DEBUG] kitchen item quantity updated: {"ownerId":"5d768da9-997a-4248-ad94-1dc5c7f5f9b2","userId":"5d768da9-997a-4248-ad94-1dc5c7f5f9b2","item_name":"Ground Beef","affected_count":1,"row_ids":["64d22d3e-d6e5-4301-b75d-c596f5f2c18c"],"remaining_quantity":".5 oz","fill_percent":null}
+[DEBUG] kitchen row insert propagation: {"ownerId":"a197a984-e36d-4b8f-812c-b0b9d5045dbf","userId":"a197a984-e36d-4b8f-812c-b0b9d5045dbf","tableOwnerId":"a197a984-e36d-4b8f-812c-b0b9d5045dbf","householdMemberIds":["a197a984-e36d-4b8f-812c-b0b9d5045dbf"],"householdSize":1,"mode":"direct","row_id":"f7695d6e-9b55-4bb6-9d4f-344be0ea4500","item_name":"Ground Beef"}
+✔ quantity text persists exactly: ".5 oz" (30.201708ms)
+[DEBUG] kitchen item checked in: {"ownerId":"a197a984-e36d-4b8f-812c-b0b9d5045dbf","userId":"a197a984-e36d-4b8f-812c-b0b9d5045dbf","item_name":"Ground Beef","row_id":"f7695d6e-9b55-4bb6-9d4f-344be0ea4500","location":null}
+[DEBUG] kitchen row propagation: {"ownerId":"a197a984-e36d-4b8f-812c-b0b9d5045dbf","userId":"a197a984-e36d-4b8f-812c-b0b9d5045dbf","tableOwnerId":"a197a984-e36d-4b8f-812c-b0b9d5045dbf","householdMemberIds":["a197a984-e36d-4b8f-812c-b0b9d5045dbf"],"householdSize":1,"mode":"direct","row_id":"f7695d6e-9b55-4bb6-9d4f-344be0ea4500","fields":["remaining_quantity","quantity_value","quantity_unit","fill_percent"]}
+[DEBUG] kitchen item quantity updated: {"ownerId":"a197a984-e36d-4b8f-812c-b0b9d5045dbf","userId":"a197a984-e36d-4b8f-812c-b0b9d5045dbf","item_name":"Ground Beef","affected_count":1,"row_ids":["f7695d6e-9b55-4bb6-9d4f-344be0ea4500"],"remaining_quantity":"one ounce","fill_percent":null}
+[DEBUG] kitchen row insert propagation: {"ownerId":"a73a8c02-7005-46d5-9cd9-9ff79fd44398","userId":"a73a8c02-7005-46d5-9cd9-9ff79fd44398","tableOwnerId":"a73a8c02-7005-46d5-9cd9-9ff79fd44398","householdMemberIds":["a73a8c02-7005-46d5-9cd9-9ff79fd44398"],"householdSize":1,"mode":"direct","row_id":"776ddb91-3ef3-4b98-a9bd-e530c7a6e9da","item_name":"Ground Beef"}
+✔ quantity text persists exactly: "one ounce" (32.03325ms)
+[DEBUG] kitchen item checked in: {"ownerId":"a73a8c02-7005-46d5-9cd9-9ff79fd44398","userId":"a73a8c02-7005-46d5-9cd9-9ff79fd44398","item_name":"Ground Beef","row_id":"776ddb91-3ef3-4b98-a9bd-e530c7a6e9da","location":null}
+[DEBUG] kitchen row propagation: {"ownerId":"a73a8c02-7005-46d5-9cd9-9ff79fd44398","userId":"a73a8c02-7005-46d5-9cd9-9ff79fd44398","tableOwnerId":"a73a8c02-7005-46d5-9cd9-9ff79fd44398","householdMemberIds":["a73a8c02-7005-46d5-9cd9-9ff79fd44398"],"householdSize":1,"mode":"direct","row_id":"776ddb91-3ef3-4b98-a9bd-e530c7a6e9da","fields":["remaining_quantity","quantity_value","quantity_unit","fill_percent"]}
+[DEBUG] kitchen item quantity updated: {"ownerId":"a73a8c02-7005-46d5-9cd9-9ff79fd44398","userId":"a73a8c02-7005-46d5-9cd9-9ff79fd44398","item_name":"Ground Beef","affected_count":1,"row_ids":["776ddb91-3ef3-4b98-a9bd-e530c7a6e9da"],"remaining_quantity":"half a bushel","fill_percent":null}
+[DEBUG] kitchen row insert propagation: {"ownerId":"8545347d-d397-4ea2-b0a6-aeb2a531ec9f","userId":"8545347d-d397-4ea2-b0a6-aeb2a531ec9f","tableOwnerId":"8545347d-d397-4ea2-b0a6-aeb2a531ec9f","householdMemberIds":["8545347d-d397-4ea2-b0a6-aeb2a531ec9f"],"householdSize":1,"mode":"direct","row_id":"a72e79ee-02f1-4e4d-a1ad-66520d56c4eb","item_name":"Ground Beef"}
+✔ quantity text persists exactly: "half a bushel" (32.670916ms)
+[DEBUG] kitchen item checked in: {"ownerId":"8545347d-d397-4ea2-b0a6-aeb2a531ec9f","userId":"8545347d-d397-4ea2-b0a6-aeb2a531ec9f","item_name":"Ground Beef","row_id":"a72e79ee-02f1-4e4d-a1ad-66520d56c4eb","location":null}
+[DEBUG] kitchen row propagation: {"ownerId":"8545347d-d397-4ea2-b0a6-aeb2a531ec9f","userId":"8545347d-d397-4ea2-b0a6-aeb2a531ec9f","tableOwnerId":"8545347d-d397-4ea2-b0a6-aeb2a531ec9f","householdMemberIds":["8545347d-d397-4ea2-b0a6-aeb2a531ec9f"],"householdSize":1,"mode":"direct","row_id":"a72e79ee-02f1-4e4d-a1ad-66520d56c4eb","fields":["remaining_quantity","quantity_value","quantity_unit","fill_percent"]}
+[DEBUG] kitchen item quantity updated: {"ownerId":"8545347d-d397-4ea2-b0a6-aeb2a531ec9f","userId":"8545347d-d397-4ea2-b0a6-aeb2a531ec9f","item_name":"Ground Beef","affected_count":1,"row_ids":["a72e79ee-02f1-4e4d-a1ad-66520d56c4eb"],"remaining_quantity":"half of 25 oz","fill_percent":null}
+[DEBUG] kitchen row insert propagation: {"ownerId":"85508f7e-8b1d-4bce-a0af-f532bfbf5de6","userId":"85508f7e-8b1d-4bce-a0af-f532bfbf5de6","tableOwnerId":"85508f7e-8b1d-4bce-a0af-f532bfbf5de6","householdMemberIds":["85508f7e-8b1d-4bce-a0af-f532bfbf5de6"],"householdSize":1,"mode":"direct","row_id":"746ce2f3-50ca-4cf7-9dc5-759f1e88851d","item_name":"Ground Beef"}
+✔ quantity text persists exactly: "half of 25 oz" (27.991792ms)
+[DEBUG] kitchen item checked in: {"ownerId":"85508f7e-8b1d-4bce-a0af-f532bfbf5de6","userId":"85508f7e-8b1d-4bce-a0af-f532bfbf5de6","item_name":"Ground Beef","row_id":"746ce2f3-50ca-4cf7-9dc5-759f1e88851d","location":null}
+[DEBUG] kitchen row propagation: {"ownerId":"85508f7e-8b1d-4bce-a0af-f532bfbf5de6","userId":"85508f7e-8b1d-4bce-a0af-f532bfbf5de6","tableOwnerId":"85508f7e-8b1d-4bce-a0af-f532bfbf5de6","householdMemberIds":["85508f7e-8b1d-4bce-a0af-f532bfbf5de6"],"householdSize":1,"mode":"direct","row_id":"746ce2f3-50ca-4cf7-9dc5-759f1e88851d","fields":["remaining_quantity","quantity_value","quantity_unit","fill_percent"]}
+[DEBUG] kitchen item quantity updated: {"ownerId":"85508f7e-8b1d-4bce-a0af-f532bfbf5de6","userId":"85508f7e-8b1d-4bce-a0af-f532bfbf5de6","item_name":"Ground Beef","affected_count":1,"row_ids":["746ce2f3-50ca-4cf7-9dc5-759f1e88851d"],"remaining_quantity":"a quarter of 200 g","fill_percent":null}
+[DEBUG] kitchen row insert propagation: {"ownerId":"fc9fc2c0-a06f-46e6-9206-3f3f9b06b9f5","userId":"fc9fc2c0-a06f-46e6-9206-3f3f9b06b9f5","tableOwnerId":"fc9fc2c0-a06f-46e6-9206-3f3f9b06b9f5","householdMemberIds":["fc9fc2c0-a06f-46e6-9206-3f3f9b06b9f5"],"householdSize":1,"mode":"direct","row_id":"a9d5bf44-4dde-4ca5-9426-336d1b92bd1c","item_name":"Ground Beef"}
+✔ quantity text persists exactly: "a quarter of 200 g" (32.390166ms)
+[DEBUG] kitchen item checked in: {"ownerId":"fc9fc2c0-a06f-46e6-9206-3f3f9b06b9f5","userId":"fc9fc2c0-a06f-46e6-9206-3f3f9b06b9f5","item_name":"Ground Beef","row_id":"a9d5bf44-4dde-4ca5-9426-336d1b92bd1c","location":null}
+[DEBUG] kitchen row propagation: {"ownerId":"fc9fc2c0-a06f-46e6-9206-3f3f9b06b9f5","userId":"fc9fc2c0-a06f-46e6-9206-3f3f9b06b9f5","tableOwnerId":"fc9fc2c0-a06f-46e6-9206-3f3f9b06b9f5","householdMemberIds":["fc9fc2c0-a06f-46e6-9206-3f3f9b06b9f5"],"householdSize":1,"mode":"direct","row_id":"a9d5bf44-4dde-4ca5-9426-336d1b92bd1c","fields":["remaining_quantity","quantity_value","quantity_unit","fill_percent"]}
+[DEBUG] kitchen item quantity updated: {"ownerId":"fc9fc2c0-a06f-46e6-9206-3f3f9b06b9f5","userId":"fc9fc2c0-a06f-46e6-9206-3f3f9b06b9f5","item_name":"Ground Beef","affected_count":1,"row_ids":["a9d5bf44-4dde-4ca5-9426-336d1b92bd1c"],"remaining_quantity":"1/2 of 25 oz","fill_percent":null}
+[DEBUG] kitchen row insert propagation: {"ownerId":"8fab1546-d829-40c2-b71b-63161d08f9e8","userId":"8fab1546-d829-40c2-b71b-63161d08f9e8","tableOwnerId":"8fab1546-d829-40c2-b71b-63161d08f9e8","householdMemberIds":["8fab1546-d829-40c2-b71b-63161d08f9e8"],"householdSize":1,"mode":"direct","row_id":"c00f79bf-3256-4e43-a816-5d6f959985cb","item_name":"Ground Beef"}
+✔ quantity text persists exactly: "1/2 of 25 oz" (32.788583ms)
+[DEBUG] kitchen item checked in: {"ownerId":"8fab1546-d829-40c2-b71b-63161d08f9e8","userId":"8fab1546-d829-40c2-b71b-63161d08f9e8","item_name":"Ground Beef","row_id":"c00f79bf-3256-4e43-a816-5d6f959985cb","location":null}
+[DEBUG] kitchen row propagation: {"ownerId":"8fab1546-d829-40c2-b71b-63161d08f9e8","userId":"8fab1546-d829-40c2-b71b-63161d08f9e8","tableOwnerId":"8fab1546-d829-40c2-b71b-63161d08f9e8","householdMemberIds":["8fab1546-d829-40c2-b71b-63161d08f9e8"],"householdSize":1,"mode":"direct","row_id":"c00f79bf-3256-4e43-a816-5d6f959985cb","fields":["remaining_quantity","quantity_value","quantity_unit","fill_percent"]}
+[DEBUG] kitchen item quantity updated: {"ownerId":"8fab1546-d829-40c2-b71b-63161d08f9e8","userId":"8fab1546-d829-40c2-b71b-63161d08f9e8","item_name":"Ground Beef","affected_count":1,"row_ids":["c00f79bf-3256-4e43-a816-5d6f959985cb"],"remaining_quantity":"two one-cup portions","fill_percent":null}
+[DEBUG] kitchen row insert propagation: {"ownerId":"e9d9cd58-566b-4b4e-b51e-ff406c815e82","userId":"e9d9cd58-566b-4b4e-b51e-ff406c815e82","tableOwnerId":"e9d9cd58-566b-4b4e-b51e-ff406c815e82","householdMemberIds":["e9d9cd58-566b-4b4e-b51e-ff406c815e82"],"householdSize":1,"mode":"direct","row_id":"31aefc84-9470-48f6-8e55-f3d9e1848357","item_name":"Ground Beef"}
+✔ quantity text persists exactly: "two one-cup portions" (30.556667ms)
+[DEBUG] kitchen item checked in: {"ownerId":"e9d9cd58-566b-4b4e-b51e-ff406c815e82","userId":"e9d9cd58-566b-4b4e-b51e-ff406c815e82","item_name":"Ground Beef","row_id":"31aefc84-9470-48f6-8e55-f3d9e1848357","location":null}
+[DEBUG] kitchen row propagation: {"ownerId":"e9d9cd58-566b-4b4e-b51e-ff406c815e82","userId":"e9d9cd58-566b-4b4e-b51e-ff406c815e82","tableOwnerId":"e9d9cd58-566b-4b4e-b51e-ff406c815e82","householdMemberIds":["e9d9cd58-566b-4b4e-b51e-ff406c815e82"],"householdSize":1,"mode":"direct","row_id":"31aefc84-9470-48f6-8e55-f3d9e1848357","fields":["remaining_quantity","quantity_value","quantity_unit","fill_percent"]}
+[DEBUG] kitchen item quantity updated: {"ownerId":"e9d9cd58-566b-4b4e-b51e-ff406c815e82","userId":"e9d9cd58-566b-4b4e-b51e-ff406c815e82","item_name":"Ground Beef","affected_count":1,"row_ids":["31aefc84-9470-48f6-8e55-f3d9e1848357"],"remaining_quantity":"3 1/2-cup portions","fill_percent":null}
+[DEBUG] kitchen row insert propagation: {"ownerId":"7beab282-3f46-4035-b238-8f0cbfe2372f","userId":"7beab282-3f46-4035-b238-8f0cbfe2372f","tableOwnerId":"7beab282-3f46-4035-b238-8f0cbfe2372f","householdMemberIds":["7beab282-3f46-4035-b238-8f0cbfe2372f"],"householdSize":1,"mode":"direct","row_id":"04268907-e69d-445f-8ef9-29281c081dcd","item_name":"Ground Beef"}
+✔ quantity text persists exactly: "3 1/2-cup portions" (29.023833ms)
+[DEBUG] kitchen item checked in: {"ownerId":"7beab282-3f46-4035-b238-8f0cbfe2372f","userId":"7beab282-3f46-4035-b238-8f0cbfe2372f","item_name":"Ground Beef","row_id":"04268907-e69d-445f-8ef9-29281c081dcd","location":null}
+[DEBUG] kitchen row propagation: {"ownerId":"7beab282-3f46-4035-b238-8f0cbfe2372f","userId":"7beab282-3f46-4035-b238-8f0cbfe2372f","tableOwnerId":"7beab282-3f46-4035-b238-8f0cbfe2372f","householdMemberIds":["7beab282-3f46-4035-b238-8f0cbfe2372f"],"householdSize":1,"mode":"direct","row_id":"04268907-e69d-445f-8ef9-29281c081dcd","fields":["remaining_quantity","quantity_value","quantity_unit","fill_percent"]}
+[DEBUG] kitchen item quantity updated: {"ownerId":"7beab282-3f46-4035-b238-8f0cbfe2372f","userId":"7beab282-3f46-4035-b238-8f0cbfe2372f","item_name":"Ground Beef","affected_count":1,"row_ids":["04268907-e69d-445f-8ef9-29281c081dcd"],"remaining_quantity":"two 8-ounce bottles","fill_percent":null}
+[DEBUG] kitchen row insert propagation: {"ownerId":"32fc7ec9-8a13-4c7c-b546-53b8116482e4","userId":"32fc7ec9-8a13-4c7c-b546-53b8116482e4","tableOwnerId":"32fc7ec9-8a13-4c7c-b546-53b8116482e4","householdMemberIds":["32fc7ec9-8a13-4c7c-b546-53b8116482e4"],"householdSize":1,"mode":"direct","row_id":"5a5d44b3-5249-4c53-8c54-2325d8e3bbd5","item_name":"Ground Beef"}
+✔ quantity text persists exactly: "two 8-ounce bottles" (30.42225ms)
+[DEBUG] kitchen item checked in: {"ownerId":"32fc7ec9-8a13-4c7c-b546-53b8116482e4","userId":"32fc7ec9-8a13-4c7c-b546-53b8116482e4","item_name":"Ground Beef","row_id":"5a5d44b3-5249-4c53-8c54-2325d8e3bbd5","location":null}
+[DEBUG] kitchen row propagation: {"ownerId":"32fc7ec9-8a13-4c7c-b546-53b8116482e4","userId":"32fc7ec9-8a13-4c7c-b546-53b8116482e4","tableOwnerId":"32fc7ec9-8a13-4c7c-b546-53b8116482e4","householdMemberIds":["32fc7ec9-8a13-4c7c-b546-53b8116482e4"],"householdSize":1,"mode":"direct","row_id":"5a5d44b3-5249-4c53-8c54-2325d8e3bbd5","fields":["remaining_quantity","quantity_value","quantity_unit","fill_percent"]}
+[DEBUG] kitchen item quantity updated: {"ownerId":"32fc7ec9-8a13-4c7c-b546-53b8116482e4","userId":"32fc7ec9-8a13-4c7c-b546-53b8116482e4","item_name":"Ground Beef","affected_count":1,"row_ids":["5a5d44b3-5249-4c53-8c54-2325d8e3bbd5"],"remaining_quantity":null,"fill_percent":null}
+[DEBUG] kitchen row insert propagation: {"ownerId":"12d0990b-9ea9-4637-b8cc-fb8de055bcdd","userId":"12d0990b-9ea9-4637-b8cc-fb8de055bcdd","tableOwnerId":"12d0990b-9ea9-4637-b8cc-fb8de055bcdd","householdMemberIds":["12d0990b-9ea9-4637-b8cc-fb8de055bcdd"],"householdSize":1,"mode":"direct","row_id":"b21c6805-e208-4885-a9cb-25b7684fa0b0","item_name":"Ground Beef"}
+✔ quantity text persists exactly: {"quantity_value":12.5,"quantity_unit":"oz"} (29.265584ms)
+[DEBUG] kitchen item checked in: {"ownerId":"12d0990b-9ea9-4637-b8cc-fb8de055bcdd","userId":"12d0990b-9ea9-4637-b8cc-fb8de055bcdd","item_name":"Ground Beef","row_id":"b21c6805-e208-4885-a9cb-25b7684fa0b0","location":null}
+[DEBUG] kitchen row propagation: {"ownerId":"12d0990b-9ea9-4637-b8cc-fb8de055bcdd","userId":"12d0990b-9ea9-4637-b8cc-fb8de055bcdd","tableOwnerId":"12d0990b-9ea9-4637-b8cc-fb8de055bcdd","householdMemberIds":["12d0990b-9ea9-4637-b8cc-fb8de055bcdd"],"householdSize":1,"mode":"direct","row_id":"b21c6805-e208-4885-a9cb-25b7684fa0b0","fields":["remaining_quantity","quantity_value","quantity_unit","fill_percent"]}
+[DEBUG] kitchen item quantity updated: {"ownerId":"12d0990b-9ea9-4637-b8cc-fb8de055bcdd","userId":"12d0990b-9ea9-4637-b8cc-fb8de055bcdd","item_name":"Ground Beef","affected_count":1,"row_ids":["b21c6805-e208-4885-a9cb-25b7684fa0b0"],"remaining_quantity":"half of the ground beef","fill_percent":null}
+[DEBUG] kitchen row insert propagation: {"ownerId":"e8605349-ff92-4730-9d0d-07a2ad688420","userId":"e8605349-ff92-4730-9d0d-07a2ad688420","tableOwnerId":"e8605349-ff92-4730-9d0d-07a2ad688420","householdMemberIds":["e8605349-ff92-4730-9d0d-07a2ad688420"],"householdSize":1,"mode":"direct","row_id":"acab258f-3db8-4d90-ad85-a5f10854a6bb","item_name":"Ground Beef"}
+✔ quantity text persists exactly: {"quantity_value":12.5,"quantity_unit":"oz","remaining_quantity":"half of the ground beef"} (33.454292ms)
+[DEBUG] kitchen item checked in: {"ownerId":"e8605349-ff92-4730-9d0d-07a2ad688420","userId":"e8605349-ff92-4730-9d0d-07a2ad688420","item_name":"Ground Beef","row_id":"acab258f-3db8-4d90-ad85-a5f10854a6bb","location":null}
+[DEBUG] kitchen row propagation: {"ownerId":"e8605349-ff92-4730-9d0d-07a2ad688420","userId":"e8605349-ff92-4730-9d0d-07a2ad688420","tableOwnerId":"e8605349-ff92-4730-9d0d-07a2ad688420","householdMemberIds":["e8605349-ff92-4730-9d0d-07a2ad688420"],"householdSize":1,"mode":"direct","row_id":"acab258f-3db8-4d90-ad85-a5f10854a6bb","fields":["remaining_quantity","quantity_value","quantity_unit","fill_percent"]}
+[DEBUG] kitchen item quantity updated: {"ownerId":"e8605349-ff92-4730-9d0d-07a2ad688420","userId":"e8605349-ff92-4730-9d0d-07a2ad688420","item_name":"Ground Beef","affected_count":1,"row_ids":["acab258f-3db8-4d90-ad85-a5f10854a6bb"],"remaining_quantity":"12.5 oz","fill_percent":null}
+[DEBUG] kitchen row insert propagation: {"ownerId":"6e831a76-62c1-40bb-91c1-dd0586449b8e","userId":"6e831a76-62c1-40bb-91c1-dd0586449b8e","tableOwnerId":"6e831a76-62c1-40bb-91c1-dd0586449b8e","householdMemberIds":["6e831a76-62c1-40bb-91c1-dd0586449b8e"],"householdSize":1,"mode":"direct","row_id":"9bbefd02-d0fc-44d6-81d4-596736396bdb","item_name":"Ground Beef"}
+✔ quantity text persists exactly: {"remaining_quantity":"12.5 oz","quantity_value":null,"fill_percent":null} (28.135667ms)
+[DEBUG] kitchen item checked in: {"ownerId":"6e831a76-62c1-40bb-91c1-dd0586449b8e","userId":"6e831a76-62c1-40bb-91c1-dd0586449b8e","item_name":"Ground Beef","row_id":"9bbefd02-d0fc-44d6-81d4-596736396bdb","location":null}
+[DEBUG] kitchen row insert propagation: {"ownerId":"37294f7b-974b-47d4-ad26-aa281acd153c","userId":"37294f7b-974b-47d4-ad26-aa281acd153c","tableOwnerId":"37294f7b-974b-47d4-ad26-aa281acd153c","householdMemberIds":["37294f7b-974b-47d4-ad26-aa281acd153c"],"householdSize":1,"mode":"direct","row_id":"4441a219-4f08-4066-8f71-5975dc2209f0","item_name":"Ground Beef"}
+✔ invalid text 1/0 cup leaves the original amount intact (27.539083ms)
+[DEBUG] kitchen item checked in: {"ownerId":"37294f7b-974b-47d4-ad26-aa281acd153c","userId":"37294f7b-974b-47d4-ad26-aa281acd153c","item_name":"Ground Beef","row_id":"4441a219-4f08-4066-8f71-5975dc2209f0","location":null}
+[DEBUG] kitchen row insert propagation: {"ownerId":"816d0bf3-3111-424b-927e-0247c7c84f47","userId":"816d0bf3-3111-424b-927e-0247c7c84f47","tableOwnerId":"816d0bf3-3111-424b-927e-0247c7c84f47","householdMemberIds":["816d0bf3-3111-424b-927e-0247c7c84f47"],"householdSize":1,"mode":"direct","row_id":"8687de39-a72b-441e-bfa6-5934fc808e36","item_name":"Ground Beef"}
+✔ invalid text -1 oz leaves the original amount intact (25.45025ms)
+[DEBUG] kitchen item checked in: {"ownerId":"816d0bf3-3111-424b-927e-0247c7c84f47","userId":"816d0bf3-3111-424b-927e-0247c7c84f47","item_name":"Ground Beef","row_id":"8687de39-a72b-441e-bfa6-5934fc808e36","location":null}
+[DEBUG] kitchen row insert propagation: {"ownerId":"64a16106-0684-450f-a409-266180a11875","userId":"64a16106-0684-450f-a409-266180a11875","tableOwnerId":"64a16106-0684-450f-a409-266180a11875","householdMemberIds":["64a16106-0684-450f-a409-266180a11875"],"householdSize":1,"mode":"direct","row_id":"9ef5ea87-1aec-4e09-9d5b-2318e852b574","item_name":"Ground Beef"}
+✔ invalid text 1/0 of 25 oz leaves the original amount intact (24.655959ms)
+[DEBUG] kitchen item checked in: {"ownerId":"64a16106-0684-450f-a409-266180a11875","userId":"64a16106-0684-450f-a409-266180a11875","item_name":"Ground Beef","row_id":"9ef5ea87-1aec-4e09-9d5b-2318e852b574","location":null}
+[DEBUG] kitchen row insert propagation: {"ownerId":"5b6111cb-fe48-406c-a2bc-cce61b61638e","userId":"5b6111cb-fe48-406c-a2bc-cce61b61638e","tableOwnerId":"5b6111cb-fe48-406c-a2bc-cce61b61638e","householdMemberIds":["5b6111cb-fe48-406c-a2bc-cce61b61638e"],"householdSize":1,"mode":"direct","row_id":"afcb210a-304a-4273-b42e-577b053b90e9","item_name":"Ground Beef"}
+✔ invalid text half of half of 25 oz leaves the original amount intact (30.202416ms)
+[DEBUG] kitchen item checked in: {"ownerId":"5b6111cb-fe48-406c-a2bc-cce61b61638e","userId":"5b6111cb-fe48-406c-a2bc-cce61b61638e","item_name":"Ground Beef","row_id":"afcb210a-304a-4273-b42e-577b053b90e9","location":null}
+[DEBUG] kitchen row insert propagation: {"ownerId":"009fe87f-c9e9-46a1-85f9-dad62fcbf4ba","userId":"009fe87f-c9e9-46a1-85f9-dad62fcbf4ba","tableOwnerId":"009fe87f-c9e9-46a1-85f9-dad62fcbf4ba","householdMemberIds":["009fe87f-c9e9-46a1-85f9-dad62fcbf4ba"],"householdSize":1,"mode":"direct","row_id":"3ca6326b-81e4-4c8a-84ef-dfc4910a90d1","item_name":"Ground Beef"}
+✔ invalid text -1/2 of 25 oz leaves the original amount intact (186.764042ms)
+[DEBUG] kitchen item checked in: {"ownerId":"009fe87f-c9e9-46a1-85f9-dad62fcbf4ba","userId":"009fe87f-c9e9-46a1-85f9-dad62fcbf4ba","item_name":"Ground Beef","row_id":"3ca6326b-81e4-4c8a-84ef-dfc4910a90d1","location":null}
+✔ invalid text half of the ground beef leaves the original amount intact (36.295917ms)
+(node:8437) ExperimentalWarning: Module mocking is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+[DEBUG] assistant turn start: {"transcript":"Garlic oil, olive oil","ownerId":"house","userId":"actor","tableOwnerId":null,"shoppingNamespace":null,"sessionMessageCount":0,"responseSurface":"app"}
+[DEBUG] assistant requested tool: {"toolName":"check_in_many_items","args":{"items":[{"item_name":"Garlic oil"},{"item_name":"Olive oil"}]}}
+{"evt":"assistant_false_confirm","tool":"log_dish_ingredients","domain":"dishes","userId":"actor","recovered":false,"reason":"original_intent_not_authorized"}
+[DEBUG] assistant final response: {"text":"Is that one flavored oil, or two separate products?","type":"action_ack","quickItems":[],"toolCount":1}
+{"evt":"ai_op","service":"thyme","op":"chat_app","owner_id":"actor","model":"gpt-5.4-2026-03-05","latency_ms":33,"status":"needs_clarification","outcome":{"version":"1","answer":"needs_clarification","actions":"none","contract":"not_applicable","reason":null,"delivery":"unknown","client_render":"unknown"},"request_id":"80369b28-a173-4270-a9d9-6141f5b04d0b","input":"Garlic oil, olive oil","output":"Is that one flavored oil, or two separate products? [tools: check_in_many_items]","error":""}
+{"evt":"assistant_false_confirm","tool":"log_dish_ingredients","domain":"dishes","userId":"actor","recovered":false,"reason":"original_intent_not_authorized"}
+{"evt":"ai_op","service":"thyme","op":"chat_app","owner_id":"actor","model":"gpt-5.4-2026-03-05","latency_ms":3,"status":"needs_clarification","outcome":{"version":"1","answer":"needs_clarification","actions":"none","contract":"not_applicable","reason":null,"delivery":"unknown","client_render":"unknown"},"request_id":"26700ff2-65c8-4cf3-bc8a-c3d0ebce9fec","input":"Garlic oil, olive oil","output":"Is that one flavored oil, or two separate products? [tools: check_in_many_items]","error":""}
+[DEBUG] assistant turn start: {"transcript":"Move the milk to the fridge and mark it opened","ownerId":"house","userId":"actor","tableOwnerId":"actor","shoppingNamespace":null,"sessionMessageCount":0,"responseSurface":"app"}
+[DEBUG] forcing tool_choice on first turn: {"type":"function","function":{"name":"mark_item_opened"}}
+[DEBUG] assistant requested tool: {"toolName":"update_item_location","args":{"item_id":"milk","location":"fridge"}}
+[DEBUG] tool action start: {"toolName":"update_item_location","actionMode":"real","args":{"item_id":"milk","location":"fridge"},"context":{"ownerId":"house","userId":"actor","tableOwnerId":"actor"}}
+✔ sync: ambiguous product returns its question without claiming a write (380.827417ms)
+✔ stream: ambiguous product returns its question without claiming a write (4.564ms)
+[DEBUG] tool action result: {"toolName":"update_item_location","ok":true,"actionMode":"real","statusCode":200,"actionSummary":"Moved Milk to fridge.","summary":{"itemName":"Milk","itemId":"milk","location":"fridge"}}
+[DEBUG] assistant requested tool: {"toolName":"mark_item_opened","args":{"item_id":"milk"}}
+[DEBUG] tool action start: {"toolName":"mark_item_opened","actionMode":"real","args":{"item_id":"milk"},"context":{"ownerId":"house","userId":"actor","tableOwnerId":"actor"}}
+[DEBUG] tool action result: {"toolName":"mark_item_opened","ok":true,"actionMode":"real","statusCode":200,"actionSummary":"Marked Milk as opened.","summary":{"itemName":"Milk","itemId":"milk","location":"fridge"}}
+[DEBUG] assistant final response: {"text":"Updated in your kitchen:\n- Milk","type":"action_ack","quickItems":[],"toolCount":2}
+{"evt":"ai_op","service":"thyme","op":"chat_app","owner_id":"actor","model":"gpt-5.4-2026-03-05","latency_ms":64,"status":"success","outcome":{"version":"1","answer":"complete","actions":"confirmed","contract":"not_applicable","reason":null,"delivery":"unknown","client_render":"unknown"},"request_id":"request-123-sync","input":"Move the milk to the fridge and mark it opened","output":"Updated in your kitchen:\n- Milk [tools: update_item_location, mark_item_opened]","error":""}
+[DEBUG] tool action start: {"toolName":"update_item_location","actionMode":"real","args":{"item_id":"milk","location":"fridge"},"context":{"ownerId":"house","userId":"actor","tableOwnerId":"actor"}}
+✔ sync: actual assistant and wrapper preserve auth/identity and serialize two edits (64.186375ms)
+[DEBUG] tool action result: {"toolName":"update_item_location","ok":true,"actionMode":"real","statusCode":200,"actionSummary":"Moved Milk to fridge.","summary":{"itemName":"Milk","itemId":"milk","location":"fridge"}}
+[DEBUG] tool action start: {"toolName":"mark_item_opened","actionMode":"real","args":{"item_id":"milk"},"context":{"ownerId":"house","userId":"actor","tableOwnerId":"actor"}}
+[DEBUG] tool action result: {"toolName":"mark_item_opened","ok":true,"actionMode":"real","statusCode":200,"actionSummary":"Marked Milk as opened.","summary":{"itemName":"Milk","itemId":"milk","location":"fridge"}}
+{"evt":"ai_op","service":"thyme","op":"chat_app","owner_id":"actor","model":"gpt-5.4-2026-03-05","latency_ms":38,"status":"success","outcome":{"version":"1","answer":"complete","actions":"confirmed","contract":"not_applicable","reason":null,"delivery":"unknown","client_render":"unknown"},"request_id":"request-123-stream","input":"Move the milk to the fridge and mark it opened","output":"Updated in your kitchen:\n- Milk [tools: update_item_location, mark_item_opened]","error":""}
+✔ stream: actual assistant and wrapper preserve auth/identity and serialize two edits (39.067833ms)
+✔ operation identity survives tool-call changes and uses the original revision on retry (77.4725ms)
+✔ canonical request carries the caller credential and only resolved actor plus authorized fields (67.113667ms)
+✔ API rejection 401 never becomes a success (0.568875ms)
+✔ API rejection 403 never becomes a success (0.279625ms)
+✔ API rejection 404 never becomes a success (0.247ms)
+✔ API rejection 409 never becomes a success (0.309334ms)
+✔ API rejection 429 never becomes a success (2.575459ms)
+✔ API rejection 500 never becomes a success (3.098708ms)
+✔ API rejection 503 never becomes a success (0.523875ms)
+✔ an invalid success response is not trusted: name (1.028208ms)
+✔ an invalid success response is not trusted: identity (0.300958ms)
+✔ an invalid success response is not trusted: operation (0.148166ms)
+✔ an invalid success response is not trusted: missing (0.089375ms)
+✔ an invalid success response is not trusted: removed (0.085417ms)
+✔ an invalid success response is not trusted: revision (0.084916ms)
+✔ missing actor and invalid API configuration stop before any network request (0.135208ms)
+✔ canonical cloves is confirmed without a false post-commit failure (15.949042ms)
+✔ canonical heads is confirmed without a false post-commit failure (0.1875ms)
+✔ canonical pieces is confirmed without a false post-commit failure (0.097ms)
+✔ a model-selected duplicate ID and selection hint are not a user selection (0.760166ms)
+✔ an unrelated grounded ID cannot redirect a user-named correction (0.078916ms)
+✔ shortening an overlapping name preserves its old target; label words are not selectors (0.04225ms)
+✔ newest and oldest use creation, not last edited date, and reject ties (0.076125ms)
+✔ fresh handler reuses original bytes before renamed/deleted target lookup (151.172167ms)
+✔ same identity with changed fields, reference, or transcript fails before lookup (53.467041ms)
+✔ actor and household partitions never reuse another callers journal (17.562333ms)
+✔ concurrent fresh handlers retain one immutable revision before either sends a write (38.992583ms)
+✔ missing or unavailable retry storage fails closed before target lookup (5.088958ms)
+✔ lost journal write acknowledgment cannot authorize transport and is recovered on retry (7.827208ms)
+✔ corrupt retained body fails closed rather than falling back to new resolution (22.335834ms)
+✔ journal has no expiry, raw transcript, or credentials (3.7135ms)
+✔ separate accepted legacy generations do not replay a prior same-worded command (79.476208ms)
+✔ one flavored oil cannot silently become its separate ingredients (0.692541ms)
+✔ ambiguous punctuation asks; explicitly separate products and ordinary lists still work (0.066334ms)
+✔ case changes in a name do not authorize opening the product (0.483167ms)
+✔ name-only correction distinguishes lookup name from replacement (1.713083ms)
+✔ exact-id rename retains only the explicit name when optional model fields are null (0.135458ms)
+✔ unknown mutation field is rejected: product_name (1.907334ms)
+✔ unknown mutation field is rejected: made_up (0.055834ms)
+✔ unknown mutation field is rejected: revision (0.103959ms)
+✔ unknown mutation field is rejected: owner (0.038375ms)
+✔ invalid new name cannot be hidden by another valid field: string (0.100667ms)
+✔ invalid new name cannot be hidden by another valid field: string (0.038542ms)
+✔ invalid new name cannot be hidden by another valid field: string (0.299334ms)
+✔ invalid new name cannot be hidden by another valid field: number (0.230208ms)
+✔ invalid new name cannot be hidden by another valid field: object (0.096292ms)
+✔ pending rename survives a restart with target revision and original patch (3.944417ms)
+✔ state cannot leak between actors, households, sessions, or beyond ten minutes (0.427417ms)
+✔ concurrent writers must compare revisions, failed state write grants no pending action (0.234042ms)
+✔ pantry follow-ups cannot log a dish or add shopping, questions do not mutate (0.509875ms)
+✔ task switch clears old state, explicit new opening is not blocked by old rename (27.132709ms)
+✔ missing dates or tied candidates require clarification (0.117ms)
+✔ a compound name is a target, not a stocking command (0.247583ms)
+✔ expired or missing pending state cannot authorize a rename from terse selection (0.06125ms)
+✔ negative additional-field constraint does not cancel an explicit primary rename (0.291333ms)
+✔ an amount-only follow-up adjusts the confirmed item instead of adding it again (0.378459ms)
+✔ an amount continuation without one confirmed target asks a specific question (0.148333ms)
+✔ proposal survives restart, asks before adding and binds yes to the retained product (0.253583ms)
+✔ two confirmations cannot both claim the same pending product (0.236292ms)
+✔ question, cancellation, task switch and failed persistence cannot admit a proposal (0.146584ms)
+✔ a replayed yes after success or expiration cannot add another item (0.107583ms)
+✔ confirmation variants preserve the proposal and every rejection prevents a write (0.415958ms)
+✔ unknown commit claim blocks every later pantry write, until an explicit new task (0.154375ms)
+✔ amount-only replies need a live target, including after context expires (0.028708ms)
+✔ without a kitchen task, recipe, shopping and calendar confirmations keep their own context (0.100208ms)
+✔ a failed pantry-context read does not disable unrelated recipe confirmation (0.039167ms)
+✔ an active or consumed kitchen confirmation still blocks cross-domain writes (0.030833ms)
+✔ explicit rejection or a question cannot mutate another feature after a task switch (173.675458ms)
+✔ successful addition with failed state persistence still blocks later writes in that request (0.254125ms)
+✔ twenty simultaneous task writes admit one revision and scope cannot leak (193.790709ms)
+✔ actual stored session messages validate a restart and reject stale task after a failed new task save (31.717667ms)
+✔ missing history cannot authorize a retained correction; another actor has no messages (11.368583ms)
+ℹ tests 143
+ℹ suites 0
+ℹ pass 143
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1475.193958

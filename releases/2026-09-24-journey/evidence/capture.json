@@ -1,0 +1,13 @@
+{
+  "name": "capture",
+  "function": "grocery-identifier-dev-identify-async",
+  "before_code_sha256": "T63wV7zYWvAp/m/z8C5bRt4JWyO5UsYGBqGY7vXVRA0=",
+  "before_revision": "79475906-3bcb-42ad-9ee1-50f3cb450154",
+  "before_config_hash": "466b5fcb4cddea4f0d657cd9fa1ea5ff8de51c51e6125e2ed67c1dbf01c01cc4",
+  "candidate_code_sha256": "JthWAhstvZKTij/UjwSkYM7Wh73TWwAhxgE8pBrZXfc=",
+  "started_at": "2026-09-25T01:01:06.970826+00:00",
+  "status": "deployed",
+  "after_revision": "186ef2a2-f755-4da1-ab42-4be3cfb62bd7",
+  "last_update_status": "Successful",
+  "completed_at": "2026-09-25T01:01:25.605532+00:00"
+}

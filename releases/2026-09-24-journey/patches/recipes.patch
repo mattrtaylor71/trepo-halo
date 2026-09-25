@@ -1,0 +1,741 @@
+--- a/app.py
++++ b/app.py
+@@ -1,3 +1,4 @@
++from recipe_readiness import usable_lines as recipe_usable_lines, complete as recipe_content_complete, outcome as recipe_content_outcome, recovery as recipe_content_recovery, incomplete_error as recipe_incomplete_error, INCOMPLETE_MESSAGE
+ from safe_logging import safe_print as print, redact_text
+ import base64
+ import recipe_batch_checkpoint
+@@ -655,6 +656,9 @@
+                         _createdDate, _updatedDate
+                     ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,COALESCE(%s,NOW()),%s)
+                     ON DUPLICATE KEY UPDATE
++                        source_url=IF(owner_id=VALUES(owner_id) AND _id=VALUES(_id), VALUES(source_url), source_url),
++                        resolved_url=IF(owner_id=VALUES(owner_id) AND _id=VALUES(_id), VALUES(resolved_url), resolved_url),
++                        resolved_url_hash=IF(owner_id=VALUES(owner_id) AND _id=VALUES(_id), VALUES(resolved_url_hash), resolved_url_hash),
+                         title=IF(owner_id=VALUES(owner_id) AND _id=VALUES(_id), VALUES(title), title), image_url=IF(owner_id=VALUES(owner_id) AND _id=VALUES(_id), VALUES(image_url), image_url), image_urls=IF(owner_id=VALUES(owner_id) AND _id=VALUES(_id), VALUES(image_urls), image_urls),
+                         source_image_url=IF(owner_id=VALUES(owner_id) AND _id=VALUES(_id), VALUES(source_image_url), source_image_url), source_image_urls=IF(owner_id=VALUES(owner_id) AND _id=VALUES(_id), VALUES(source_image_urls), source_image_urls),
+                         image_storage_key=IF(owner_id=VALUES(owner_id) AND _id=VALUES(_id), VALUES(image_storage_key), image_storage_key), ingredients=IF(owner_id=VALUES(owner_id) AND _id=VALUES(_id), VALUES(ingredients), ingredients),
+@@ -681,12 +685,16 @@
+         # A foreign ID or same-URL/different-ID collision must not edit another row.
+         with conn.cursor() as cur:
+             cur.execute(
+-                f"SELECT owner_id, _id, title, ingredients, instructions, notes FROM `{_SHARED_SAVED_RECIPES_TABLE}` WHERE owner_id=%s AND _id=%s",
++                f"SELECT owner_id, _id, title, ingredients, instructions, notes, source_url, resolved_url, resolved_url_hash, status FROM `{_SHARED_SAVED_RECIPES_TABLE}` WHERE owner_id=%s AND _id=%s",
+                 [owner, recipe_id],
+             )
+             confirmed = cur.fetchone()
+         if not confirmed:
+             raise ValueError('Saved recipe projection identity collision')
++        for field in ('source_url','resolved_url','resolved_url_hash','status'):
++            expected = resolved_url_hash if field=='resolved_url_hash' else (row.get('status') or 'ready') if field=='status' else row.get(field)
++            if confirmed.get(field) != expected:
++                raise ValueError('Saved recipe projection did not retain source/status')
+         if confirmed.get('title') != row.get('title'):
+             raise ValueError('Saved recipe projection did not retain the edited title')
+         for field in ('ingredients', 'instructions', 'notes'):
+@@ -1161,6 +1169,10 @@
+     out['platform'] = out.get('source_type')
+     out['content'] = out.get('raw_content') or out.get('raw_caption') or None
+     out['caption'] = out.get('raw_caption') or out.get('raw_content') or None
++    out['content_outcome'] = recipe_content_outcome(out)
++    out['content_revision'] = _saved_recipe_content_revision(row)
++    if out['content_outcome'] != 'ready':
++        out['recovery'] = recipe_content_recovery(out)
+     return out
+ 
+ 
+@@ -5205,14 +5217,17 @@
+     if not function_name or not _valid_recipe_repair_url(url):
+         return False
+     try:
+-        boto3.client('lambda').invoke(
++        response = boto3.client('lambda').invoke(
+             FunctionName=function_name,
+             InvocationType='Event',
+             Payload=json.dumps({
+                 'async_task': _ASYNC_TASK_REPAIR_SAVED_RECIPE,
+                 'owner': owner, 'recipe_id': recipe_id, 'url': url,
++                'request_id': request_id,
+             }).encode('utf-8'),
+         )
++        if response.get('StatusCode') != 202:
++            return False
+         _log_event(request_id, 'saved_recipe_repair_enqueued', owner=owner, recipe_id=recipe_id)
+         return True
+     except Exception as exc:
+@@ -5221,122 +5236,136 @@
+         return False
+ 
+ 
++def _saved_recipe_content_revision(row):
++    """Opaque optimistic revision; no schema migration for installed clients.
++
++    Include source, status, content and admission identity. Network/model work must not
++    hold row locks, and any concurrent edit or source replacement wins.
++    """
++    fields = ('_id', '_owner', 'source_url', 'resolved_url', 'title', 'ingredients',
++              'instructions', 'notes', 'extraction_source', 'recipe_source_used',
++              'status', '_createdDate')
++    values = {field: row.get(field) for field in fields}
++    for field in ('ingredients', 'instructions', 'notes'):
++        if isinstance(values[field], str):
++            try:
++                values[field] = json.loads(values[field])
++            except ValueError:
++                pass
++    return hashlib.sha256(json.dumps(values, sort_keys=True, default=str).encode()).hexdigest()
++
++
++def _enqueue_saved_recipe_repair_or_finish(conn, owner, recipe_id, url, request_id=None):
++    """A failed admission must not leave an unscheduled bookmark processing forever."""
++    before = _fetch_saved_recipe_by_id(conn, owner, recipe_id)
++    if not before or before.get('status') != 'repairing':
++        return False
++    revision = _saved_recipe_content_revision(before)
++    if _invoke_saved_recipe_repair_async(owner, recipe_id, url, request_id=request_id):
++        return True
++    table = _saved_recipes_table(owner)
++    fields = _drift_safe_select(conn, table)
++    conn.begin()
++    try:
++        with conn.cursor() as cur:
++            cur.execute(f"SELECT {fields} FROM `{table}` WHERE _id=%s AND _owner=%s FOR UPDATE", [recipe_id, owner])
++            row = cur.fetchone()
++            if not row or _saved_recipe_content_revision(row) != revision:
++                conn.rollback()
++                return False
++            cur.execute(f"UPDATE `{table}` SET status='failed' WHERE _id=%s AND _owner=%s", [recipe_id, owner])
++        _dual_write_saved_recipe_to_shared(conn, owner, recipe_id, request_id=request_id,
++            transactional=True, required=os.getenv('READ_SHARED_SAVED_RECIPES', '').strip().lower() == 'true')
++        conn.commit()
++    except Exception:
++        conn.rollback()
++        raise
++    _log_event(request_id, 'saved_recipe_repair_outcome', owner=owner, recipe_id=recipe_id,
++               outcome='link_retained', reason='dispatch_unavailable')
++    return False
++
++
+ def _repair_saved_recipe(owner, recipe_id, url, request_id=None):
+-    """Re-extract one recipe properly and write it back only if it is genuinely better.
+-
+-    Never downgrades: a repair that comes back no richer than what is stored leaves the row
+-    alone and marks it failed, so a user is never worse off for having been repaired. The
+-    grounding test applies here too — if the second pass still has nothing real to work from,
+-    the recipe stays empty rather than being filled with a plausible guess.
++    """Recover an empty bookmark, without replacing content of unknown provenance.
++
++    Legacy rows do not identify human versus generated fields. Nonempty content
++    therefore belongs to the user; list length is never permission to replace it.
++    Compare the pre-extraction revision under lock and commit required mirrors in
++    the same transaction. A late job cannot resurrect a deleted recipe.
+     """
+     if not _valid_recipe_repair_url(url):
+-        _log_event(request_id, 'saved_recipe_repair_rejected',
+-                   owner=owner, recipe_id=recipe_id, code='invalid_source_url')
+         return {'error': 'invalid source URL', 'code': 'invalid_source_url', 'retryable': False}
+     conn = _mysql_conn()
+     try:
+         row = _fetch_saved_recipe_by_id(conn, owner, recipe_id)
+         if not row:
+-            return {'error': 'recipe not found'}
++            return {'repaired': False, 'outcome': 'skipped', 'reason': 'deleted'}
++        sources = [row.get('source_url'), row.get('resolved_url')]
++        if not any(source and _resolved_url_hash(source) == _resolved_url_hash(url) for source in sources):
++            return {'repaired': False, 'outcome': 'skipped', 'reason': 'source_changed'}
++        revision = _saved_recipe_content_revision(row)
+         current = _serialize_row(row)
+         before = (len(current.get('ingredients') or []), len(current.get('instructions') or []))
+-
+-        # No sync deadline here: let the full ladder run, audio included.
++        current_complete = recipe_content_complete(current)
++        if current_complete and row.get('status') == 'ready':
++            return {'repaired': False, 'outcome': 'ready', 'reason': 'existing_content', 'before': before}
++
+         _mark_sync_request_start(False)
+-        extraction = _extract_content(url, request_id=request_id)
+-        response, structured = _analyze_extraction(extraction, request_id=request_id)
+-        ing = (structured or {}).get('ingredients') or []
+-        ins = (structured or {}).get('instructions') or []
++        try:
++            extraction = _extract_content(url, request_id=request_id)
++            response, structured = _analyze_extraction(extraction, request_id=request_id)
++        except Exception as exc:
++            # End processing honestly; the lock below still protects newer edits.
++            _log_event(request_id, 'saved_recipe_repair_extraction_failed', owner=owner, recipe_id=recipe_id, failure_type=type(exc).__name__)
++            response, structured = {}, {}
++        structured = structured or {}
++        ing = _clean_string_list(structured.get('ingredients') or [])
++        ins = _clean_string_list(structured.get('instructions') or [])
+         after = (len(ing), len(ins))
+-
+-        # Counts only, deliberately.
+-        #
+-        # Replacing a FABRICATED recipe with a grounded one of equal size is the right thing in
+-        # principle, and there is a real case for it: a recipe invented from a 22-character
+-        # caption keeps the invention because 4/5 is not "better" than 4/5. But deciding
+-        # "was the stored one fabricated?" reliably needs provenance we do not record at save
+-        # time, and two attempts to infer it from stored text got it wrong — once deleting
+-        # recipes that had just been rebuilt successfully. Until provenance is recorded
+-        # explicitly, this stays on counts, where it cannot lose content.
+-        better = (after[0] > before[0] or after[1] > before[1]
+-                  or (before == (0, 0) and after != (0, 0)))
+-        if not better:
+-            # The second pass, with audio and no deadline, still found nothing real. That is a
+-            # verdict: this post genuinely does not contain its recipe (here, a reel captioned
+-            # only "#JerkChicken" whose transcript has no recipe signal either).
+-            #
+-            # If what is stored was FABRICATED, clear it. Leaving invented ingredients on a
+-            # recipe we now know is ungrounded is the exact harm the user reported — a phantom
+-            # tomato they would have shopped for. Keep the title, link and image so the save is
+-            # still theirs, and say plainly that we could not read it.
+-            # Only a SECOND pass that also produced nothing proves the post lacks its recipe.
+-            #
+-            # This used to test `extraction['content']` alone — the caption — but
+-            # _analyze_extraction legitimately builds the recipe from caption PLUS the audio
+-            # transcript. So a recipe correctly recovered from speech was judged "ungrounded"
+-            # on the caption and WIPED. That destroyed real content on rows whose re-extraction
+-            # had just returned a full recipe. If the second pass produced anything, keep it.
+-            fabricated = (after == (0, 0)
+-                          and not _content_can_support_a_recipe(extraction.get('content')))
+-            table = _saved_recipes_table(owner)
++        # A coherent source-backed recipe needs ingredients AND directions.
++        # Preserve partial old content for explicit user recovery, rather than
++        # silently combining lists extracted on different occasions.
++        replace_empty = before == (0, 0) and recipe_content_complete({'ingredients': ing, 'instructions': ins})
++        pending_note = "We couldn't read the full recipe from this post yet — we're still working on it."
++        # Remove only our own obsolete processing copy. Other notes may be human
++        # edits and must survive; a failed re-extraction is never proof otherwise.
++        recovered_notes = [note for note in (current.get('notes') or []) if note != pending_note]
++        ready = current_complete or replace_empty
++        table = _saved_recipes_table(owner)
++        select_fields = _drift_safe_select(conn, table)
++        conn.begin()
++        try:
+             with conn.cursor() as cur:
+-                if fabricated:
+-                    cur.execute(
+-                        f"""UPDATE `{table}` SET ingredients = %s, instructions = %s, notes = %s,
+-                                status = 'failed' WHERE _id = %s AND _owner = %s""",
+-                        (json.dumps([]), json.dumps([]),
+-                         json.dumps(["This post doesn't include its recipe — the caption and the "
+-                                     "audio don't list ingredients or steps. Open the original to "
+-                                     "watch it, or send us a link that has the recipe written out."]),
+-                         recipe_id, owner))
+-                elif before == (0, 0):
+-                    # Genuinely nothing, before or after — an honest failure.
+-                    cur.execute(f"UPDATE `{table}` SET status = 'failed' WHERE _id = %s AND _owner = %s",
+-                                (recipe_id, owner))
++                cur.execute(f"SELECT {select_fields} FROM `{table}` WHERE _id=%s AND _owner=%s FOR UPDATE",
++                            [recipe_id, owner])
++                locked = cur.fetchone()
++                if not locked or _saved_recipe_content_revision(locked) != revision:
++                    conn.rollback()
++                    return {'repaired': False, 'outcome': 'skipped', 'reason': 'changed_or_deleted'}
++                if replace_empty:
++                    cur.execute(f"""UPDATE `{table}` SET title=%s, ingredients=%s, instructions=%s, notes=%s,
++                                extraction_source=%s, recipe_source_used=%s, status='ready', _updatedDate=NOW()
++                                WHERE _id=%s AND _owner=%s""",
++                                [current.get('title') or structured.get('title') or 'Recipe',
++                                 json.dumps(ing), json.dumps(ins), json.dumps(recovered_notes),
++                                 _append_extraction_source(current.get('extraction_source'), 'repair'),
++                                 _safe_text(response.get('recipe_source_used')) or None, recipe_id, owner])
+                 else:
+-                    # The repair found nothing NEW, but the row still holds a real recipe.
+-                    # Marking that 'failed' hides a perfectly good saved recipe from the user
+-                    # over a background job they never asked for. Leave it usable.
+-                    cur.execute(f"UPDATE `{table}` SET status = 'ready' WHERE _id = %s AND _owner = %s",
+-                                (recipe_id, owner))
++                    cur.execute(f"UPDATE `{table}` SET status=%s WHERE _id=%s AND _owner=%s",
++                                ['ready' if ready else 'failed', recipe_id, owner])
++            require_shared = os.getenv('READ_SHARED_SAVED_RECIPES', '').strip().lower() == 'true'
++            _dual_write_saved_recipe_to_shared(conn, owner, recipe_id, request_id=request_id,
++                                              transactional=True, required=require_shared)
+             conn.commit()
+-            _dual_write_saved_recipe_to_shared(conn, owner, recipe_id, request_id=request_id)
+-            _log_event(request_id, 'saved_recipe_repair_no_improvement',
+-                       owner=owner, recipe_id=recipe_id, before=str(before), after=str(after))
+-            return {'repaired': False, 'before': before, 'after': after}
+-
+-        # Merge per FIELD rather than replacing wholesale. A repair can come back with more
+-        # ingredients but fewer steps (seen: 9/8 -> 10/7); overwriting on the strength of the
+-        # improved field alone silently drops the other one. Keep whichever list is richer.
+-        keep_ing = ing if len(ing) > before[0] else (current.get('ingredients') or [])
+-        keep_ins = ins if len(ins) > before[1] else (current.get('instructions') or [])
+-        table = _saved_recipes_table(owner)
+-        with conn.cursor() as cur:
+-            cur.execute(
+-                f"""UPDATE `{table}` SET title = %s, ingredients = %s, instructions = %s,
+-                        notes = %s, extraction_source = %s, recipe_source_used = %s,
+-                        status = 'ready'
+-                    WHERE _id = %s AND _owner = %s""",
+-                (structured.get('title') or current.get('title') or 'Recipe',
+-                 json.dumps(keep_ing), json.dumps(keep_ins),
+-                 json.dumps(structured.get('notes') or []),
+-                 _append_extraction_source(current.get('extraction_source'), 'repair'),
+-                 # Record what THIS pass actually read. A repair that succeeded off the audio
+-                 # transcript must not later be re-judged against the caption alone — that
+-                 # exact inference is what wiped real recipes.
+-                 _safe_text(response.get('recipe_source_used')) or None,
+-                 recipe_id, owner))
+-        conn.commit()
+-        _dual_write_saved_recipe_to_shared(conn, owner, recipe_id, request_id=request_id)
+-        _log_event(request_id, 'saved_recipe_repaired', owner=owner, recipe_id=recipe_id,
+-                   before=str(before), after=str(after),
+-                   source_used=response.get('recipe_source_used'))
+-        return {'repaired': True, 'before': before, 'after': after}
++        except Exception:
++            conn.rollback()
++            raise
++        outcome = 'ready' if ready else 'link_retained'
++        _log_event(request_id, 'saved_recipe_repair_outcome', owner=owner, recipe_id=recipe_id,
++                   outcome=outcome, replaced_empty=replace_empty, before=str(before), after=str(after))
++        return {'repaired': replace_empty, 'outcome': outcome, 'before': before, 'after': after}
+     finally:
+-        try:
+-            conn.close()
+-        except Exception:
+-            pass
++        conn.close()
+ 
+ 
+ def _invoke_saved_recipe_image_generation_async(owner, recipe_id, request_id=None):
+@@ -6308,6 +6337,7 @@
+     # cannot. The user keeps their save and gets the real recipe shortly after, instead of
+     # either losing it or being handed a confident fabrication.
+     ungrounded = recipe_response['recipe'] == 'Not enough recipe information.'
++    _repairable_platform = extraction.get('platform') not in {'text', 'image', 'explore'}
+ 
+     # A save can also come back GROUNDED but incomplete: a video whose caption lists the
+     # ingredients while the method is only ever spoken aloud. Those pass the grounding check,
+@@ -6398,11 +6428,11 @@
+                      _safe_text(recipe_response.get('recipe_source_used')) or None),
+                     extraction.get('author_name'),
+                     extraction.get('caption_field') or None,
+-                    'repairing' if ungrounded else 'ready',
++                    'ready' if recipe_content_complete(structured_recipe) else 'repairing' if _repairable_platform else 'failed',
+                 )
+             )
+         conn.commit()
+-        if ungrounded or incomplete_video:
++        if _repairable_platform and not recipe_content_complete(structured_recipe):
+             # Hand it to the background repair agent, which is not bound by the gateway's 29s
+             # and can afford the audio transcription this save could not.
+             if incomplete_video:
+@@ -6410,7 +6440,7 @@
+                            platform=extraction.get('platform'),
+                            ingredients=len(_ing),
+                            resolved_url=extraction.get('resolved_url'))
+-            _invoke_saved_recipe_repair_async(owner, recipe_id,
++            _enqueue_saved_recipe_repair_or_finish(conn, owner, recipe_id,
+                                               extraction.get('resolved_url') or extraction.get('url'),
+                                               request_id=request_id)
+     except pymysql.err.IntegrityError as exc:
+@@ -6484,6 +6514,16 @@
+     if not results:
+         raise ServiceError('Not enough recipe information.', status_code=422, extra={'partial_errors': partial_errors})
+ 
++    retained = [result for result in results if not recipe_content_complete(result.get('recipe'))]
++    results = [result for result in results if recipe_content_complete(result.get('recipe'))]
++    partial_errors.extend(recipe_incomplete_error(result['recipe']) for result in retained)
++    if not results:
++        retained_recipe = retained[0]['recipe']
++        return _success({'owner':owner, 'recipe':retained_recipe,
++                         'deduped':bool(retained[0].get('deduped')),
++                         'retained_recipes':[result['recipe'] for result in retained],
++                         'code':'recipe_content_incomplete', 'error':INCOMPLETE_MESSAGE,
++                         'recovery':recipe_content_recovery(retained_recipe)}, status=422)
+     has_created = any(not result.get('deduped') for result in results)
+     status = 201 if has_created else 200
+     if len(results) == 1:
+@@ -6493,6 +6533,8 @@
+             'recipe': result['recipe'],
+             'deduped': bool(result.get('deduped')),
+         }
++        if retained:
++            body['retained_recipes'] = [entry['recipe'] for entry in retained]
+         if partial_errors:
+             body['partial_errors'] = partial_errors
+         return _success(body, status=status)
+@@ -6509,6 +6551,8 @@
+         ],
+         'count': len(results),
+     }
++    if retained:
++        body['retained_recipes'] = [entry['recipe'] for entry in retained]
+     if partial_errors:
+         body['partial_errors'] = partial_errors
+     return _success(body, status=status)
+@@ -6523,13 +6567,30 @@
+ 
+ 
+ def _build_saved_recipe_batch_job_response(owner, job, recipes=None, results=None, partial_errors=None, event=None):
+-    body = {
+-        'owner': owner,
+-        'job': _serialize_saved_recipe_batch_job(job, event=event),
+-        'recipes': recipes or [],
+-        'results': results or [],
+-        'count': len(results or []),
+-    }
++    serialized_job = _serialize_saved_recipe_batch_job(job, event=event)
++    recipes = list(recipes or [])
++    results = list(results or [])
++    partial_errors = list(partial_errors or [])
++    retained = [recipe for recipe in recipes if not recipe_content_complete(recipe)]
++    ready = [recipe for recipe in recipes if recipe_content_complete(recipe)]
++    if serialized_job.get('status') == 'completed' and retained:
++        pending = any(recipe_content_outcome(recipe) == 'processing' for recipe in retained)
++        serialized_job['status'] = 'running' if pending else 'completed' if ready else 'failed'
++        if not pending:
++            partial_errors.extend(recipe_incomplete_error(recipe) for recipe in retained)
++            if not ready:
++                serialized_job['error'] = INCOMPLETE_MESSAGE
++                serialized_job['code'] = 'recipe_content_incomplete'
++        serialized_job['result_count'] = len(ready)
++    if serialized_job.get('status') == 'completed' and not recipes:
++        serialized_job.update(status='failed',error='No usable recipe result is available.',code='recipe_result_unavailable',result_count=0)
++    ready_ids = {recipe.get('id') for recipe in ready}
++    verified_results = [entry for entry in results if (entry.get('recipe') or {}).get('id') in ready_ids]
++    body = {'owner':owner, 'job':serialized_job, 'recipes':ready,
++            'results':verified_results, 'count':len(verified_results)}
++    if retained:
++        body['retained_recipes'] = retained
++        body['content_outcome'] = 'processing' if any(recipe_content_outcome(r) == 'processing' for r in retained) else 'partial' if ready else 'link_retained'
+     if partial_errors:
+         body['partial_errors'] = partial_errors
+     return _success(body)
+@@ -6865,7 +6926,7 @@
+                 _dual_write_saved_recipe_to_shared(conn, owner, existing['_id'], request_id=request_id, transactional=True)
+                 conn.commit()
+                 serialized_existing = _serialize_row(existing)
+-                response = _success({'owner': owner, 'recipe': serialized_existing, 'deduped': True}, status=200)
++                response = _build_saved_recipe_post_response(owner, [{'recipe':serialized_existing,'deduped':True}])
+                 response_result_count = 1
+             elif not _text_processing_schema_ready(conn, owner):
+                 # An older table may have an active metadata lock. Preserve the shipped
+@@ -6940,7 +7001,7 @@
+                     _dual_write_saved_recipe_to_shared(conn, owner, dup_row['_id'], request_id=request_id, transactional=True)
+                     conn.commit()
+                     dup_row = _ensure_owned_saved_recipe_image(conn, owner, dup_row, request_id=request_id)
+-                    response = _success({'owner': owner, 'recipe': _serialize_row(dup_row), 'deduped': True}, status=200)
++                    response = _build_saved_recipe_post_response(owner, [{'recipe':_serialize_row(dup_row),'deduped':True}])
+                     response_result_count = 1
+                 else:
+                     _invoke_saved_recipe_text_refinement_async(owner, recipe_id, content_text, request_id=request_id)
+@@ -7091,11 +7152,97 @@
+         pass
+ 
+ 
+-def _update_saved_recipe(owner, item_id, body, request_id=None):
++def _extract_recovery_source(url, request_id=None):
++    from recovery_web import fetch_page
++    html, resolved = fetch_page(url)
++    soup = BeautifulSoup(html, 'html.parser')
++    node = _select_richest_recipe_node(soup)
++    if node:
++        ingredients = node.get('recipeIngredient')
++        if isinstance(ingredients, str):
++            ingredients = [ingredients]
++        elif not isinstance(ingredients, list):
++            ingredients = []
++        structured = {'title':_safe_text(node.get('name')),
++                      'ingredients':_clean_string_list([value for value in ingredients if isinstance(value, str)]),
++                      'instructions':_parse_instructions(node.get('recipeInstructions'))}
++    else:
++        # No inferred link crawling, audio scrape, images or embedded subrequests.
++        _, structured = _recipe_response_from_content(_extract_web_article_text(soup), request_id=request_id)
++    return structured or {}, resolved
++
++
++def _recover_saved_recipe(owner, item_id, body, request_id=None):
++    recovery = body.get('recovery')
++    if not isinstance(recovery, dict) or recovery.get('action') not in ('replace_source','paste_recipe'):
++        return _error(400, 'Choose a recipe recovery action.')
++    revision = body.get('content_revision')
++    if not isinstance(revision, str) or not revision:
++        return _error(400, 'Refresh the recipe before changing its source.')
++    conn = _mysql_conn()
++    row = _fetch_saved_recipe_by_id(conn, owner, item_id)
++    if not row: return _error(404, 'Saved recipe not found')
++    if _saved_recipe_content_revision(row) != revision:
++        return _error(409, 'This recipe changed. Refresh it before saving.')
++    replace = recovery.get('replace_fields') or []
++    if not isinstance(replace,list) or set(replace)-{'title','ingredients','instructions','notes'}:
++        return _error(400, 'Choose which recipe fields to replace.')
++    # A source is one coherent recipe. Never attach new directions to ingredients
++    # retained from another version, even when only one old field is populated.
++    current_content = _serialize_row(row)
++    if (current_content.get('ingredients') or current_content.get('instructions')) and not {'ingredients','instructions'}.issubset(replace):
++        return _error(409, 'Replace the ingredients and steps together to recover this recipe.',
++                      {'code':'recipe_replacement_confirmation_required','replace_fields':['ingredients','instructions']})
++    source_updates = {}
++    if recovery['action'] == 'replace_source':
++        url = _safe_text(recovery.get('url'))
++        if not _valid_recipe_repair_url(url): return _error(400,'Use a public recipe page URL.')
++        try:
++            from recovery_web import recovery_budget
++            with recovery_budget():
++                structured, resolved = _extract_recovery_source(url, request_id=request_id)
++        except ValueError as exc:
++            return _error(422, str(exc))
++        source_updates = {'source_url':url, 'resolved_url':resolved, 'resolved_url_hash':_resolved_url_hash(resolved)}
++        other = _fetch_saved_recipe_by_hash(conn, owner, source_updates['resolved_url_hash'])
++        if other and other.get('_id') != item_id:
++            return _error(409, 'This source is already saved.', {'existing_recipe_id':other['_id']})
++    else:
++        text = _safe_text(recovery.get('text'))
++        if not text or len(text)>30000: return _error(400, 'Paste up to 30,000 characters of recipe text.')
++        try:
++            from recovery_web import recovery_budget
++            with recovery_budget():
++                _, structured = _recipe_response_from_content(text, request_id=request_id)
++        except ValueError as exc:
++            return _error(422, str(exc))
++        structured = structured or {}
++    if not recipe_content_complete(structured):
++        return _error(422, INCOMPLETE_MESSAGE, {'code':'recipe_content_incomplete','recipe':_serialize_row(row),'recovery':recipe_content_recovery(_serialize_row(row))})
++    updates = {'content_revision':revision}
++    for field in ('title','ingredients','instructions','notes'):
++        if field == 'notes' and field not in replace:
++            notes = current_content.get('notes') or []
++            pending_note = "We couldn't read the full recipe from this post yet — we're still working on it."
++            if pending_note in notes:
++                # Bypass input normalization: these are already-stored user notes.
++                source_updates['notes'] = json.dumps([note for note in notes if note != pending_note])
++            continue
++        current = _safe_text(row.get(field)) if field=='title' else current_content.get(field)
++        if field in replace or not current:
++            value = structured.get(field)
++            if value is not None: updates[field]=value
++    # Revision and uniqueness are revalidated inside the same edit transaction.
++    return _update_saved_recipe(owner,item_id,updates,request_id=request_id,_source_updates=source_updates)
++
++
++def _update_saved_recipe(owner, item_id, body, request_id=None, _source_updates=None):
+     """Edit a saved recipe's user-editable fields (title, ingredients, steps/instructions,
+     notes). Partial updates allowed. Applies to the owner + any household members that have
+     the recipe, then recomputes availability since ingredient changes affect kitchen matching."""
+-    updates = {}
++    if 'recovery' in body:
++        return _recover_saved_recipe(owner,item_id,body,request_id=request_id)
++    updates = dict(_source_updates or {})
+     if 'title' in body:
+         title = _safe_text(body.get('title'))
+         if not title:
+@@ -7135,24 +7282,41 @@
+     # Schema preparation may commit implicitly. Finish it before the edit transaction.
+     for tid in targets:
+         _ensure_saved_recipes_table(conn, tid)
+-    set_clause = ', '.join(f"`{col}` = %s" for col in updates) + ", `_updatedDate` = NOW()"
+-    vals = list(updates.values())
+     conn.begin()
+     try:
+         with conn.cursor() as cur:
+             # Lock all existing copies in the same order for concurrent household
+             # edits. Recheck the acting copy before changing any required target.
+             acting_exists = False
++            locked_rows = {}
+             for tid in targets:
+                 target_table = _saved_recipes_table(tid)
+-                cur.execute(f"SELECT _id FROM `{target_table}` WHERE _id = %s LIMIT 1 FOR UPDATE", [item_id])
++                cur.execute(f"SELECT * FROM `{target_table}` WHERE _id = %s LIMIT 1 FOR UPDATE", [item_id])
+                 locked = cur.fetchone()
++                if locked is not None: locked_rows[tid] = locked
+                 if target_table == table:
+                     acting_exists = locked is not None
+             if not acting_exists:
+                 conn.rollback()
+                 return _error(404, 'Saved recipe not found')
+-            for tid in targets:
++            expected_revision = body.get('content_revision')
++            if expected_revision is not None and expected_revision != _saved_recipe_content_revision(locked_rows[_safe_owner_token(owner)]):
++                conn.rollback()
++                return _error(409, 'This recipe changed. Refresh it before saving.')
++            if 'resolved_url_hash' in (_source_updates or {}):
++                for tid in locked_rows:
++                    cur.execute(f"SELECT _id FROM `{_saved_recipes_table(tid)}` WHERE resolved_url_hash=%s AND _id<>%s FOR UPDATE",[_source_updates['resolved_url_hash'],item_id])
++                    if cur.fetchone():
++                        conn.rollback()
++                        return _error(409, 'This source is already saved.')
++            for tid, locked in locked_rows.items():
++                target_updates = dict(updates)
++                # Old clients omit content_revision; retain their partial-edit
++                # contract, but compute readiness from the entire locked row.
++                if 'status' in locked:
++                    target_updates['status'] = 'ready' if recipe_content_complete({**locked, **updates}) else 'failed'
++                set_clause = ', '.join(f"`{col}` = %s" for col in target_updates) + ", `_updatedDate` = NOW()"
++                vals = list(target_updates.values())
+                 mtable = _saved_recipes_table(tid)
+                 cur.execute(f"UPDATE `{mtable}` SET {set_clause} WHERE _id = %s LIMIT 1", vals + [item_id])
+         # Required projections join the same transaction. A shared-read cutover
+--- a/recipe_readiness.py
++++ b/recipe_readiness.py
+@@ -0,0 +1,41 @@
++"""Usable recipe content and retained-link outcomes, independent of job transport."""
++import json
++import re
++
++INCOMPLETE_MESSAGE = "Your link is saved, but we couldn't get the full recipe. Open it in Saved Recipes to add the ingredients and steps."
++
++
++def usable_lines(value):
++    if isinstance(value, str):
++        try:
++            value = json.loads(value)
++        except ValueError:
++            return []
++    if not isinstance(value, list):
++        return []
++    return [line.strip() for line in value if isinstance(line, str) and line.strip()
++            and not re.fullmatch(r'https?://\S+', line.strip(), flags=re.I)
++            and line.strip().lower() not in {'not enough recipe information.', 'ingredients', 'instructions', 'steps'}]
++
++
++def complete(recipe):
++    return bool(usable_lines((recipe or {}).get('ingredients'))
++                and usable_lines((recipe or {}).get('instructions', (recipe or {}).get('steps'))))
++
++
++def outcome(recipe):
++    if complete(recipe):
++        return 'ready'
++    if (recipe or {}).get('status') in ('processing', 'repairing'):
++        return 'processing'
++    return 'link_retained'
++
++
++def recovery(recipe):
++    return {'recipe_id': (recipe or {}).get('id') or (recipe or {}).get('_id'),
++            'actions': ['replace_source', 'paste_recipe', 'open_original']}
++
++
++def incomplete_error(recipe):
++    return {'code': 'recipe_content_incomplete', 'recipe_id': recovery(recipe)['recipe_id'],
++            'error': INCOMPLETE_MESSAGE, 'retryable': False}
+--- a/recovery_web.py
++++ b/recovery_web.py
+@@ -0,0 +1,124 @@
++"""Small, pinned-address fetcher used only for explicit recipe source recovery."""
++import ipaddress
++import socket
++import signal
++import threading
++import time
++from contextlib import contextmanager
++from urllib.parse import urlsplit, urljoin
++import urllib3
++
++MAX_BYTES = 2 * 1024 * 1024
++_DNS_SLOT = threading.BoundedSemaphore(1)
++
++
++def _bounded_dns(host, port, resolver, seconds=2):
++    # getaddrinfo can remain in native code despite SIGALRM. One daemon worker
++    # isolates that call; its only side effect is DNS, never network extraction
++    # or persistence. A stuck resolver cannot accumulate additional workers.
++    if not _DNS_SLOT.acquire(blocking=False):
++        raise ValueError('Recipe lookup is busy. Please try again.')
++    done, result = threading.Event(), {}
++    def resolve():
++        try:
++            result['addresses'] = resolver(host, port, type=socket.SOCK_STREAM)
++        except Exception as exc:
++            result['error'] = exc
++        finally:
++            _DNS_SLOT.release()
++            done.set()
++    try:
++        threading.Thread(target=resolve, daemon=True, name='recipe-recovery-dns').start()
++    except RuntimeError:
++        _DNS_SLOT.release()
++        raise ValueError('Recipe lookup is unavailable. Please try again.') from None
++    if not done.wait(seconds):
++        raise ValueError('The recipe site lookup timed out. Try again or paste its recipe text.')
++    if 'error' in result:
++        raise ValueError('The recipe site could not be found. Check its URL or paste its recipe text.') from result['error']
++    return result['addresses']
++
++
++class _RecoveryDeadline(BaseException):
++    """Escape provider retry handlers; caught only at the recovery boundary."""
++
++
++@contextmanager
++def recovery_budget(seconds=18):
++    """Bound synchronous Lambda recovery, including DNS and trickling responses.
++
++    Only extraction runs inside this boundary. Database writes start afterwards.
++    A socket read timeout alone restarts on each byte and is not a wall deadline.
++    Fail closed outside the Lambda main thread rather than leave background work.
++    """
++    if threading.current_thread() is not threading.main_thread() or not hasattr(signal, 'setitimer'):
++        raise ValueError('Recipe recovery is unavailable. Please try again.')
++    previous_handler = signal.getsignal(signal.SIGALRM)
++    previous_timer = signal.getitimer(signal.ITIMER_REAL)
++    started = time.monotonic()
++    budget = min(seconds, previous_timer[0]) if previous_timer[0] else seconds
++
++    def expired(*_):
++        raise _RecoveryDeadline()
++
++    signal.signal(signal.SIGALRM, expired)
++    signal.setitimer(signal.ITIMER_REAL, budget)
++    try:
++        yield
++    except _RecoveryDeadline:
++        raise ValueError('This is taking too long. Your saved recipe has not changed. Try again or paste its recipe text.') from None
++    finally:
++        signal.setitimer(signal.ITIMER_REAL, 0)
++        signal.signal(signal.SIGALRM, previous_handler)
++        if previous_timer[0]:
++            signal.setitimer(signal.ITIMER_REAL, max(0.001, previous_timer[0] - (time.monotonic() - started)), previous_timer[1])
++
++
++def public_target(url, resolver=socket.getaddrinfo):
++    parsed = urlsplit(url)
++    if (parsed.scheme not in ('https', 'http') or not parsed.hostname or parsed.username
++            or parsed.password or parsed.port not in (None, 80, 443)
++            or any(c.isspace() for c in parsed.netloc)):
++        raise ValueError('Use a public recipe page URL.')
++    port = parsed.port or (443 if parsed.scheme == 'https' else 80)
++    addresses = list(dict.fromkeys(entry[4][0] for entry in _bounded_dns(parsed.hostname, port, resolver)))
++    if not addresses or any(not ipaddress.ip_address(address).is_global for address in addresses):
++        raise ValueError('Use a public recipe page URL.')
++    return parsed, port, addresses[0]
++
++
++def fetch_page(url, resolver=socket.getaddrinfo, pool_factory=None):
++    with recovery_budget(8):
++        return _fetch_page(url, resolver, pool_factory)
++
++
++def _fetch_page(url, resolver, pool_factory):
++    """Validate every redirect and pin the checked IP so DNS rebinding cannot win."""
++    for _ in range(4):
++        parsed, port, address = public_target(url, resolver)
++        kwargs = {'host': address, 'port': port, 'timeout': urllib3.Timeout(connect=4, read=8), 'retries':False}
++        if parsed.scheme == 'https':
++            kwargs.update(server_hostname=parsed.hostname, assert_hostname=parsed.hostname)
++        factory = pool_factory or (urllib3.HTTPSConnectionPool if parsed.scheme == 'https' else urllib3.HTTPConnectionPool)
++        pool = factory(**kwargs)
++        response = None
++        try:
++            path = (parsed.path or '/') + ('?' + parsed.query if parsed.query else '')
++            response = pool.urlopen('GET', path, headers={'Host':parsed.netloc, 'Accept':'text/html,application/xhtml+xml',
++                'Accept-Encoding':'identity','User-Agent':'Trepo Recipe Import'}, redirect=False, preload_content=False)
++            if response.status in (301,302,303,307,308):
++                location = response.headers.get('Location')
++                if not location: raise ValueError('The source redirect could not be followed.')
++                url = urljoin(url, location)
++                continue
++            if response.status != 200: raise ValueError('The recipe page is unavailable. Paste its recipe text instead.')
++            content_type = response.headers.get('Content-Type','').lower()
++            if not any(t in content_type for t in ('text/html','application/xhtml+xml','text/plain')):
++                raise ValueError('Use a recipe page, or paste its recipe text.')
++            body = response.read(MAX_BYTES + 1, decode_content=True)
++            if len(body) > MAX_BYTES: raise ValueError('This page is too large. Paste the recipe text instead.')
++            return body.decode('utf-8', errors='replace'), url
++        finally:
++            if response: response.close()
++            pool.close()
++    raise ValueError('Too many redirects. Paste the recipe text instead.')

@@ -1,0 +1,152 @@
+{
+  "run": "journey-8edb358aca",
+  "owner": "8fcb37c1-0927-4c31-856a-5b761efc226c",
+  "fixtures": {
+    "kitchen": "1d6f67ea-e60b-481c-b39c-bb8c77b87769",
+    "recipe": "66f763fa-caeb-4fd6-bf2b-98dd1bd8e91c"
+  },
+  "events": [
+    {
+      "method": "POST",
+      "path": "/kitchen/8fcb37c1-0927-4c31-856a-5b761efc226c",
+      "status": 201,
+      "duration_s": 0.56
+    },
+    {
+      "method": "GET",
+      "path": "/kitchen/8fcb37c1-0927-4c31-856a-5b761efc226c",
+      "status": 200,
+      "duration_s": 0.93
+    },
+    {
+      "method": "POST",
+      "path": "/kitchen/8fcb37c1-0927-4c31-856a-5b761efc226c?amount_operation=v1",
+      "status": 200,
+      "duration_s": 0.32
+    },
+    {
+      "method": "POST",
+      "path": "/kitchen/8fcb37c1-0927-4c31-856a-5b761efc226c?amount_operation=v1",
+      "status": 200,
+      "duration_s": 0.29
+    },
+    {
+      "method": "GET",
+      "path": "/kitchen/8fcb37c1-0927-4c31-856a-5b761efc226c",
+      "status": 200,
+      "duration_s": 1.03
+    },
+    {
+      "method": "POST",
+      "path": "/kitchen/8fcb37c1-0927-4c31-856a-5b761efc226c?amount_operation=v1",
+      "status": 409,
+      "duration_s": 0.33
+    },
+    {
+      "method": "GET",
+      "path": "/kitchen/8fcb37c1-0927-4c31-856a-5b761efc226c",
+      "status": 200,
+      "duration_s": 0.83
+    },
+    {
+      "method": "PUT",
+      "path": "/kitchen/8fcb37c1-0927-4c31-856a-5b761efc226c/1d6f67ea-e60b-481c-b39c-bb8c77b87769",
+      "status": 409,
+      "duration_s": 0.29
+    },
+    {
+      "method": "PUT",
+      "path": "/kitchen/8fcb37c1-0927-4c31-856a-5b761efc226c/1d6f67ea-e60b-481c-b39c-bb8c77b87769",
+      "status": 200,
+      "duration_s": 0.34
+    },
+    {
+      "method": "GET",
+      "path": "/kitchen/8fcb37c1-0927-4c31-856a-5b761efc226c",
+      "status": 200,
+      "duration_s": 0.85
+    },
+    {
+      "check": "canonical write, exact replay, changed payload rejection, legacy edit, refreshed readback",
+      "pass": true
+    },
+    {
+      "method": "POST",
+      "path": "/saved-recipes/8fcb37c1-0927-4c31-856a-5b761efc226c",
+      "status": 202,
+      "duration_s": 0.42
+    },
+    {
+      "method": "GET",
+      "path": "/saved-recipes/8fcb37c1-0927-4c31-856a-5b761efc226c",
+      "status": 200,
+      "duration_s": 4.21
+    },
+    {
+      "method": "PUT",
+      "path": "/saved-recipes/8fcb37c1-0927-4c31-856a-5b761efc226c/66f763fa-caeb-4fd6-bf2b-98dd1bd8e91c",
+      "status": 200,
+      "duration_s": 3.72
+    },
+    {
+      "method": "PUT",
+      "path": "/saved-recipes/8fcb37c1-0927-4c31-856a-5b761efc226c/66f763fa-caeb-4fd6-bf2b-98dd1bd8e91c",
+      "status": 409,
+      "duration_s": 0.42
+    },
+    {
+      "method": "GET",
+      "path": "/saved-recipes/8fcb37c1-0927-4c31-856a-5b761efc226c",
+      "status": 200,
+      "duration_s": 0.76
+    },
+    {
+      "method": "PUT",
+      "path": "/saved-recipes/8fcb37c1-0927-4c31-856a-5b761efc226c/66f763fa-caeb-4fd6-bf2b-98dd1bd8e91c",
+      "status": 200,
+      "duration_s": 2.24
+    },
+    {
+      "method": "GET",
+      "path": "/saved-recipes/8fcb37c1-0927-4c31-856a-5b761efc226c",
+      "status": 200,
+      "duration_s": 0.84
+    },
+    {
+      "check": "live text extraction, optimistic conflict, same-ID recovery, preserved title/notes, refreshed readback",
+      "pass": true
+    },
+    {
+      "method": "DELETE",
+      "path": "/saved-recipes/8fcb37c1-0927-4c31-856a-5b761efc226c/66f763fa-caeb-4fd6-bf2b-98dd1bd8e91c",
+      "status": 200,
+      "duration_s": 3.31
+    },
+    {
+      "method": "GET",
+      "path": "/saved-recipes/8fcb37c1-0927-4c31-856a-5b761efc226c",
+      "status": 200,
+      "duration_s": 1.11
+    },
+    {
+      "cleanup": "recipe",
+      "absence_verified": true
+    },
+    {
+      "method": "DELETE",
+      "path": "/kitchen/8fcb37c1-0927-4c31-856a-5b761efc226c/1d6f67ea-e60b-481c-b39c-bb8c77b87769",
+      "status": 200,
+      "duration_s": 0.54
+    },
+    {
+      "method": "GET",
+      "path": "/kitchen/8fcb37c1-0927-4c31-856a-5b761efc226c",
+      "status": 200,
+      "duration_s": 1.2
+    },
+    {
+      "cleanup": "kitchen",
+      "absence_verified": true
+    }
+  ]
+}

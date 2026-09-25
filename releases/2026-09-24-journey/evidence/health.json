@@ -1,0 +1,174 @@
+{
+  "checked_at": "2026-09-25T01:14:25.503540+00:00",
+  "note": "Lambda unhandled-error/throttle metrics; handled application errors and device delivery are separate checks. CloudWatch metrics may lag.",
+  "functions": [
+    {
+      "name": "thyme",
+      "CodeSha256": "cmfWCl5U09P4SxVMVX22Ckvbe5np4Fo+qeRseujRLn0=",
+      "RevisionId": "a4509e3f-f792-4b46-a2f8-0c3ea6bc2872",
+      "status": "Successful",
+      "metrics": {
+        "before": {
+          "from": "2026-09-25T00:41:18.462198+00:00",
+          "through": "2026-09-25T01:11:18.462198+00:00",
+          "Invocations": 3.0,
+          "Invocations_samples": 3,
+          "Errors": 0.0,
+          "Errors_samples": 3,
+          "Throttles": 0.0,
+          "Throttles_samples": 3
+        },
+        "after": {
+          "from": "2026-09-25T01:11:18.462198+00:00",
+          "through": "2026-09-25T01:14:25.503540+00:00",
+          "Invocations": 2.0,
+          "Invocations_samples": 2,
+          "Errors": 0.0,
+          "Errors_samples": 2,
+          "Throttles": 0.0,
+          "Throttles_samples": 2
+        }
+      }
+    },
+    {
+      "name": "thyme-sync",
+      "CodeSha256": "n3zKKh8zwsFgpq9xNTwiMxiuA1bbyslb/B7CopFLC6s=",
+      "RevisionId": "4ca6286b-1da7-4a51-84d1-cf6347d8f200",
+      "status": "Successful",
+      "metrics": {
+        "before": {
+          "from": "2026-09-25T00:41:11.754810+00:00",
+          "through": "2026-09-25T01:11:11.754810+00:00",
+          "Invocations": 0,
+          "Invocations_samples": 0,
+          "Errors": 0,
+          "Errors_samples": 0,
+          "Throttles": 0,
+          "Throttles_samples": 0
+        },
+        "after": {
+          "from": "2026-09-25T01:11:11.754810+00:00",
+          "through": "2026-09-25T01:14:25.503540+00:00",
+          "Invocations": 2.0,
+          "Invocations_samples": 1,
+          "Errors": 0.0,
+          "Errors_samples": 1,
+          "Throttles": 0.0,
+          "Throttles_samples": 1
+        }
+      }
+    },
+    {
+      "name": "thyme-worker",
+      "CodeSha256": "rpsgkSUYbRVKoeW+2L154QPGEek1Ae6ZtpkHE2B0jaU=",
+      "RevisionId": "7bb68dc5-8704-452d-9f75-64d12bf9d0f8",
+      "status": "Successful",
+      "metrics": {
+        "before": {
+          "from": "2026-09-25T00:41:24.520390+00:00",
+          "through": "2026-09-25T01:11:24.520390+00:00",
+          "Invocations": 1.0,
+          "Invocations_samples": 1,
+          "Errors": 0.0,
+          "Errors_samples": 1,
+          "Throttles": 0.0,
+          "Throttles_samples": 1
+        },
+        "after": {
+          "from": "2026-09-25T01:11:24.520390+00:00",
+          "through": "2026-09-25T01:14:25.503540+00:00",
+          "Invocations": 1.0,
+          "Invocations_samples": 1,
+          "Errors": 0.0,
+          "Errors_samples": 1,
+          "Throttles": 0.0,
+          "Throttles_samples": 1
+        }
+      }
+    },
+    {
+      "name": "kitchen",
+      "CodeSha256": "bqiMBVyVo80t2VxWUnnHHar0rJFXKwUIHvh4vkwCXhU=",
+      "RevisionId": "27afe1b9-0489-4e79-8639-93446b5e9c08",
+      "status": "Successful",
+      "metrics": {
+        "before": {
+          "from": "2026-09-25T00:28:32.261147+00:00",
+          "through": "2026-09-25T00:58:32.261147+00:00",
+          "Invocations": 96.0,
+          "Invocations_samples": 25,
+          "Errors": 0.0,
+          "Errors_samples": 25,
+          "Throttles": 0.0,
+          "Throttles_samples": 25
+        },
+        "after": {
+          "from": "2026-09-25T00:58:32.261147+00:00",
+          "through": "2026-09-25T01:14:25.503540+00:00",
+          "Invocations": 57.0,
+          "Invocations_samples": 12,
+          "Errors": 0.0,
+          "Errors_samples": 12,
+          "Throttles": 0.0,
+          "Throttles_samples": 12
+        }
+      }
+    },
+    {
+      "name": "recipes",
+      "CodeSha256": "odOt6M9EH7awMZrZftlBEAEn9VmMtYyODjM1G6rsohg=",
+      "RevisionId": "41e54944-7aac-4d45-bebb-5464d3f9c4e1",
+      "status": "Successful",
+      "metrics": {
+        "before": {
+          "from": "2026-09-25T00:28:46.101000+00:00",
+          "through": "2026-09-25T00:58:46.101000+00:00",
+          "Invocations": 109.0,
+          "Invocations_samples": 30,
+          "Errors": 0.0,
+          "Errors_samples": 30,
+          "Throttles": 0.0,
+          "Throttles_samples": 30
+        },
+        "after": {
+          "from": "2026-09-25T00:58:46.101000+00:00",
+          "through": "2026-09-25T01:14:25.503540+00:00",
+          "Invocations": 96.0,
+          "Invocations_samples": 16,
+          "Errors": 0.0,
+          "Errors_samples": 16,
+          "Throttles": 0.0,
+          "Throttles_samples": 16
+        }
+      }
+    },
+    {
+      "name": "capture",
+      "CodeSha256": "JthWAhstvZKTij/UjwSkYM7Wh73TWwAhxgE8pBrZXfc=",
+      "RevisionId": "186ef2a2-f755-4da1-ab42-4be3cfb62bd7",
+      "status": "Successful",
+      "metrics": {
+        "before": {
+          "from": "2026-09-25T00:31:25.605532+00:00",
+          "through": "2026-09-25T01:01:25.605532+00:00",
+          "Invocations": 0,
+          "Invocations_samples": 0,
+          "Errors": 0,
+          "Errors_samples": 0,
+          "Throttles": 0,
+          "Throttles_samples": 0
+        },
+        "after": {
+          "from": "2026-09-25T01:01:25.605532+00:00",
+          "through": "2026-09-25T01:14:25.503540+00:00",
+          "Invocations": 6.0,
+          "Invocations_samples": 1,
+          "Errors": 0.0,
+          "Errors_samples": 1,
+          "Throttles": 0.0,
+          "Throttles_samples": 1
+        }
+      }
+    }
+  ]
+}

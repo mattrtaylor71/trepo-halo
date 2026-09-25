@@ -1,0 +1,13 @@
+{
+  "name": "thyme-worker",
+  "function": "trepo-quick-ack-async-worker-dev",
+  "before_code_sha256": "afllLb3SWGND5d+Jhl1hFB/bk6/3tEioU4O2atqjVR8=",
+  "before_revision": "be4c2f84-658f-4769-bbec-0a2898f32b56",
+  "before_config_hash": "82fdbadbc83c6204e558a0b7111ddd43957419792ea71e7ce0d55806bff940f0",
+  "candidate_code_sha256": "rpsgkSUYbRVKoeW+2L154QPGEek1Ae6ZtpkHE2B0jaU=",
+  "started_at": "2026-09-25T01:11:18.657640+00:00",
+  "status": "deployed",
+  "after_revision": "7bb68dc5-8704-452d-9f75-64d12bf9d0f8",
+  "last_update_status": "Successful",
+  "completed_at": "2026-09-25T01:11:24.520390+00:00"
+}

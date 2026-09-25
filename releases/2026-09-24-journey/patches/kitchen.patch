@@ -1,0 +1,36 @@
+--- a/amount_operations.py
++++ b/amount_operations.py
+@@ -125,6 +125,25 @@
+ def _quantity_fields(left,u,reference):
+  fill=int((left/reference*100).quantize(Decimal('1'),rounding=ROUND_HALF_UP)) if reference and reference>0 else None
+  return {'quantity_value':left,'quantity_unit':u,'remaining_quantity':format(left.normalize(),'f')+' '+u,'fill_percent':min(100,fill) if fill is not None else None}
++
++def _verify_saved_fields(row,fields):
++ """Compare authoritative storage before committing or creating a success receipt.
++
++ MySQL may accept UPDATE while a trigger changes its values. Normalize database
++ representations only; do not forgive missing fields or different user content.
++ """
++ if not row:raise Rejected('Could not confirm the saved change. Refresh and retry.',409)
++ for key,expected in fields.items():
++  actual=row.get(key);kind=FIELDS[key]
++  try:
++   if actual is not None and expected is not None:
++    if kind=='decimal':actual=Decimal(str(actual));expected=Decimal(str(expected))
++    elif kind in ('bool','int'):actual=int(actual);expected=int(expected)
++    elif kind=='date' and isinstance(actual,(datetime,date)):actual=actual.strftime('%Y-%m-%d')
++    elif kind=='list' and isinstance(actual,str):actual=json.loads(actual)
++   matches=key in row and actual==expected
++  except (ValueError,TypeError,InvalidOperation):matches=False
++  if not matches:raise Rejected('Could not confirm the saved change. Refresh and retry.',409)
+ 
+ def execute(conn,actor,body,members):
+  try:op=str(uuid.UUID(body.get('operation_id','')))
+@@ -215,6 +234,7 @@
+      cur.execute('DELETE FROM shared_archive_kitchen WHERE _id=%s',(item_id,))
+     _save(cur,row,meta,fields,reference)
+     cur.execute('SELECT * FROM shared_kitchen WHERE _id=%s',(item_id,));updated=cur.fetchone()
++    _verify_saved_fields(updated,fields)
+     emptied=updated.get('quantity_value') is not None and amount(updated['quantity_value'])==0
+     if emptied:
+      cur.execute("INSERT INTO shared_archive_kitchen SELECT *, NOW(), %s, 'shared_kitchen' FROM shared_kitchen WHERE _id=%s ON DUPLICATE KEY UPDATE archived_at=NOW(), archived_reason=VALUES(archived_reason)",('consumed_recipe' if body.get('recipe_title') else 'consumed_manual',item_id))

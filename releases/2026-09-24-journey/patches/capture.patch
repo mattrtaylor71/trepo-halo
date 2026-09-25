@@ -1,0 +1,557 @@
+--- a/captureSourceRetention.js
++++ b/captureSourceRetention.js
+@@ -0,0 +1,40 @@
++const {createHash}=require('node:crypto');
++const {UpdateCommand}=require('@aws-sdk/lib-dynamodb');
++const {PutObjectCommand}=require('@aws-sdk/client-s3');
++const {makeSceneSourceManifest}=require('./sceneSourceManifest');
++function createSourceRetention({db,s3,TableName,bucket}) {
++ return async({job_id,owner,images})=>{
++  if(typeof job_id!=='string'||!/^[a-f0-9-]{36}$/i.test(job_id)||typeof owner!=='string'||!/^[A-Za-z0-9_-]{1,64}$/.test(owner))throw Error('Invalid receipt identity');
++  if(!Array.isArray(images)||!images.length||images.length>30)throw Error('Invalid receipt photos');
++  const signal=AbortSignal.timeout(18000);
++  const sources=[];
++  for(let i=0;i<images.length;i++){
++   const body=Buffer.from(images[i]||'','base64');if(!body.length||body.length>20*1024*1024)throw Error('Invalid receipt photo');
++   const sha256=createHash('sha256').update(body).digest('hex');
++   const key=`bulk-identify-uploads/${job_id}-img${i}.${sha256}.jpg`;
++   await s3.send(new PutObjectCommand({Bucket:bucket,Key:key,Body:body,ContentType:'application/octet-stream',ChecksumSHA256:Buffer.from(sha256,'hex').toString('base64')}),{abortSignal:AbortSignal.any([signal,AbortSignal.timeout(5000)])});
++   sources.push({bucket,key,sha256});
++  }
++  const manifest=makeSceneSourceManifest({job_id,owner,analysis_mode:'receipt_inventory_deep',receipt_s3_keys:sources},{bucket});
++  if(!manifest)throw Error('Invalid retained receipt identity');
++  await db.send(new UpdateCommand({TableName,Key:{job_id},
++   UpdateExpression:'SET scene_source_manifest=:manifest',
++   ConditionExpression:'#status=:pending AND meta.#owner=:owner AND analysis_mode=:mode AND attribute_not_exists(scene_source_manifest) AND attribute_not_exists(commit_status) AND attribute_not_exists(review_dismissed_at) AND attribute_not_exists(deleted_at) AND (attribute_not_exists(deleted) OR deleted=:false)',
++   ExpressionAttributeNames:{'#status':'status','#owner':'owner'},
++   ExpressionAttributeValues:{':manifest':manifest,':pending':'pending',':owner':owner,':mode':'receipt_inventory_deep',':false':false}}),{abortSignal:AbortSignal.any([signal,AbortSignal.timeout(5000)])});
++  return sources;
++ };
++}
++module.exports={createSourceRetention};
++let retain;
++module.exports.retain=async input=>{
++ if(!retain){
++  const {NodeHttpHandler}=require('@smithy/node-http-handler');
++  const {DynamoDBClient}=require('@aws-sdk/client-dynamodb');
++  const {DynamoDBDocumentClient}=require('@aws-sdk/lib-dynamodb');
++  const {S3Client}=require('@aws-sdk/client-s3');
++  const options={maxAttempts:1,requestHandler:new NodeHttpHandler({connectionTimeout:1000,requestTimeout:5000})};
++  retain=createSourceRetention({db:DynamoDBDocumentClient.from(new DynamoDBClient(options)),s3:new S3Client(options),TableName:process.env.JOB_TABLE_NAME,bucket:process.env.UPLOADS_BUCKET_NAME});
++ }
++ return retain(input);
++};
+--- a/sceneSourceManifest.js
++++ b/sceneSourceManifest.js
+@@ -0,0 +1,45 @@
++// Internal prospective provenance. A digest detects mismatch; it is not auth.
++// Only build from an already normalized, server-captured dispatch payload.
++const {createHash}=require('node:crypto');
++function makeSceneSourceManifest(payload,{bucket}) {
++  if(!payload||typeof payload.owner!=='string'||!/^[A-Za-z0-9_-]{1,64}$/.test(payload.owner)||
++     typeof payload.job_id!=='string'||!/^[A-Za-z0-9-]{1,80}$/.test(payload.job_id)||
++     !['bulk_inventory_deep','receipt_inventory_deep'].includes(payload.analysis_mode))return null;
++  const raw=payload.receipt_s3_keys||[{bucket:payload.s3_bucket,key:payload.s3_key,sha256:payload.s3_sha256}];
++  if(payload.receipt_s3_keys&&payload.analysis_mode!=='receipt_inventory_deep')return null;
++  if(!Array.isArray(raw)||raw.length<1||raw.length>30)return null;
++  const sources=[];
++  for(let i=0;i<raw.length;i++) {
++    const r=raw[i],suffix=payload.receipt_s3_keys?'-img'+i:'';
++    if(!r||r.bucket!==bucket||typeof bucket!=='string'||!/^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/.test(bucket)||
++       typeof r.sha256!=='string'||!/^[a-f0-9]{64}$/.test(r.sha256)||typeof r.key!=='string'||
++       !['jpg','png','webp','gif'].some(ext=>r.key==='bulk-identify-uploads/'+payload.job_id+suffix+'.'+r.sha256+'.'+ext))return null;
++    sources.push({bucket:r.bucket,key:r.key,sha256:r.sha256});
++  }
++  const manifest={version:1,owner:payload.owner,job_id:payload.job_id,analysis_mode:payload.analysis_mode,
++    layout:payload.receipt_s3_keys?'receipt_pages':'single',sources};
++  return {...manifest,digest:createHash('sha256').update(JSON.stringify(manifest)).digest('hex')};
++}
++
++function verifiedSceneSourceManifest(job,{owner,bucket}) {
++  if(!job || job.meta?.owner!==owner)return null;
++  const m=job.scene_source_manifest;
++  if(!m||m.version!==1||m.owner!==owner||m.job_id!==job.job_id||m.analysis_mode!==job.analysis_mode||!Array.isArray(m.sources))return null;
++  const payload={owner,job_id:job.job_id,analysis_mode:job.analysis_mode};
++  if(m.layout==='receipt_pages'&&job.analysis_mode==='receipt_inventory_deep')payload.receipt_s3_keys=m.sources;
++  else if(m.layout==='single'&&m.sources.length===1)Object.assign(payload,{s3_bucket:m.sources[0]?.bucket,s3_key:m.sources[0]?.key,s3_sha256:m.sources[0]?.sha256});
++  else return null;
++  const verified=makeSceneSourceManifest(payload,{bucket});
++  return verified?.digest===m.digest ? verified : null;
++}
++
++function sceneSourceReference(job,{owner,bucket}) {
++  const unset=value=>value===undefined||value===null||value==='';
++  if(!job||job.meta?.owner!==owner||job.status!=='completed'||!unset(job.review_dismissed_at)||
++     (job.deleted!==undefined&&job.deleted!==null&&job.deleted!==false)||!unset(job.deleted_at))return null;
++  const verified=verifiedSceneSourceManifest(job,{owner,bucket});
++  // Multi-page attribution is not inferred from a merged receipt item list.
++  if(!verified||verified.sources.length!==1)return null;
++  return {...verified.sources[0]};
++}
++module.exports={makeSceneSourceManifest,sceneSourceReference,verifiedSceneSourceManifest};
+--- a/captureRecoveryAdmission.js
++++ b/captureRecoveryAdmission.js
+@@ -0,0 +1,54 @@
++// Recovery uses the already-serving async worker and its processing lease.
++// A saved payload is not acknowledgement: only Lambda 202 (or observed worker
++// progress) permits the recovery route to tell the client processing started.
++const {createHash,randomUUID}=require('node:crypto');
++const {GetCommand,UpdateCommand}=require('@aws-sdk/lib-dynamodb');
++const {PutObjectCommand}=require('@aws-sdk/client-s3');
++const {InvokeCommand}=require('@aws-sdk/client-lambda');
++const pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
++function createRecoveryAdmission({db,s3,lambda,TableName,bucket,functionName,now=Date.now,wait=pause}) {
++ const send=(client,command)=>client.send(command,{abortSignal:AbortSignal.timeout(5000)});
++ const read=async id=>(await send(db,new GetCommand({TableName,Key:{job_id:id},ConsistentRead:true}))).Item;
++ const valid=(job,input)=>job && job.meta?.owner===input.owner && job.meta.persist_to_kitchen===false &&
++  job.analysis_mode==='bulk_inventory_deep' && job.recovery_source_id && !job.deleted && !job.deleted_at && !job.review_dismissed_at && !job.commit_status;
++ return async input=>{
++  if(!functionName||!bucket)throw Error('Recovery worker unavailable');
++  const image=Buffer.from(input.image||'','base64');
++  if(!image.length||image.length>20*1024*1024)throw Error('Invalid recovery image');
++  const sha=createHash('sha256').update(image).digest('hex'),token=randomUUID();
++  const key=`bulk-identify-uploads/${input.job_id}.${sha}.jpg`;
++  let claimed=false;
++  for(let attempt=0;attempt<24;attempt++){
++   const job=await read(input.job_id);if(!valid(job,input))throw Error('Recovery identity changed');
++   if(job.dispatch_digest||['processing','completed','failed'].includes(job.status))return;
++   try {
++    await send(db,new UpdateCommand({TableName,Key:{job_id:input.job_id},
++     UpdateExpression:'SET recovery_dispatch_token=:token, recovery_dispatch_until=:until',
++     ConditionExpression:'#status=:pending AND meta.#owner=:owner AND meta.persist_to_kitchen=:false AND attribute_exists(recovery_source_id) AND attribute_not_exists(dispatch_digest) AND attribute_not_exists(commit_status) AND attribute_not_exists(review_dismissed_at) AND attribute_not_exists(deleted_at) AND (attribute_not_exists(deleted) OR deleted=:false) AND (attribute_not_exists(recovery_dispatch_until) OR recovery_dispatch_until < :now)',
++     ExpressionAttributeNames:{'#status':'status','#owner':'owner'},
++     ExpressionAttributeValues:{':token':token,':until':now()+20000,':now':now(),':pending':'pending',':owner':input.owner,':false':false}}));
++    claimed=true;break;
++   }catch(error){if(error.name!=='ConditionalCheckFailedException')throw error;await wait(200);}
++  }
++  if(!claimed)throw Error('Recovery dispatch is still being confirmed');
++  try {
++   await send(s3,new PutObjectCommand({Bucket:bucket,Key:key,Body:image,ContentType:'application/octet-stream',ChecksumSHA256:Buffer.from(sha,'hex').toString('base64')}));
++   const payload={deep_async_internal:true,job_id:input.job_id,analysis_mode:'bulk_inventory_deep',owner:input.owner,user_id:input.user_id,s3_bucket:bucket,s3_key:key};
++   const response=await send(lambda,new InvokeCommand({FunctionName:functionName,InvocationType:'Event',Payload:Buffer.from(JSON.stringify(payload))}));
++   if(response.StatusCode!==202)throw Error('Recovery worker did not accept the photo');
++   await send(db,new UpdateCommand({TableName,Key:{job_id:input.job_id},
++    UpdateExpression:'SET dispatch_digest=:digest REMOVE recovery_dispatch_token, recovery_dispatch_until',
++    ConditionExpression:'recovery_dispatch_token=:token',
++    ExpressionAttributeValues:{':token':token,':digest':createHash('sha256').update(JSON.stringify(payload)).digest('hex')}}));
++  }catch(error){
++   const job=await read(input.job_id).catch(()=>null);
++   if(valid(job,input)&&(job.dispatch_digest||['processing','completed','failed'].includes(job.status)))return;
++   // Unknown acknowledgement remains retryable under this same child identity.
++   await send(db,new UpdateCommand({TableName,Key:{job_id:input.job_id},
++    UpdateExpression:'REMOVE recovery_dispatch_token, recovery_dispatch_until',
++    ConditionExpression:'recovery_dispatch_token=:token',ExpressionAttributeValues:{':token':token}})).catch(()=>{});
++   throw error;
++  }
++ };
++}
++module.exports={createRecoveryAdmission};
+--- a/captureOutcome.js
++++ b/captureOutcome.js
+@@ -0,0 +1,29 @@
++// Completion means analysis finished; it does not mean items were found/committed.
++function captureOutcome(result, index=0) {
++ const count=Array.isArray(result?.items)?result.items.length:0;
++ const type=['receipt','product','scene','unreadable'].includes(result?.capture_type)?result.capture_type:'unknown';
++ return {image_index:index,capture_type:type,item_count:count,
++   outcome:count?'items_identified':['product','scene'].includes(type)?'wrong_capture_type':'no_items'};
++}
++function aggregateCaptureOutcomes(results) {
++ const outcomes=results.map((r,i)=>captureOutcome(r,i));
++ return {capture_outcome:outcomes.some(r=>r.item_count>0)?'items_identified':outcomes.some(r=>r.outcome==='wrong_capture_type')?'wrong_capture_type':'no_items',
++   capture_outcomes:outcomes};
++}
++// Classification is model output; recovery availability is server-owned.
++// A verified manifest was attached only after retained source uploads succeeded.
++function applyRecoveryAvailability(result, job, {enabled=false, owner, bucket}={}) {
++ const unset=value=>value===undefined||value===null||value==='';
++ const eligible=enabled===true && typeof owner==='string' && owner.length>0 &&
++   job?.meta?.owner===owner && job?.analysis_mode==='receipt_inventory_deep' &&
++   ['processing','completed'].includes(job?.status) && job.meta.persist_to_kitchen===false &&
++   [undefined,null,false].includes(job.deleted) && unset(job.deleted_at) &&
++   unset(job.commit_status) && unset(job.review_dismissed_at);
++ const manifest=eligible ? require('./sceneSourceManifest').verifiedSceneSourceManifest(job,{owner,bucket}) : null;
++ return {...result,capture_outcomes:(result.capture_outcomes||[]).map(outcome=>({...outcome,
++   recovery_available:Boolean(manifest && Number.isInteger(outcome.image_index) &&
++     outcome.image_index>=0 && manifest.sources[outcome.image_index] &&
++     outcome.item_count===0 && outcome.outcome==='wrong_capture_type')
++ }))};
++}
++module.exports={captureOutcome,aggregateCaptureOutcomes,applyRecoveryAvailability};
+--- a/captureRecoveryRuntime.js
++++ b/captureRecoveryRuntime.js
+@@ -0,0 +1,57 @@
++const {DynamoDBClient}=require('@aws-sdk/client-dynamodb');
++const {DynamoDBDocumentClient,GetCommand,TransactWriteCommand}=require('@aws-sdk/lib-dynamodb');
++const {S3Client,GetObjectCommand}=require('@aws-sdk/client-s3');
++const {LambdaClient}=require('@aws-sdk/client-lambda');
++const {createRecoveryAdmission}=require('./captureRecoveryAdmission');
++const {createCaptureRecovery}=require('./captureRecovery');
++const {NodeHttpHandler}=require('@smithy/node-http-handler');
++function createRuntime({db,s3,TableName,bucket,enabled,admit,authenticate}) {
++  const send=(client,command)=>client.send(command,{abortSignal:AbortSignal.timeout(7000)});
++  return createCaptureRecovery({enabled,bucket,...(authenticate?{authenticate}:{}),
++   readJob:async id=>(await send(db,new GetCommand({TableName,Key:{job_id:id},ConsistentRead:true}))).Item,
++   readImage:async ref=>{
++    const response=await send(s3,new GetObjectCommand({Bucket:ref.bucket,Key:ref.key}));
++    if(!response.Body||response.ContentLength>20*1024*1024)throw Error('Source unavailable');
++    const chunks=[];let length=0;
++    const timer=setTimeout(()=>response.Body.destroy?.(Error('Source read timed out')),7000);
++    try {
++     for await (const chunk of response.Body) {
++      length+=chunk.length;if(length>20*1024*1024)throw Error('Source too large');
++      chunks.push(chunk);
++     }
++     return Buffer.concat(chunks);
++    } finally {clearTimeout(timer);response.Body.destroy?.();}
++   },
++   createChild:async(source,child)=>{
++    try{await send(db,new TransactWriteCommand({TransactItems:[
++     {ConditionCheck:{TableName,Key:{job_id:source.job_id},
++      ConditionExpression:'#status = :completed AND meta.#owner = :owner AND analysis_mode = :mode AND '+(source.scene_source_manifest?'scene_source_manifest.digest':'dispatch_digest')+' = :digest AND attribute_not_exists(commit_status) AND attribute_not_exists(review_dismissed_at) AND attribute_not_exists(deleted_at) AND (attribute_not_exists(deleted) OR deleted = :false)',
++      ExpressionAttributeNames:{'#status':'status','#owner':'owner'},
++      ExpressionAttributeValues:{':completed':'completed',':owner':child.meta.owner,':mode':'receipt_inventory_deep',':digest':source.scene_source_manifest?.digest||source.dispatch_digest,':false':false}}},
++     {Put:{TableName,Item:child,ConditionExpression:'attribute_not_exists(job_id)'}}]}));}
++    catch(error){
++     if(error.name!=='TransactionCanceledException')throw error;
++     // A duplicate child is a retry; a changed/dismissed source is not.
++     if(error.CancellationReasons?.[0]?.Code!=='None'||error.CancellationReasons?.[1]?.Code!=='ConditionalCheckFailed')throw error;
++     const existing=(await send(db,new GetCommand({TableName,Key:{job_id:child.job_id},ConsistentRead:true}))).Item;
++     if(!existing||existing.meta?.owner!==child.meta.owner||existing.meta.persist_to_kitchen!==false||existing.recovery_source_id!==source.job_id
++       ||existing.recovery_image_index!==child.recovery_image_index||existing.analysis_mode!=='bulk_inventory_deep'
++       ||existing.deleted||existing.deleted_at||existing.review_dismissed_at||existing.commit_status)throw error;
++    }
++   },
++   admit
++  });
++}
++exports.createRuntime=createRuntime;
++let handler;
++exports.handle=async event=>{
++ if(!handler){
++  const options={maxAttempts:1,requestHandler:new NodeHttpHandler({connectionTimeout:1000,requestTimeout:5000})};
++  const db=DynamoDBDocumentClient.from(new DynamoDBClient(options)),s3=new S3Client(options);
++  const TableName=process.env.JOB_TABLE_NAME,bucket=process.env.UPLOADS_BUCKET_NAME;
++  handler=createRuntime({db,s3,TableName,bucket,
++   enabled:process.env.CAPTURE_RECOVERY_ENABLED==='true' && process.env.PROCESSING_LEASES_ENABLED==='true' && Boolean(process.env.TOKEN_SIGNING_SECRET),
++   admit:createRecoveryAdmission({db,s3,lambda:new LambdaClient(options),TableName,bucket,functionName:process.env.AWS_LAMBDA_FUNCTION_NAME})});
++ }
++ return handler(event);
++};
+--- a/captureRecovery.js
++++ b/captureRecovery.js
+@@ -0,0 +1,72 @@
++const {createHash}=require('node:crypto');
++const {authorizeCommit}=require('./bulkCommit/auth');
++const {replayPayload}=require('./dispatchJournal');
++const {verifiedSceneSourceManifest}=require('./sceneSourceManifest');
++const reply=(statusCode,body)=>({statusCode,headers:{'Content-Type':'application/json','Access-Control-Allow-Origin':'*'},body:JSON.stringify(body)});
++const active=job=>job && [undefined,null,false].includes(job.deleted) && [undefined,null,''].includes(job.deleted_at);
++function recoveryId(owner,sourceId,index){
++ const b=createHash('sha256').update(JSON.stringify(['capture-recovery-v1',owner,sourceId,index])).digest().subarray(0,16);
++ b[6]=(b[6]&15)|80;b[8]=(b[8]&63)|128;const h=b.toString('hex');return `${h.slice(0,8)}-${h.slice(8,12)}-${h.slice(12,16)}-${h.slice(16,20)}-${h.slice(20)}`;
++}
++function createCaptureRecovery({readJob,readImage,createChild,admit,bucket,authenticate=authorizeCommit,enabled=true}){
++ return async(event)=>{
++  if(!enabled)return reply(503,{code:'capture_recovery_unavailable',error:'Retake this photo using Fridge / pantry.'});
++  let body;try{body=JSON.parse(event.body||'{}');}catch{return reply(400,{error:'Invalid request.'});}
++  const {owner,source_job_id:sourceId,image_index:index=0}=body;
++  if(typeof owner!=='string'||!/^[a-zA-Z0-9_-]{1,64}$/.test(owner)||typeof sourceId!=='string'||!/^[a-f0-9-]{36}$/i.test(sourceId)||!Number.isInteger(index)||index<0||index>=30)
++   return reply(400,{error:'Choose the original scan photo.'});
++  const auth=authenticate(event,owner);if(auth.status)return reply(auth.status,{error:auth.code});
++  if(auth.userId!==owner)return reply(403,{error:'owner_forbidden'});
++  try{
++   const source=await readJob(sourceId);
++   if(!active(source)||source.meta?.owner!==owner)return reply(404,{error:'Scan not found.'});
++   if(source.status!=='completed'||source.analysis_mode!=='receipt_inventory_deep'||source.commit_status||source.review_dismissed_at||source.meta.persist_to_kitchen===true)
++    return reply(409,{error:'This scan is no longer available for recovery.'});
++   const outcomes=source.result?.capture_outcomes;
++   const selected=Array.isArray(outcomes)?outcomes.find(r=>r.image_index===index):null;
++   if((selected && !['no_items','wrong_capture_type'].includes(selected.outcome)) || (!selected && source.result?.items?.length))
++    return reply(409,{error:'Review the identified items before recovering another photo.'});
++   let ref;
++   if(source.scene_source_manifest){
++    const manifest=verifiedSceneSourceManifest(source,{owner,bucket});
++    if(!manifest)return reply(409,{error:'Original scan could not be verified.'});
++    // The user chose this image explicitly; no item-to-photo attribution is inferred.
++    ref=manifest.sources[index];
++   }else{
++    let payload;try{payload=replayPayload(source.dispatch_payload,{bucket});}catch{return reply(410,{code:'source_unavailable',error:'The original photo is unavailable. Take another photo.'});}
++    if(payload.job_id!==sourceId||payload.owner!==owner||payload.analysis_mode!==source.analysis_mode)return reply(409,{error:'Original scan could not be verified.'});
++    ref=payload.receipt_s3_keys?.[index] || (index===0 && !payload.receipt_s3_keys ? {bucket:payload.s3_bucket,key:payload.s3_key,sha256:payload.s3_sha256}:null);
++   }
++   if(!ref)return reply(400,{error:'Choose the original scan photo.'});
++   const id=recoveryId(owner,sourceId,index);
++   let child=await readJob(id);
++   if(child && (!active(child)||child.meta?.owner!==owner||child.recovery_source_id!==sourceId||child.meta.persist_to_kitchen!==false))
++    return reply(409,{error:'Recovery could not be verified.'});
++   if(!child?.dispatch_digest && (!child || child.status==='pending')){
++    let image;try{image=await readImage(ref);}catch(error){if(['NoSuchKey','NotFound'].includes(error.name)||error.statusCode===404)return reply(410,{code:'source_unavailable',error:'The original photo has expired. Take another photo.'});throw error;}
++    if(!Buffer.isBuffer(image)||!image.length||image.length>20*1024*1024)throw Error('Invalid source image');
++    if(ref.sha256 && createHash('sha256').update(image).digest('hex')!==ref.sha256)throw Error('Source digest mismatch');
++    if(!child){
++     const now=new Date().toISOString();
++     child={job_id:id,status:'pending',analysis_mode:'bulk_inventory_deep',created_at:now,updated_at:now,
++       meta:{owner,user_id:auth.userId,persist_to_kitchen:false},recovery_source_id:sourceId,recovery_image_index:index,
++       review_owner:owner,review_order:now+'#'+id,stage:'pending',stage_message:'Checking your photo',progress:0};
++    }
++    // Retry admission must revalidate the parent too; an interrupted child is
++    // not permission to ignore a dismissal that raced the retained-photo read.
++    await createChild(source,child);
++    try { await admit({job_id:id,analysis_mode:'bulk_inventory_deep',owner,user_id:auth.userId,image:image.toString('base64')}); }
++    catch(error) {
++      const admitted=await readJob(id);
++      if(!admitted?.dispatch_digest || admitted.meta?.owner!==owner || admitted.recovery_source_id!==sourceId)throw error;
++      child=admitted;
++    }
++   }
++   return reply(202,{job_id:id,status:child?.status||'pending',analysis_mode:'bulk_inventory_deep',source_job_id:sourceId,review_required:true});
++  }catch(error){
++   console.error(JSON.stringify({event:'capture_recovery_failed',failure_type:error.name||'Error'}));
++   return reply(error.name==='TransactionCanceledException'?409:503,{code:'capture_recovery_unavailable',error:'The photo could not be recovered yet. Try again.'});
++  }
++ };
++}
++module.exports={createCaptureRecovery,recoveryId};
+--- a/dispatchJournal.js
++++ b/dispatchJournal.js
+@@ -0,0 +1,49 @@
++// Internal durable dispatch journal. Not wired into admission until recovery is ready.
++const {createHash}=require('node:crypto');
++const {GetCommand,UpdateCommand}=require('@aws-sdk/lib-dynamodb');
++const {makeSceneSourceManifest}=require('./sceneSourceManifest');
++const active=job=>job&&[undefined,null,false].includes(job.deleted)&&[undefined,null,''].includes(job.deleted_at);
++const MODES=new Set(['product_analysis','quick_identify_deep','bulk_inventory_deep','receipt_inventory_deep']);
++function replayPayload(input,{bucket}) {
++ if(!input || typeof input.job_id!=='string' || !/^[a-zA-Z0-9-]{1,80}$/.test(input.job_id) || !MODES.has(input.analysis_mode))throw Error('Invalid replay identity');
++ const identity=value=>{if(value==null)return null;if(typeof value!=='string'||!value||value.length>256)throw Error('Invalid replay identity');return value;};
++ if(!bucket || input.image || input.image_url)throw Error('Replay requires durable image references');
++ function reference(value,index) {
++  const stem='bulk-identify-uploads/'+input.job_id+(index===undefined?'':'-img'+index)+'.';
++  if(!value || value.bucket!==bucket || typeof value.key!=='string' || !value.key.startsWith(stem) || !(value.sha256 ? /^[a-f0-9]{64}$/.test(value.sha256) && ['jpg','png','webp','gif'].some(ext=>value.key===stem+value.sha256+'.'+ext) : ['jpg','png','webp','gif'].includes(value.key.slice(stem.length))))throw Error('Invalid replay source');
++  return {bucket:value.bucket,key:value.key,...(value.sha256?{sha256:value.sha256}:{})};
++ }
++ let source;
++ if(input.receipt_s3_keys!=null) {
++  if(input.analysis_mode!=='receipt_inventory_deep'||!Array.isArray(input.receipt_s3_keys)||input.receipt_s3_keys.length<1||input.receipt_s3_keys.length>30||input.s3_bucket||input.s3_key)throw Error('Invalid replay receipt pages');
++  source={receipt_s3_keys:input.receipt_s3_keys.map(reference)};
++ } else {
++  const ref=reference({bucket:input.s3_bucket,key:input.s3_key,sha256:input.s3_sha256});source={s3_bucket:ref.bucket,s3_key:ref.key,...(ref.sha256?{s3_sha256:ref.sha256}:{})};
++ }
++ // Explicit fields prevent admission headers, raw images and lease tokens entering storage.
++ return {deep_async_internal:true,job_id:input.job_id,analysis_mode:input.analysis_mode,owner:identity(input.owner),user_id:identity(input.user_id),device_id:identity(input.device_id),session_id:identity(input.session_id),...source};
++}
++function createDispatchJournal({client,tableName,bucket,now=()=>Math.floor(Date.now()/1000)}) {
++ if(!client||!tableName||!bucket)throw Error('Invalid dispatch journal configuration');
++ const read=async jobId=>(await client.send(new GetCommand({TableName:tableName,Key:{job_id:jobId},ConsistentRead:true}))).Item||null;
++ async function prepare(input) {
++  const payload=replayPayload(input,{bucket}),digest=createHash('sha256').update(JSON.stringify(payload)).digest('hex'),time=now();
++  const manifest=makeSceneSourceManifest(payload,{bucket});
++  const owner=payload.owner==null?'(attribute_not_exists(meta.#owner) OR meta.#owner=:owner)':'meta.#owner=:owner';
++  try {
++   await client.send(new UpdateCommand({TableName:tableName,Key:{job_id:payload.job_id},
++    UpdateExpression:'SET dispatch_version=:version, dispatch_payload=:payload, dispatch_digest=:digest, dispatch_partition=:partition, dispatch_due_at=:due, dispatch_created_at=:now'+(manifest?', scene_source_manifest=:manifest':'')+' REMOVE #ttl',
++    ConditionExpression:`attribute_exists(job_id) AND ${owner} AND analysis_mode=:mode AND #status=:pending AND attribute_not_exists(dispatch_digest) AND attribute_not_exists(commit_status) AND attribute_not_exists(review_dismissed_at) AND (attribute_not_exists(#deleted) OR #deleted=:false OR attribute_type(#deleted,:nullType)) AND (attribute_not_exists(#deletedAt) OR #deletedAt=:empty OR attribute_type(#deletedAt,:nullType))`+(manifest?' AND attribute_not_exists(scene_source_manifest)':''),
++    ExpressionAttributeNames:{'#owner':'owner','#status':'status','#ttl':'ttl','#deleted':'deleted','#deletedAt':'deleted_at'},
++    ExpressionAttributeValues:{':false':false,':nullType':'NULL',':empty':'',':owner':payload.owner,':mode':payload.analysis_mode,':pending':'pending',':version':1,':payload':payload,':digest':digest,':partition':'dispatch-v1',':due':time+120,':now':time,...(manifest?{':manifest':manifest}:{})}}));
++   return {state:'prepared',payload,digest};
++  }catch(error){
++   if(error.name!=='ConditionalCheckFailedException')throw error;
++   const job=await read(payload.job_id);
++   if(active(job) && job.dispatch_digest===digest && job.dispatch_version===1 && (job.meta?.owner??null)===payload.owner && job.analysis_mode===payload.analysis_mode && ['pending','processing'].includes(job.status) && !job.commit_status && !job.review_dismissed_at)return {state:'existing',payload,digest};
++   return {state:'conflict'};
++  }
++ }
++ return {prepare,read};
++}
++module.exports={replayPayload,createDispatchJournal};
+--- a/quickIdentify/geminiReceipt.js
++++ b/quickIdentify/geminiReceipt.js
+@@ -1,3 +1,4 @@
++const {captureOutcome} = require('../captureOutcome');
+ const { providerMetadata, rememberProviderResult, providerResultMetadata, recordProviderAttempt } = require("./providerUsage");
+ const fetch = require("node-fetch");
+ const { Jimp } = require("jimp");
+@@ -13,6 +14,7 @@
+ const geminiResponseSchema = {
+   type: "object",
+   properties: {
++    capture_type: {type:"string",enum:["receipt","product","scene","unreadable","unknown"]},
+     receipt_analysis_log: { type: "string" },
+     receipt_summary: {
+       type: "object",
+@@ -65,7 +67,7 @@
+       },
+     },
+   },
+-  required: ["receipt_analysis_log", "receipt_summary", "items"],
++  required: ["capture_type", "receipt_analysis_log", "receipt_summary", "items"],
+ };
+ 
+ function cleanNullable(value) {
+@@ -440,6 +442,7 @@
+ - OCR text extracted from the receipt when available
+ 
+ Return strict JSON with:
++0. capture_type: receipt, product (one product label/package), scene (fridge/pantry/foods without a receipt), unreadable, or unknown. Classify what is actually visible. For a non-receipt image return no receipt items; never invent a purchase.
+ 1. receipt_analysis_log: 1 to 3 short sentences about any hard-to-read areas or especially cryptic abbreviations
+ 2. receipt_summary:
+    - merchant_name
+@@ -568,8 +571,15 @@
+           outcome = "parse_error";
+           payload = await response.json();
+           finishedAt = Date.now();
+-          const text = payload?.candidates?.[0]?.content?.parts?.map((part) => part.text).filter(Boolean).join("\n") || "{}";
++          const text = payload?.candidates?.[0]?.content?.parts?.map((part) => part.text).filter(Boolean).join("\n");
++          if (!text) throw new Error('Receipt response is unavailable');
+           const parsed = JSON.parse(text);
++          if (!parsed || !['receipt','product','scene','unreadable','unknown'].includes(parsed.capture_type)
++              || !Array.isArray(parsed.items)
++              || parsed.items.some(item => !item || typeof item !== 'object' || typeof item.item_name !== 'string' || !item.item_name.trim())
++              || (parsed.capture_type !== 'receipt' && parsed.items.length)) {
++            throw new Error('Receipt response has an invalid shape');
++          }
+           outcome = "success";
+           return rememberProviderResult(parsed, providerMetadata("gemini", currentModel, payload));
+         }
+@@ -662,6 +672,8 @@
+ 
+   return {
+     items,
++    capture_type: captureOutcome(geminiResult).capture_type,
++    ...{capture_outcome:captureOutcome({...geminiResult,items}).outcome},
+     visual_analysis_log: cleanNullable(geminiResult?.receipt_analysis_log),
+     receipt_analysis_log: cleanNullable(geminiResult?.receipt_analysis_log),
+     receipt_summary: receiptSummary,
+--- a/identifyAsync/app.js
++++ b/identifyAsync/app.js
+@@ -1,3 +1,4 @@
++const {captureOutcome,aggregateCaptureOutcomes,applyRecoveryAvailability} = require('../captureOutcome');
+ // Lambda handler for async identification - creates job and processes in background
+ const { randomUUID } = require('crypto');
+ const { LambdaClient, InvokeCommand } = require('@aws-sdk/client-lambda');
+@@ -174,6 +175,7 @@
+     }
+ 
+     const body = JSON.parse(event.body || '{}');
++    if (body.operation === 'recover_capture') return require('../captureRecoveryRuntime').handle(event);
+     const { image_url, image, owner, user_id, device_id, session_id } = body;
+     // Support multi-image receipt uploads: `images` is an array of base64 strings
+     const images = Array.isArray(body.images) ? body.images : null;
+@@ -242,7 +244,15 @@
+ 
+     // For multi-image receipts, upload all images to S3 first, then dispatch ONE job
+     let receiptS3Keys = null;
+-    if (images && images.length > 0 && analysisMode === RECEIPT_DEEP_MODE) {
++    if (process.env.CAPTURE_RECOVERY_ENABLED === 'true' && owner && !persistToKitchen &&
++        analysisMode === RECEIPT_DEEP_MODE && (image || images?.length)) {
++      try {
++        receiptS3Keys = await require('../captureSourceRetention').retain({job_id:jobId,owner,images:images?.length ? images : [image]});
++      } catch (error) {
++        await jobQueue.updateJobStatus(jobId,'failed',null,'Photo could not be retained. Please try again.').catch(()=>null);
++        throw error;
++      }
++    } else if (images && images.length > 0 && analysisMode === RECEIPT_DEEP_MODE) {
+       console.log(`[IdentifyAsync] Uploading ${images.length} receipt images to S3 for job ${jobId}`);
+       receiptS3Keys = [];
+       for (let i = 0; i < images.length; i++) {
+@@ -382,6 +392,7 @@
+       console.log(`[IdentifyAsync] Multi-image receipt: ${receiptS3Keys.length} images for job ${jobId}`);
+       var allItems = [];
+       var allReceiptSummaries = [];
++      const receiptResults = [];
+ 
+       for (let i = 0; i < receiptS3Keys.length; i++) {
+         const imgNum = i + 1;
+@@ -428,6 +439,7 @@
+           output: summarizeItems(partialResult),
+         });
+ 
++        receiptResults.push(partialResult);
+         if (Array.isArray(partialResult?.items)) {
+           allItems = allItems.concat(partialResult.items);
+           console.log(`[IdentifyAsync] Receipt image ${imgNum}: found ${partialResult.items.length} items (total so far: ${allItems.length})`);
+@@ -477,6 +489,7 @@
+         items: allItems,
+         receipt_summary: mergedSummary,
+         receipt_image_count: receiptS3Keys.length,
++        ...aggregateCaptureOutcomes(receiptResults),
+       };
+     } else {
+       // --- Single-image path (original) ---
+@@ -642,8 +655,18 @@
+       });
+     }
+ 
++    if (analysisMode === RECEIPT_DEEP_MODE && !analysis.capture_outcomes) {
++      analysis = {...analysis,...aggregateCaptureOutcomes([analysis])};
++    }
++    if (analysisMode === RECEIPT_DEEP_MODE) {
++      analysis = applyRecoveryAvailability(analysis, await queue.getJob(jobId), {
++        enabled: process.env.CAPTURE_RECOVERY_ENABLED === 'true' &&
++          process.env.PROCESSING_LEASES_ENABLED === 'true' && Boolean(process.env.TOKEN_SIGNING_SECRET),
++        owner, bucket: process.env.UPLOADS_BUCKET_NAME,
++      });
++    }
+     // Store result
+-    await queue.updateJobProgress(jobId, 'completed', 'All done!', 100, {
++    await queue.updateJobProgress(jobId, 'completed', analysis?.items?.length ? 'Ready to review' : 'No items identified', 100, {
+       item_count: analysis?.items?.length || 0,
+       persisted_count: persistence?.persisted_count || 0,
+     });
+@@ -705,7 +728,7 @@
+     const canRedrive =
+       retryCount < maxRedrive &&
+       !!process.env.AWS_LAMBDA_FUNCTION_NAME &&
+-      !!(imageUrl || s3Key || imageBase64);
++      !!(imageUrl || s3Key || imageBase64 || (analysisMode === RECEIPT_DEEP_MODE && receiptS3Keys?.length));
+     if (canRedrive) {
+       try {
+         await queue.updateJobProgress(jobId, 'retrying', 'Taking another pass at your photo…', 15).catch(() => null);
+--- a/bulkCommit/auth.js
++++ b/bulkCommit/auth.js
+@@ -0,0 +1,44 @@
++const { createHmac, timingSafeEqual } = require('crypto');
++function authorizeCommit(event, owner, secret = process.env.TOKEN_SIGNING_SECRET) {
++  if (!secret) return { status: 503, code: 'auth_unavailable' };
++  try {
++    const headers = Object.entries(event.headers || {}).filter(([key]) => key.toLowerCase() === 'authorization');
++    if (headers.length !== 1 || typeof headers[0][1] !== 'string') throw new Error();
++    const match = /^Bearer ([A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)$/i.exec(headers[0][1].trim());
++    if (!match || match[1].length > 8192) throw new Error();
++    const [head, body, signature] = match[1].split('.');
++    const expected = createHmac('sha256', secret).update(head + '.' + body).digest();
++    const actual = Buffer.from(signature, 'base64url');
++    if (actual.length !== expected.length || !timingSafeEqual(actual, expected)) throw new Error();
++    const header = JSON.parse(Buffer.from(head, 'base64url'));
++    const claims = JSON.parse(Buffer.from(body, 'base64url'));
++    if (header?.alg !== 'HS256' || header.crit || claims?.iss !== 'trepo-auth' ||
++        typeof claims.exp !== 'number' || !Number.isFinite(claims.exp) || claims.exp <= Date.now()/1000 ||
++        (claims.nbf !== undefined && (typeof claims.nbf !== 'number' || !Number.isFinite(claims.nbf) || claims.nbf > Date.now()/1000))) throw new Error();
++    if (![claims.owner_id, claims.user_id].some(value => typeof value === 'string' && value === owner)) return { status: 403, code: 'owner_forbidden' };
++    return { userId: typeof claims.user_id === "string" && claims.user_id ? claims.user_id : owner };
++  } catch { return { status: 401, code: 'authentication_required' }; }
++}
++// Released iOS <=1.13 sends no Authorization header. Its unguessable scan UUID
++// is the legacy capability: constrain it to a completed inventory scan and owner.
++// Never downgrade a supplied invalid/expired signed credential to this path.
++function isLegacyCommit(event, sourceId) {
++  return !Object.keys(event.headers || {}).some(key => key.toLowerCase() === 'authorization') &&
++    typeof sourceId === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(sourceId);
++}
++function authorizeLegacySource(source, owner) {
++  validateSourceOwner(source, owner);
++  if (source.status !== 'completed' || !['receipt_inventory_deep', 'bulk_inventory_deep'].includes(source.analysis_mode)) {
++    const error = new Error('This scan is not ready to add. Please reopen your scan.');
++    error.code = 'source_owner_conflict'; throw error;
++  }
++  // Do not trust a separately supplied body user_id for attribution.
++  return { userId: typeof source.meta.user_id === 'string' && source.meta.user_id ? source.meta.user_id : owner };
++}
++function validateSourceOwner(source, owner) {
++  if (!source?.meta || typeof source.meta.owner !== 'string' || source.meta.owner !== owner) {
++    const error = new Error('This scan does not belong to the signed-in account. Please reopen your scan.');
++    error.statusCode = 409; error.code = 'source_owner_conflict'; throw error;
++  }
++}
++module.exports = { authorizeCommit, validateSourceOwner, isLegacyCommit, authorizeLegacySource };

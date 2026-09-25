@@ -1,0 +1,65 @@
+{
+  "run": "journey-7b0458ba22",
+  "owner": "8fcb37c1-0927-4c31-856a-5b761efc226c",
+  "records": [
+    {
+      "case": "thyme-sync rename",
+      "pass": true,
+      "revision": 1
+    },
+    {
+      "case": "thyme-sync exact completed response cache removed to force fresh handler",
+      "pass": true
+    },
+    {
+      "case": "thyme-sync repeat after response-cache lifetime",
+      "pass": true,
+      "revision_unchanged": true
+    },
+    {
+      "case": "thyme rename",
+      "pass": true,
+      "revision": 1
+    },
+    {
+      "case": "thyme exact completed response cache removed to force fresh handler",
+      "pass": true
+    },
+    {
+      "case": "thyme repeat after response-cache lifetime",
+      "pass": true,
+      "revision_unchanged": true
+    },
+    {
+      "case": "async admission, audio, worker completion",
+      "pass": true
+    },
+    {
+      "cleanup_item": "a4389513-d286-47af-8311-7d54525ac869",
+      "absence_verified": true
+    },
+    {
+      "cleanup_item": "d2f11e95-5e75-421e-ab26-069b0e010ef2",
+      "absence_verified": true
+    },
+    {
+      "cleanup": "unique session messages removed; immutable operation receipts retained as designed"
+    }
+  ],
+  "fixtures": [
+    "a4389513-d286-47af-8311-7d54525ac869",
+    "d2f11e95-5e75-421e-ab26-069b0e010ef2"
+  ],
+  "sessions": [
+    "journey-7b0458ba22-thyme-sync",
+    "journey-7b0458ba22-thyme",
+    "journey-7b0458ba22-voice"
+  ],
+  "operations": [
+    "109cdb2a-929d-425a-807a-da08d0089a16",
+    "78f9de83-90bc-4c80-8315-f99ea8546bef"
+  ],
+  "jobs": [
+    "16ab93e75077de834e4a17d5ed51c114867027c0d55e0efc192917a2083e059d"
+  ]
+}

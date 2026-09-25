@@ -1,0 +1,159 @@
+FFFF                                                                     [100%]
+=================================== FAILURES ===================================
+__________ test_thyme_to_canonical_kitchen_real_database[fresh-retry] __________
+
+db = (<pymysql.connections.Connection object at 0x1070e4b90>, <function db.<locals>.connect at 0x10724c7c0>)
+mode = 'fresh-retry'
+
+    @pytest.mark.parametrize('mode',['rename','retry','stale','foreign','mismatch','duplicate','newest','unrelated-id','shortening','fresh-retry','fresh-later-edit','fresh-deleted','fresh-conflict'])
+    def test_thyme_to_canonical_kitchen_real_database(db,mode):
+        assert os.environ.get('TREPO_AMOUNT_TEST_PORT') == '33317'
+        # Exercise the actual mixed collations used by the protected edit sidecar.
+        with db[0].cursor() as cur:
+            cur.execute('ALTER TABLE shared_kitchen CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci')
+            cur.execute('ALTER TABLE shared_kitchen ADD _createdDate DATETIME DEFAULT CURRENT_TIMESTAMP')
+            if mode in ('duplicate','newest','unrelated-id','shortening'):
+                cur.execute("UPDATE shared_kitchen SET product_name='Beef Broth', _createdDate='2026-08-01', _updatedDate='2026-09-24' WHERE _id='beef'")
+                cur.execute("UPDATE shared_kitchen SET owner_id='owner', product_name=%s, _createdDate='2026-09-01', _updatedDate='2026-09-01' WHERE _id='eggs'", ('Beef Broth' if mode in ('duplicate','newest') else 'Garlic Oil',))
+            if mode in ('stale','mismatch'):
+                cur.execute("INSERT INTO kitchen_item_edits(item_id,overrides) VALUES('beef',JSON_OBJECT())")
+            if mode=='mismatch':
+                cur.execute("CREATE TRIGGER fixture_mismatch BEFORE UPDATE ON shared_kitchen FOR EACH ROW FOLLOWS trepo_preserve_item_edits SET NEW.product_name=OLD.product_name")
+        schema=db[0].db.decode()
+        root=Path(__file__).resolve().parents[2]
+        script=Path(os.environ.get('TREPO_THYME_TEST_SOURCE',str(root/'playground12_voice_ack/trepo-quick-ack')))/'test/fixtures/kitchen-edit-roundtrip.mjs'
+        worker=Path(__file__).with_name('kitchen_roundtrip_worker.py')
+        result=subprocess.run(['/opt/homebrew/bin/node','--experimental-test-module-mocks',str(script),schema,mode,str(worker),sys.executable],
+            capture_output=True,text=True,timeout=20,env={**os.environ,'WRITE_SHARED_ONLY':'true','READ_SHARED_KITCHEN':'true'})
+        assert result.returncode==0,result.stderr
+        result=json.loads(result.stdout.splitlines()[-1])
+        if mode.startswith('fresh-'):
+            if mode=='fresh-conflict':
+                assert result['error']['status']==409 and result['requests']==1,result
+                assert row(db)['product_name']=='Garlic Olive Oil'
+            else:
+>               assert not result.get('error') and result['requests']==2,result
+E               AssertionError: {'error': {'status': 409, 'message': 'This request ID was already used.'}, 'requests': 2}
+E               assert (not {'status': 409, 'message': 'This request ID was already used.'})
+E                +  where {'status': 409, 'message': 'This request ID was already used.'} = <built-in method get of dict object at 0x10725e880>('error')
+E                +    where <built-in method get of dict object at 0x10725e880> = {'error': {'status': 409, 'message': 'This request ID was already used.'}, 'requests': 2}.get
+
+Desktop/trepov2/playground6_groceryRec/tests/test_thyme_kitchen_roundtrip.py:34: AssertionError
+_______ test_thyme_to_canonical_kitchen_real_database[fresh-later-edit] ________
+
+db = (<pymysql.connections.Connection object at 0x10781b440>, <function db.<locals>.connect at 0x10784da80>)
+mode = 'fresh-later-edit'
+
+    @pytest.mark.parametrize('mode',['rename','retry','stale','foreign','mismatch','duplicate','newest','unrelated-id','shortening','fresh-retry','fresh-later-edit','fresh-deleted','fresh-conflict'])
+    def test_thyme_to_canonical_kitchen_real_database(db,mode):
+        assert os.environ.get('TREPO_AMOUNT_TEST_PORT') == '33317'
+        # Exercise the actual mixed collations used by the protected edit sidecar.
+        with db[0].cursor() as cur:
+            cur.execute('ALTER TABLE shared_kitchen CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci')
+            cur.execute('ALTER TABLE shared_kitchen ADD _createdDate DATETIME DEFAULT CURRENT_TIMESTAMP')
+            if mode in ('duplicate','newest','unrelated-id','shortening'):
+                cur.execute("UPDATE shared_kitchen SET product_name='Beef Broth', _createdDate='2026-08-01', _updatedDate='2026-09-24' WHERE _id='beef'")
+                cur.execute("UPDATE shared_kitchen SET owner_id='owner', product_name=%s, _createdDate='2026-09-01', _updatedDate='2026-09-01' WHERE _id='eggs'", ('Beef Broth' if mode in ('duplicate','newest') else 'Garlic Oil',))
+            if mode in ('stale','mismatch'):
+                cur.execute("INSERT INTO kitchen_item_edits(item_id,overrides) VALUES('beef',JSON_OBJECT())")
+            if mode=='mismatch':
+                cur.execute("CREATE TRIGGER fixture_mismatch BEFORE UPDATE ON shared_kitchen FOR EACH ROW FOLLOWS trepo_preserve_item_edits SET NEW.product_name=OLD.product_name")
+        schema=db[0].db.decode()
+        root=Path(__file__).resolve().parents[2]
+        script=Path(os.environ.get('TREPO_THYME_TEST_SOURCE',str(root/'playground12_voice_ack/trepo-quick-ack')))/'test/fixtures/kitchen-edit-roundtrip.mjs'
+        worker=Path(__file__).with_name('kitchen_roundtrip_worker.py')
+        result=subprocess.run(['/opt/homebrew/bin/node','--experimental-test-module-mocks',str(script),schema,mode,str(worker),sys.executable],
+            capture_output=True,text=True,timeout=20,env={**os.environ,'WRITE_SHARED_ONLY':'true','READ_SHARED_KITCHEN':'true'})
+        assert result.returncode==0,result.stderr
+        result=json.loads(result.stdout.splitlines()[-1])
+        if mode.startswith('fresh-'):
+            if mode=='fresh-conflict':
+                assert result['error']['status']==409 and result['requests']==1,result
+                assert row(db)['product_name']=='Garlic Olive Oil'
+            else:
+>               assert not result.get('error') and result['requests']==2,result
+E               AssertionError: {'error': {'status': 409, 'message': 'This request ID was already used.'}, 'requests': 2}
+E               assert (not {'status': 409, 'message': 'This request ID was already used.'})
+E                +  where {'status': 409, 'message': 'This request ID was already used.'} = <built-in method get of dict object at 0x107209000>('error')
+E                +    where <built-in method get of dict object at 0x107209000> = {'error': {'status': 409, 'message': 'This request ID was already used.'}, 'requests': 2}.get
+
+Desktop/trepov2/playground6_groceryRec/tests/test_thyme_kitchen_roundtrip.py:34: AssertionError
+_________ test_thyme_to_canonical_kitchen_real_database[fresh-deleted] _________
+
+db = (<pymysql.connections.Connection object at 0x107819e50>, <function db.<locals>.connect at 0x10784dd00>)
+mode = 'fresh-deleted'
+
+    @pytest.mark.parametrize('mode',['rename','retry','stale','foreign','mismatch','duplicate','newest','unrelated-id','shortening','fresh-retry','fresh-later-edit','fresh-deleted','fresh-conflict'])
+    def test_thyme_to_canonical_kitchen_real_database(db,mode):
+        assert os.environ.get('TREPO_AMOUNT_TEST_PORT') == '33317'
+        # Exercise the actual mixed collations used by the protected edit sidecar.
+        with db[0].cursor() as cur:
+            cur.execute('ALTER TABLE shared_kitchen CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci')
+            cur.execute('ALTER TABLE shared_kitchen ADD _createdDate DATETIME DEFAULT CURRENT_TIMESTAMP')
+            if mode in ('duplicate','newest','unrelated-id','shortening'):
+                cur.execute("UPDATE shared_kitchen SET product_name='Beef Broth', _createdDate='2026-08-01', _updatedDate='2026-09-24' WHERE _id='beef'")
+                cur.execute("UPDATE shared_kitchen SET owner_id='owner', product_name=%s, _createdDate='2026-09-01', _updatedDate='2026-09-01' WHERE _id='eggs'", ('Beef Broth' if mode in ('duplicate','newest') else 'Garlic Oil',))
+            if mode in ('stale','mismatch'):
+                cur.execute("INSERT INTO kitchen_item_edits(item_id,overrides) VALUES('beef',JSON_OBJECT())")
+            if mode=='mismatch':
+                cur.execute("CREATE TRIGGER fixture_mismatch BEFORE UPDATE ON shared_kitchen FOR EACH ROW FOLLOWS trepo_preserve_item_edits SET NEW.product_name=OLD.product_name")
+        schema=db[0].db.decode()
+        root=Path(__file__).resolve().parents[2]
+        script=Path(os.environ.get('TREPO_THYME_TEST_SOURCE',str(root/'playground12_voice_ack/trepo-quick-ack')))/'test/fixtures/kitchen-edit-roundtrip.mjs'
+        worker=Path(__file__).with_name('kitchen_roundtrip_worker.py')
+        result=subprocess.run(['/opt/homebrew/bin/node','--experimental-test-module-mocks',str(script),schema,mode,str(worker),sys.executable],
+            capture_output=True,text=True,timeout=20,env={**os.environ,'WRITE_SHARED_ONLY':'true','READ_SHARED_KITCHEN':'true'})
+        assert result.returncode==0,result.stderr
+        result=json.loads(result.stdout.splitlines()[-1])
+        if mode.startswith('fresh-'):
+            if mode=='fresh-conflict':
+                assert result['error']['status']==409 and result['requests']==1,result
+                assert row(db)['product_name']=='Garlic Olive Oil'
+            else:
+>               assert not result.get('error') and result['requests']==2,result
+E               AssertionError: {'error': {'status': 404, 'message': "Couldn't find beef in the kitchen."}, 'requests': 1}
+E               assert (not {'status': 404, 'message': "Couldn't find beef in the kitchen."})
+E                +  where {'status': 404, 'message': "Couldn't find beef in the kitchen."} = <built-in method get of dict object at 0x10720a840>('error')
+E                +    where <built-in method get of dict object at 0x10720a840> = {'error': {'status': 404, 'message': "Couldn't find beef in the kitchen."}, 'requests': 1}.get
+
+Desktop/trepov2/playground6_groceryRec/tests/test_thyme_kitchen_roundtrip.py:34: AssertionError
+________ test_thyme_to_canonical_kitchen_real_database[fresh-conflict] _________
+
+db = (<pymysql.connections.Connection object at 0x10781b470>, <function db.<locals>.connect at 0x10784dee0>)
+mode = 'fresh-conflict'
+
+    @pytest.mark.parametrize('mode',['rename','retry','stale','foreign','mismatch','duplicate','newest','unrelated-id','shortening','fresh-retry','fresh-later-edit','fresh-deleted','fresh-conflict'])
+    def test_thyme_to_canonical_kitchen_real_database(db,mode):
+        assert os.environ.get('TREPO_AMOUNT_TEST_PORT') == '33317'
+        # Exercise the actual mixed collations used by the protected edit sidecar.
+        with db[0].cursor() as cur:
+            cur.execute('ALTER TABLE shared_kitchen CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci')
+            cur.execute('ALTER TABLE shared_kitchen ADD _createdDate DATETIME DEFAULT CURRENT_TIMESTAMP')
+            if mode in ('duplicate','newest','unrelated-id','shortening'):
+                cur.execute("UPDATE shared_kitchen SET product_name='Beef Broth', _createdDate='2026-08-01', _updatedDate='2026-09-24' WHERE _id='beef'")
+                cur.execute("UPDATE shared_kitchen SET owner_id='owner', product_name=%s, _createdDate='2026-09-01', _updatedDate='2026-09-01' WHERE _id='eggs'", ('Beef Broth' if mode in ('duplicate','newest') else 'Garlic Oil',))
+            if mode in ('stale','mismatch'):
+                cur.execute("INSERT INTO kitchen_item_edits(item_id,overrides) VALUES('beef',JSON_OBJECT())")
+            if mode=='mismatch':
+                cur.execute("CREATE TRIGGER fixture_mismatch BEFORE UPDATE ON shared_kitchen FOR EACH ROW FOLLOWS trepo_preserve_item_edits SET NEW.product_name=OLD.product_name")
+        schema=db[0].db.decode()
+        root=Path(__file__).resolve().parents[2]
+        script=Path(os.environ.get('TREPO_THYME_TEST_SOURCE',str(root/'playground12_voice_ack/trepo-quick-ack')))/'test/fixtures/kitchen-edit-roundtrip.mjs'
+        worker=Path(__file__).with_name('kitchen_roundtrip_worker.py')
+        result=subprocess.run(['/opt/homebrew/bin/node','--experimental-test-module-mocks',str(script),schema,mode,str(worker),sys.executable],
+            capture_output=True,text=True,timeout=20,env={**os.environ,'WRITE_SHARED_ONLY':'true','READ_SHARED_KITCHEN':'true'})
+        assert result.returncode==0,result.stderr
+        result=json.loads(result.stdout.splitlines()[-1])
+        if mode.startswith('fresh-'):
+            if mode=='fresh-conflict':
+>               assert result['error']['status']==409 and result['requests']==1,result
+E               AssertionError: {'error': {'status': 409, 'message': 'This request ID was already used.'}, 'requests': 2}
+E               assert (409 == 409 and 2 == 1)
+
+Desktop/trepov2/playground6_groceryRec/tests/test_thyme_kitchen_roundtrip.py:31: AssertionError
+=========================== short test summary info ============================
+FAILED Desktop/trepov2/playground6_groceryRec/tests/test_thyme_kitchen_roundtrip.py::test_thyme_to_canonical_kitchen_real_database[fresh-retry]
+FAILED Desktop/trepov2/playground6_groceryRec/tests/test_thyme_kitchen_roundtrip.py::test_thyme_to_canonical_kitchen_real_database[fresh-later-edit]
+FAILED Desktop/trepov2/playground6_groceryRec/tests/test_thyme_kitchen_roundtrip.py::test_thyme_to_canonical_kitchen_real_database[fresh-deleted]
+FAILED Desktop/trepov2/playground6_groceryRec/tests/test_thyme_kitchen_roundtrip.py::test_thyme_to_canonical_kitchen_real_database[fresh-conflict]
+4 failed, 9 deselected in 1.37s

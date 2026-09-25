@@ -1,0 +1,53 @@
+{
+  "run": "journey-0ef172d287",
+  "owner": "8fcb37c1-0927-4c31-856a-5b761efc226c",
+  "records": [
+    {
+      "case": "receipt",
+      "job_id": "89094e54-c3ae-4e01-9012-cf734764a34d",
+      "expected": "items_identified",
+      "status": "completed",
+      "outcome": "items_identified",
+      "count": 3,
+      "recovery_available": false,
+      "pass": true
+    },
+    {
+      "case": "pantry-in-receipt",
+      "job_id": "85a6b72c-f033-45e2-8ec3-a8bee4a33b61",
+      "expected": "wrong_capture_type",
+      "status": "completed",
+      "outcome": "wrong_capture_type",
+      "count": 0,
+      "recovery_available": false,
+      "pass": true
+    },
+    {
+      "case": "blank",
+      "job_id": "88ac94c8-a033-4ec1-8e7a-b4b24c457202",
+      "expected": "no_items",
+      "status": "completed",
+      "outcome": "no_items",
+      "count": 0,
+      "recovery_available": false,
+      "pass": true
+    },
+    {
+      "cleanup_job": "89094e54-c3ae-4e01-9012-cf734764a34d",
+      "absence_verified": true,
+      "s3_removed": []
+    },
+    {
+      "cleanup_job": "85a6b72c-f033-45e2-8ec3-a8bee4a33b61",
+      "absence_verified": true,
+      "s3_removed": [
+        "bulk-identify-uploads/85a6b72c-f033-45e2-8ec3-a8bee4a33b61.png"
+      ]
+    },
+    {
+      "cleanup_job": "88ac94c8-a033-4ec1-8e7a-b4b24c457202",
+      "absence_verified": true,
+      "s3_removed": []
+    }
+  ]
+}

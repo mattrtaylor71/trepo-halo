@@ -1,0 +1,13 @@
+{
+  "name": "kitchen",
+  "function": "trepo-grocery-backend-dev-KitchenApiFunction-lC0BHStmZf1k",
+  "before_code_sha256": "vCo7hLgjkGA2dEJmk6O85YdKbHvx1WhX1iisOTi2+dQ=",
+  "before_revision": "be8dbd0a-e4ba-40f5-9d1f-f575d22f5e80",
+  "before_config_hash": "699cfaa424e0ec91b0611c478e944114bf5c9bb2a0c4f9c3c6035a62104c10b9",
+  "candidate_code_sha256": "bqiMBVyVo80t2VxWUnnHHar0rJFXKwUIHvh4vkwCXhU=",
+  "started_at": "2026-09-25T00:58:25.870417+00:00",
+  "status": "deployed",
+  "after_revision": "27afe1b9-0489-4e79-8639-93446b5e9c08",
+  "last_update_status": "Successful",
+  "completed_at": "2026-09-25T00:58:32.261147+00:00"
+}

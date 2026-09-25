@@ -1,0 +1,13 @@
+{
+  "name": "recipes",
+  "function": "trepo-grocery-backend-dev-SavedRecipesApiFunction-a7aWuWlJvEF2",
+  "before_code_sha256": "fx6QVMX0mvIAwwmQtYpespROSg5Y1fR8umxoL9cZPR0=",
+  "before_revision": "e79e5c4d-2825-4bdc-80e9-ab12761f0832",
+  "before_config_hash": "ab3b07777cb4891c90f0e920d8374a97a2f8b923499d26c01ad1f98f90ee39f3",
+  "candidate_code_sha256": "odOt6M9EH7awMZrZftlBEAEn9VmMtYyODjM1G6rsohg=",
+  "started_at": "2026-09-25T00:58:32.477777+00:00",
+  "status": "deployed",
+  "after_revision": "41e54944-7aac-4d45-bebb-5464d3f9c4e1",
+  "last_update_status": "Successful",
+  "completed_at": "2026-09-25T00:58:46.101000+00:00"
+}

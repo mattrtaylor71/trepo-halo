@@ -1,0 +1,46 @@
+{
+  "recorded_at": "2026-09-25T01:10:25.758335+00:00",
+  "services": {
+    "thyme": {
+      "zip_sha256": "7267d60a5e54d3d3f84b154c557db60a4bdb7b99e9e05a3ea9e46c7ae8d12e7d",
+      "code_sha256": "cmfWCl5U09P4SxVMVX22Ckvbe5np4Fo+qeRseujRLn0=",
+      "changed_entries_verified": 17,
+      "replay_changed_entries": [
+        "playground12_voice_ack/trepo-quick-ack/index.js",
+        "playground12_voice_ack/trepo-quick-ack/index-stream.js",
+        "playground12_voice_ack/trepo-quick-ack/lib/data-access.mjs",
+        "playground12_voice_ack/trepo-quick-ack/lib/kitchen-edit-client.mjs",
+        "playground12_voice_ack/trepo-quick-ack/lib/session-store.mjs"
+      ],
+      "all_other_zip_entries_unchanged": true
+    },
+    "thyme-sync": {
+      "zip_sha256": "9f7cca2a1f33c2c160a6af71353c223318ae0356dbcac95bfc1ec2a2914b0bab",
+      "code_sha256": "n3zKKh8zwsFgpq9xNTwiMxiuA1bbyslb/B7CopFLC6s=",
+      "changed_entries_verified": 16,
+      "replay_changed_entries": [
+        "playground12_voice_ack/trepo-quick-ack/index.js",
+        "playground12_voice_ack/trepo-quick-ack/index-stream.js",
+        "playground12_voice_ack/trepo-quick-ack/lib/data-access.mjs",
+        "playground12_voice_ack/trepo-quick-ack/lib/kitchen-edit-client.mjs",
+        "playground12_voice_ack/trepo-quick-ack/lib/session-store.mjs"
+      ],
+      "all_other_zip_entries_unchanged": true
+    },
+    "thyme-worker": {
+      "zip_sha256": "ae9b209125186d154aa1e5bed8bd79e103c611e93501ee99b699071360748da5",
+      "code_sha256": "rpsgkSUYbRVKoeW+2L154QPGEek1Ae6ZtpkHE2B0jaU=",
+      "changed_entries_verified": 17,
+      "replay_changed_entries": [
+        "playground12_voice_ack/trepo-quick-ack/index.js",
+        "playground12_voice_ack/trepo-quick-ack/index-stream.js",
+        "playground12_voice_ack/trepo-quick-ack/lib/data-access.mjs",
+        "playground12_voice_ack/trepo-quick-ack/lib/kitchen-edit-client.mjs",
+        "playground12_voice_ack/trepo-quick-ack/lib/session-store.mjs"
+      ],
+      "all_other_zip_entries_unchanged": true
+    }
+  },
+  "no_serving_deployment": true,
+  "configuration_changes": false
+}

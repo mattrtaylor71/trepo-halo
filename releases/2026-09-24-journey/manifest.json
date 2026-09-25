@@ -1,0 +1,412 @@
+{
+  "thyme": {
+    "base": {
+      "FunctionName": "trepo-quick-ack-stream-dev",
+      "CodeSha256": "vzhdBuD6tnXy1gbIGZVPVuukINBjOgPC+DC+N/S4EJo=",
+      "LastModified": "2026-09-12T14:49:58.000+0000",
+      "Runtime": "nodejs22.x",
+      "Handler": "playground12_voice_ack/trepo-quick-ack/index-stream.handler",
+      "Timeout": 150,
+      "RevisionId": "679694de-d2e4-4fc0-919a-b7c04630f53b"
+    },
+    "code_sha256": "cmfWCl5U09P4SxVMVX22Ckvbe5np4Fo+qeRseujRLn0=",
+    "zip_sha256": "7267d60a5e54d3d3f84b154c557db60a4bdb7b99e9e05a3ea9e46c7ae8d12e7d",
+    "changes": [
+      {
+        "path": "playground12_voice_ack/trepo-quick-ack/index.js",
+        "sha256": "9be298863c527937ed572c43aed871de60f7a45fb0d220d3a30ca2211d6f28f7",
+        "previous_sha256": "23ca3b9f1b9b40d81dc276fda658e83622510a928365c035307d8b4ad5232387"
+      },
+      {
+        "path": "playground12_voice_ack/trepo-quick-ack/index-stream.js",
+        "sha256": "ae8f054c516aade09953f3f53dfbf0e808475350b855005d723e7a94f06025be",
+        "previous_sha256": "4b9aa1da41f6698cf0682a7e8bc85142cf467d2efdb94ac0c696f678b10c1a15"
+      },
+      {
+        "path": "playground12_voice_ack/trepo-quick-ack/lib/kitchen-task-context.mjs",
+        "sha256": "3812ee270067fc3c035907b31cf33a50a4db389be82c5b1eb94c6d779c422e7a",
+        "previous_sha256": null
+      },
+      {
+        "path": "playground12_voice_ack/trepo-quick-ack/lib/tool-actions.mjs",
+        "sha256": "f8cb5629379def99fc940f170cc0acfb4615eb7e58b91c123a81979421fee5bb",
+        "previous_sha256": "a31952ded184ef70d3b0eb7017eaa1c039ddd72dd4fd729dc4faacb0b301cd8a"
+      },
+      {
+        "path": "playground12_voice_ack/trepo-quick-ack/lib/device-assistant.mjs",
+        "sha256": "cf3b7bc3217e531443b60b9b84dfd0b37f5ced49977ca67a9ad941335e92a63b",
+        "previous_sha256": "a1f5688ef532db15e6769eaf4876d58bebd88aad34f296019bb5fa60b3fbcf2d"
+      },
+      {
+        "path": "playground12_voice_ack/trepo-quick-ack/lib/assistant-outcome.mjs",
+        "sha256": "aefce9e6f07537a6921e630c854cb2b50ed4fc098cfff1bfd9a702477c18647c",
+        "previous_sha256": null
+      },
+      {
+        "path": "playground12_voice_ack/trepo-quick-ack/lib/halo-add-intent.mjs",
+        "sha256": "894b71fa958ce524b7085ee4d4a1278a476c928340381c1b987a400622e44369",
+        "previous_sha256": null
+      },
+      {
+        "path": "playground12_voice_ack/trepo-quick-ack/lib/kitchen-label-intent.mjs",
+        "sha256": "97c6192a09cda920b33313c20b32e567e383c678565721fbfd45ceb14af80e89",
+        "previous_sha256": null
+      },
+      {
+        "path": "playground12_voice_ack/trepo-quick-ack/lib/action-claims.mjs",
+        "sha256": "20d9db10758c4bd4d5d362f445c3b8706f8b289c87e5f8dd4b0945466b913be1",
+        "previous_sha256": null
+      },
+      {
+        "path": "playground12_voice_ack/trepo-quick-ack/lib/session-store.mjs",
+        "sha256": "1abad40a4ee02271ea2ceca916a61722ce1e857e77a0b6ff5bd6f2689cd499ac",
+        "previous_sha256": "2ee56e746f46880a2b4b34d9d381d049ba4b21c91a13ed9ceba9c84279385bd8"
+      },
+      {
+        "path": "playground12_voice_ack/trepo-quick-ack/lib/data-access.mjs",
+        "sha256": "4866bdff523512fa41732bff033ae97fd72db6ee48a12ef5a2e4e961152ee9a3",
+        "previous_sha256": "d112e6f45976754bbcc8ca121574c6e291f9d53aebb43b096c477d414fabbea1"
+      },
+      {
+        "path": "playground12_voice_ack/trepo-quick-ack/lib/action-narration.mjs",
+        "sha256": "cdb31b309eeacad615f7c7009526fcf1dfb632891bb02f325200ae5967876ac5",
+        "previous_sha256": null
+      },
+      {
+        "path": "playground12_voice_ack/trepo-quick-ack/lib/action-outcomes.mjs",
+        "sha256": "4f74f3eeccbeb3958c5d0a47850d2ec439c23ef7954fb3eb8b240ff6d60204f8",
+        "previous_sha256": null
+      },
+      {
+        "path": "playground12_voice_ack/trepo-quick-ack/lib/kitchen-edit-client.mjs",
+        "sha256": "7ecd92f8ec64798769ce3742cc59d6f679d5c10393ef1f4b1412bc2a6a26bcaa",
+        "previous_sha256": null
+      },
+      {
+        "path": "shared/voice-assistant/tool-executor.mjs",
+        "sha256": "ddd8a78a24424daa3659dba164cb39470b3362be0ebe308307e18df83c7eff0c",
+        "previous_sha256": "a19248043d2936ca08a32686fa3449c0bfd652afc1cc5cbe884eab39ae62046f"
+      },
+      {
+        "path": "shared/voice-assistant/kitchen-correction-intent.mjs",
+        "sha256": "c62e869a4e690286161bc023b07e6d1e30a06fa1b4cba145f4a0f8638a6cf245",
+        "previous_sha256": null
+      },
+      {
+        "path": "shared/voice-assistant/tool-definitions.mjs",
+        "sha256": "7e7a4dc8e57d4e8991d2d410f35ce236eb4439812afad400da0e9d9ce1fcfbfb",
+        "previous_sha256": "25a161363cb77b2c3e28f606d94890edcc2c3294a3ff272b63c7928f064ca845"
+      }
+    ]
+  },
+  "thyme-sync": {
+    "base": {
+      "FunctionName": "trepo-quick-ack-sam-dev",
+      "CodeSha256": "wFdAx1Ni/DuAsqnLDct1QEgFdhzO77YKqwcuMwsVa8Q=",
+      "LastModified": "2026-09-24T22:40:06.000+0000",
+      "Runtime": "nodejs22.x",
+      "Handler": "playground12_voice_ack/trepo-quick-ack/index.handler",
+      "Timeout": 150,
+      "RevisionId": "cd15bbce-4812-4bd0-b23f-9dc7483d3282"
+    },
+    "code_sha256": "n3zKKh8zwsFgpq9xNTwiMxiuA1bbyslb/B7CopFLC6s=",
+    "zip_sha256": "9f7cca2a1f33c2c160a6af71353c223318ae0356dbcac95bfc1ec2a2914b0bab",
+    "changes": [
+      {
+        "path": "playground12_voice_ack/trepo-quick-ack/index.js",
+        "sha256": "9be298863c527937ed572c43aed871de60f7a45fb0d220d3a30ca2211d6f28f7",
+        "previous_sha256": "23ca3b9f1b9b40d81dc276fda658e83622510a928365c035307d8b4ad5232387"
+      },
+      {
+        "path": "playground12_voice_ack/trepo-quick-ack/index-stream.js",
+        "sha256": "ae8f054c516aade09953f3f53dfbf0e808475350b855005d723e7a94f06025be",
+        "previous_sha256": "4b9aa1da41f6698cf0682a7e8bc85142cf467d2efdb94ac0c696f678b10c1a15"
+      },
+      {
+        "path": "playground12_voice_ack/trepo-quick-ack/lib/kitchen-task-context.mjs",
+        "sha256": "3812ee270067fc3c035907b31cf33a50a4db389be82c5b1eb94c6d779c422e7a",
+        "previous_sha256": null
+      },
+      {
+        "path": "playground12_voice_ack/trepo-quick-ack/lib/tool-actions.mjs",
+        "sha256": "f8cb5629379def99fc940f170cc0acfb4615eb7e58b91c123a81979421fee5bb",
+        "previous_sha256": "a31952ded184ef70d3b0eb7017eaa1c039ddd72dd4fd729dc4faacb0b301cd8a"
+      },
+      {
+        "path": "playground12_voice_ack/trepo-quick-ack/lib/device-assistant.mjs",
+        "sha256": "cf3b7bc3217e531443b60b9b84dfd0b37f5ced49977ca67a9ad941335e92a63b",
+        "previous_sha256": "63bfd8ac6ac77cb630e46fec178217db5fcaa337ccc6d45f0885c623336fe782"
+      },
+      {
+        "path": "playground12_voice_ack/trepo-quick-ack/lib/assistant-outcome.mjs",
+        "sha256": "aefce9e6f07537a6921e630c854cb2b50ed4fc098cfff1bfd9a702477c18647c",
+        "previous_sha256": null
+      },
+      {
+        "path": "playground12_voice_ack/trepo-quick-ack/lib/kitchen-label-intent.mjs",
+        "sha256": "97c6192a09cda920b33313c20b32e567e383c678565721fbfd45ceb14af80e89",
+        "previous_sha256": null
+      },
+      {
+        "path": "playground12_voice_ack/trepo-quick-ack/lib/action-claims.mjs",
+        "sha256": "20d9db10758c4bd4d5d362f445c3b8706f8b289c87e5f8dd4b0945466b913be1",
+        "previous_sha256": null
+      },
+      {
+        "path": "playground12_voice_ack/trepo-quick-ack/lib/session-store.mjs",
+        "sha256": "1abad40a4ee02271ea2ceca916a61722ce1e857e77a0b6ff5bd6f2689cd499ac",
+        "previous_sha256": "2ee56e746f46880a2b4b34d9d381d049ba4b21c91a13ed9ceba9c84279385bd8"
+      },
+      {
+        "path": "playground12_voice_ack/trepo-quick-ack/lib/data-access.mjs",
+        "sha256": "4866bdff523512fa41732bff033ae97fd72db6ee48a12ef5a2e4e961152ee9a3",
+        "previous_sha256": "d112e6f45976754bbcc8ca121574c6e291f9d53aebb43b096c477d414fabbea1"
+      },
+      {
+        "path": "playground12_voice_ack/trepo-quick-ack/lib/action-narration.mjs",
+        "sha256": "cdb31b309eeacad615f7c7009526fcf1dfb632891bb02f325200ae5967876ac5",
+        "previous_sha256": null
+      },
+      {
+        "path": "playground12_voice_ack/trepo-quick-ack/lib/action-outcomes.mjs",
+        "sha256": "4f74f3eeccbeb3958c5d0a47850d2ec439c23ef7954fb3eb8b240ff6d60204f8",
+        "previous_sha256": null
+      },
+      {
+        "path": "playground12_voice_ack/trepo-quick-ack/lib/kitchen-edit-client.mjs",
+        "sha256": "7ecd92f8ec64798769ce3742cc59d6f679d5c10393ef1f4b1412bc2a6a26bcaa",
+        "previous_sha256": null
+      },
+      {
+        "path": "shared/voice-assistant/tool-executor.mjs",
+        "sha256": "ddd8a78a24424daa3659dba164cb39470b3362be0ebe308307e18df83c7eff0c",
+        "previous_sha256": "a19248043d2936ca08a32686fa3449c0bfd652afc1cc5cbe884eab39ae62046f"
+      },
+      {
+        "path": "shared/voice-assistant/kitchen-correction-intent.mjs",
+        "sha256": "c62e869a4e690286161bc023b07e6d1e30a06fa1b4cba145f4a0f8638a6cf245",
+        "previous_sha256": null
+      },
+      {
+        "path": "shared/voice-assistant/tool-definitions.mjs",
+        "sha256": "7e7a4dc8e57d4e8991d2d410f35ce236eb4439812afad400da0e9d9ce1fcfbfb",
+        "previous_sha256": "25a161363cb77b2c3e28f606d94890edcc2c3294a3ff272b63c7928f064ca845"
+      }
+    ]
+  },
+  "thyme-worker": {
+    "base": {
+      "FunctionName": "trepo-quick-ack-async-worker-dev",
+      "CodeSha256": "afllLb3SWGND5d+Jhl1hFB/bk6/3tEioU4O2atqjVR8=",
+      "LastModified": "2026-09-24T22:40:13.000+0000",
+      "Runtime": "nodejs22.x",
+      "Handler": "playground12_voice_ack/trepo-quick-ack/async_worker.handler",
+      "Timeout": 180,
+      "RevisionId": "be4c2f84-658f-4769-bbec-0a2898f32b56"
+    },
+    "code_sha256": "rpsgkSUYbRVKoeW+2L154QPGEek1Ae6ZtpkHE2B0jaU=",
+    "zip_sha256": "ae9b209125186d154aa1e5bed8bd79e103c611e93501ee99b699071360748da5",
+    "changes": [
+      {
+        "path": "playground12_voice_ack/trepo-quick-ack/index.js",
+        "sha256": "bb4ae05567a9640ce283f8ca14bb4db574ecd44593a585bb5a3eda19db8a73e7",
+        "previous_sha256": "1f1f4451ca436e82ec79b1d403b08c6a29856c786d49c3c734104c3dda6d91f6"
+      },
+      {
+        "path": "playground12_voice_ack/trepo-quick-ack/index-stream.js",
+        "sha256": "1db3105b6bafba00638492fb57711d51a7d9416a53dd28495b27dda3ee837dd5",
+        "previous_sha256": "d3c4bcef0331c9e1a4a9cd45d975266b67ca1780a4d71a89448339db04912586"
+      },
+      {
+        "path": "playground12_voice_ack/trepo-quick-ack/async-worker.js",
+        "sha256": "baab340604ae19514f3ca53d4a0082772969f55ff78cf6d84198ed4b04ed4fc1",
+        "previous_sha256": "beb4715d8029e80912f02e745373136c0bb8e88542b67f46a939a2e97f5b652d"
+      },
+      {
+        "path": "playground12_voice_ack/trepo-quick-ack/lib/kitchen-task-context.mjs",
+        "sha256": "3812ee270067fc3c035907b31cf33a50a4db389be82c5b1eb94c6d779c422e7a",
+        "previous_sha256": null
+      },
+      {
+        "path": "playground12_voice_ack/trepo-quick-ack/lib/tool-actions.mjs",
+        "sha256": "f8cb5629379def99fc940f170cc0acfb4615eb7e58b91c123a81979421fee5bb",
+        "previous_sha256": "a31952ded184ef70d3b0eb7017eaa1c039ddd72dd4fd729dc4faacb0b301cd8a"
+      },
+      {
+        "path": "playground12_voice_ack/trepo-quick-ack/lib/device-assistant.mjs",
+        "sha256": "cf3b7bc3217e531443b60b9b84dfd0b37f5ced49977ca67a9ad941335e92a63b",
+        "previous_sha256": "63bfd8ac6ac77cb630e46fec178217db5fcaa337ccc6d45f0885c623336fe782"
+      },
+      {
+        "path": "playground12_voice_ack/trepo-quick-ack/lib/assistant-outcome.mjs",
+        "sha256": "aefce9e6f07537a6921e630c854cb2b50ed4fc098cfff1bfd9a702477c18647c",
+        "previous_sha256": null
+      },
+      {
+        "path": "playground12_voice_ack/trepo-quick-ack/lib/kitchen-label-intent.mjs",
+        "sha256": "97c6192a09cda920b33313c20b32e567e383c678565721fbfd45ceb14af80e89",
+        "previous_sha256": null
+      },
+      {
+        "path": "playground12_voice_ack/trepo-quick-ack/lib/action-claims.mjs",
+        "sha256": "20d9db10758c4bd4d5d362f445c3b8706f8b289c87e5f8dd4b0945466b913be1",
+        "previous_sha256": null
+      },
+      {
+        "path": "playground12_voice_ack/trepo-quick-ack/lib/session-store.mjs",
+        "sha256": "1abad40a4ee02271ea2ceca916a61722ce1e857e77a0b6ff5bd6f2689cd499ac",
+        "previous_sha256": "2ee56e746f46880a2b4b34d9d381d049ba4b21c91a13ed9ceba9c84279385bd8"
+      },
+      {
+        "path": "playground12_voice_ack/trepo-quick-ack/lib/data-access.mjs",
+        "sha256": "4866bdff523512fa41732bff033ae97fd72db6ee48a12ef5a2e4e961152ee9a3",
+        "previous_sha256": "d112e6f45976754bbcc8ca121574c6e291f9d53aebb43b096c477d414fabbea1"
+      },
+      {
+        "path": "playground12_voice_ack/trepo-quick-ack/lib/action-narration.mjs",
+        "sha256": "cdb31b309eeacad615f7c7009526fcf1dfb632891bb02f325200ae5967876ac5",
+        "previous_sha256": null
+      },
+      {
+        "path": "playground12_voice_ack/trepo-quick-ack/lib/action-outcomes.mjs",
+        "sha256": "4f74f3eeccbeb3958c5d0a47850d2ec439c23ef7954fb3eb8b240ff6d60204f8",
+        "previous_sha256": null
+      },
+      {
+        "path": "playground12_voice_ack/trepo-quick-ack/lib/kitchen-edit-client.mjs",
+        "sha256": "7ecd92f8ec64798769ce3742cc59d6f679d5c10393ef1f4b1412bc2a6a26bcaa",
+        "previous_sha256": null
+      },
+      {
+        "path": "shared/voice-assistant/tool-executor.mjs",
+        "sha256": "ddd8a78a24424daa3659dba164cb39470b3362be0ebe308307e18df83c7eff0c",
+        "previous_sha256": "a19248043d2936ca08a32686fa3449c0bfd652afc1cc5cbe884eab39ae62046f"
+      },
+      {
+        "path": "shared/voice-assistant/kitchen-correction-intent.mjs",
+        "sha256": "c62e869a4e690286161bc023b07e6d1e30a06fa1b4cba145f4a0f8638a6cf245",
+        "previous_sha256": null
+      },
+      {
+        "path": "shared/voice-assistant/tool-definitions.mjs",
+        "sha256": "7e7a4dc8e57d4e8991d2d410f35ce236eb4439812afad400da0e9d9ce1fcfbfb",
+        "previous_sha256": "25a161363cb77b2c3e28f606d94890edcc2c3294a3ff272b63c7928f064ca845"
+      }
+    ]
+  },
+  "kitchen": {
+    "base": {
+      "FunctionName": "trepo-grocery-backend-dev-KitchenApiFunction-lC0BHStmZf1k",
+      "CodeSha256": "vCo7hLgjkGA2dEJmk6O85YdKbHvx1WhX1iisOTi2+dQ=",
+      "LastModified": "2026-09-17T16:24:56.000+0000",
+      "Runtime": "python3.9",
+      "Handler": "app.handler",
+      "Timeout": 60,
+      "RevisionId": "be8dbd0a-e4ba-40f5-9d1f-f575d22f5e80"
+    },
+    "code_sha256": "bqiMBVyVo80t2VxWUnnHHar0rJFXKwUIHvh4vkwCXhU=",
+    "zip_sha256": "6ea88c055c95a3cd2dd95c565279c71daaf4ac91572b05081ef878be4c025e15",
+    "changes": [
+      {
+        "path": "amount_operations.py",
+        "sha256": "f2e2988a9a50693b8dab4a6637726d6d8a2a3b4cf4cd473dde5cb447f2677810",
+        "previous_sha256": "765d3baf0d7636f02aeaff53bff23a4097582a29fb3ae06f11c2fcae0a08fb86"
+      }
+    ]
+  },
+  "recipes": {
+    "base": {
+      "FunctionName": "trepo-grocery-backend-dev-SavedRecipesApiFunction-a7aWuWlJvEF2",
+      "CodeSha256": "fx6QVMX0mvIAwwmQtYpespROSg5Y1fR8umxoL9cZPR0=",
+      "LastModified": "2026-09-17T16:05:21.000+0000",
+      "Runtime": "python3.9",
+      "Handler": "app.handler",
+      "Timeout": 120,
+      "RevisionId": "e79e5c4d-2825-4bdc-80e9-ab12761f0832"
+    },
+    "code_sha256": "odOt6M9EH7awMZrZftlBEAEn9VmMtYyODjM1G6rsohg=",
+    "zip_sha256": "a1d3ade8cf441fb6b0319ad97ed941100127f5598cb58c8e0e33351baaeca218",
+    "changes": [
+      {
+        "path": "app.py",
+        "sha256": "f1812316143056c00ce5f2597098f76a4699ffa3287c065783505280098aa19c",
+        "previous_sha256": "f487eee6f61b53c7c02c75b869b252ab93b06bb6d789f6e67e9f2a020d9d4c4b"
+      },
+      {
+        "path": "recipe_readiness.py",
+        "sha256": "e8b33fe8f69f2f709db5c0b97dcf82492e1c7470458d8914665908fdfc6da378",
+        "previous_sha256": null
+      },
+      {
+        "path": "recovery_web.py",
+        "sha256": "c15c6a688eb3cafefea08ba3ffd5a36322499f96633dfd95747658209f2f625a",
+        "previous_sha256": null
+      }
+    ]
+  },
+  "capture": {
+    "base": {
+      "FunctionName": "grocery-identifier-dev-identify-async",
+      "CodeSha256": "T63wV7zYWvAp/m/z8C5bRt4JWyO5UsYGBqGY7vXVRA0=",
+      "LastModified": "2026-09-16T13:15:51.000+0000",
+      "Runtime": "nodejs20.x",
+      "Handler": "identifyAsync/app.handler",
+      "Timeout": 900,
+      "RevisionId": "79475906-3bcb-42ad-9ee1-50f3cb450154"
+    },
+    "code_sha256": "JthWAhstvZKTij/UjwSkYM7Wh73TWwAhxgE8pBrZXfc=",
+    "zip_sha256": "26d856021b2dbd92938a3fd48f04a460ced687bdd35b0021c6013ca41ad95df7",
+    "changes": [
+      {
+        "path": "captureSourceRetention.js",
+        "sha256": "3aa7862458a1cde952ba0be492a2fd9dd22c8cdce14bbf505699fa005106080d",
+        "previous_sha256": null
+      },
+      {
+        "path": "sceneSourceManifest.js",
+        "sha256": "5b610dd31ff10a14d67843663fa76feb016566d389c807b2dbce4509b3b5a49d",
+        "previous_sha256": null
+      },
+      {
+        "path": "captureRecoveryAdmission.js",
+        "sha256": "4b05a0d70001203345696fada14679f68a77bb5c0f2f0da1be8e0ff276494aa3",
+        "previous_sha256": null
+      },
+      {
+        "path": "captureOutcome.js",
+        "sha256": "39b7cb43ae778135e6a893892f951b339498034f191f66c61d3b4cf230067fc6",
+        "previous_sha256": null
+      },
+      {
+        "path": "captureRecoveryRuntime.js",
+        "sha256": "e7cbfa89094b23e595924ec4dda52a34ddb0c45678a311d91f34cc583dbf6446",
+        "previous_sha256": null
+      },
+      {
+        "path": "captureRecovery.js",
+        "sha256": "9608eb73fafb1b8c7d1da6a466168fe03b1dde1ca013fc879228346ccf426b16",
+        "previous_sha256": null
+      },
+      {
+        "path": "dispatchJournal.js",
+        "sha256": "29b2d7295fbba2054569988854203814522d25edde56c9eea8eabcac84477de3",
+        "previous_sha256": null
+      },
+      {
+        "path": "quickIdentify/geminiReceipt.js",
+        "sha256": "9783b53c032a0d8025015bbaf237244ac2d8bbed0d4a3f90f678925da8de340c",
+        "previous_sha256": "e4f9ee858b344b984defe4296c0d2ddeaa1d4e31ad8df8545da691a2ce16137b"
+      },
+      {
+        "path": "identifyAsync/app.js",
+        "sha256": "f0a88c570088f25ab8edd4d4875cba78acc63cd4fbd900526919bcd8a2fb7a79",
+        "previous_sha256": "4f4c490f335d49de5141da47fbeb6beaf991e6e097b6f37c58fdb76b96966f04"
+      },
+      {
+        "path": "bulkCommit/auth.js",
+        "sha256": "8ed01ed0b763c11ab81556aa37eeeefa4c9fe86ba7f30e2fa87bca406559d9c3",
+        "previous_sha256": null
+      }
+    ]
+  }
+}

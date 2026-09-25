@@ -1,0 +1,678 @@
+{
+  "thyme": {
+    "playground12_voice_ack/trepo-quick-ack/lib/kitchen-task-context.mjs": {
+      "date_time": [
+        2026,
+        9,
+        24,
+        16,
+        31,
+        28
+      ],
+      "compress_type": 8,
+      "create_system": 3,
+      "create_version": 20,
+      "extract_version": 20,
+      "external_attr": 2175008768,
+      "internal_attr": 0,
+      "flag_bits": 0,
+      "extra_b64": "",
+      "comment_b64": ""
+    },
+    "playground12_voice_ack/trepo-quick-ack/lib/assistant-outcome.mjs": {
+      "date_time": [
+        2026,
+        9,
+        24,
+        15,
+        3,
+        16
+      ],
+      "compress_type": 8,
+      "create_system": 3,
+      "create_version": 20,
+      "extract_version": 20,
+      "external_attr": 2175008768,
+      "internal_attr": 0,
+      "flag_bits": 0,
+      "extra_b64": "",
+      "comment_b64": ""
+    },
+    "playground12_voice_ack/trepo-quick-ack/lib/halo-add-intent.mjs": {
+      "date_time": [
+        2026,
+        9,
+        24,
+        15,
+        37,
+        48
+      ],
+      "compress_type": 8,
+      "create_system": 3,
+      "create_version": 20,
+      "extract_version": 20,
+      "external_attr": 2175008768,
+      "internal_attr": 0,
+      "flag_bits": 0,
+      "extra_b64": "",
+      "comment_b64": ""
+    },
+    "playground12_voice_ack/trepo-quick-ack/lib/kitchen-label-intent.mjs": {
+      "date_time": [
+        2026,
+        9,
+        24,
+        14,
+        57,
+        6
+      ],
+      "compress_type": 8,
+      "create_system": 3,
+      "create_version": 20,
+      "extract_version": 20,
+      "external_attr": 2175008768,
+      "internal_attr": 0,
+      "flag_bits": 0,
+      "extra_b64": "",
+      "comment_b64": ""
+    },
+    "playground12_voice_ack/trepo-quick-ack/lib/action-claims.mjs": {
+      "date_time": [
+        2026,
+        9,
+        24,
+        14,
+        14,
+        54
+      ],
+      "compress_type": 8,
+      "create_system": 3,
+      "create_version": 20,
+      "extract_version": 20,
+      "external_attr": 2175008768,
+      "internal_attr": 0,
+      "flag_bits": 0,
+      "extra_b64": "",
+      "comment_b64": ""
+    },
+    "playground12_voice_ack/trepo-quick-ack/lib/action-narration.mjs": {
+      "date_time": [
+        2026,
+        9,
+        24,
+        15,
+        57,
+        4
+      ],
+      "compress_type": 8,
+      "create_system": 3,
+      "create_version": 20,
+      "extract_version": 20,
+      "external_attr": 2175008768,
+      "internal_attr": 0,
+      "flag_bits": 0,
+      "extra_b64": "",
+      "comment_b64": ""
+    },
+    "playground12_voice_ack/trepo-quick-ack/lib/action-outcomes.mjs": {
+      "date_time": [
+        2026,
+        9,
+        24,
+        15,
+        57,
+        4
+      ],
+      "compress_type": 8,
+      "create_system": 3,
+      "create_version": 20,
+      "extract_version": 20,
+      "external_attr": 2175008768,
+      "internal_attr": 0,
+      "flag_bits": 0,
+      "extra_b64": "",
+      "comment_b64": ""
+    },
+    "playground12_voice_ack/trepo-quick-ack/lib/kitchen-edit-client.mjs": {
+      "date_time": [
+        2026,
+        9,
+        24,
+        15,
+        16,
+        36
+      ],
+      "compress_type": 8,
+      "create_system": 3,
+      "create_version": 20,
+      "extract_version": 20,
+      "external_attr": 2175008768,
+      "internal_attr": 0,
+      "flag_bits": 0,
+      "extra_b64": "",
+      "comment_b64": ""
+    },
+    "shared/voice-assistant/kitchen-correction-intent.mjs": {
+      "date_time": [
+        2026,
+        9,
+        24,
+        14,
+        24,
+        10
+      ],
+      "compress_type": 8,
+      "create_system": 3,
+      "create_version": 20,
+      "extract_version": 20,
+      "external_attr": 2175008768,
+      "internal_attr": 0,
+      "flag_bits": 0,
+      "extra_b64": "",
+      "comment_b64": ""
+    }
+  },
+  "thyme-sync": {
+    "playground12_voice_ack/trepo-quick-ack/lib/kitchen-task-context.mjs": {
+      "date_time": [
+        2026,
+        9,
+        24,
+        16,
+        31,
+        28
+      ],
+      "compress_type": 8,
+      "create_system": 3,
+      "create_version": 20,
+      "extract_version": 20,
+      "external_attr": 2175008768,
+      "internal_attr": 0,
+      "flag_bits": 0,
+      "extra_b64": "",
+      "comment_b64": ""
+    },
+    "playground12_voice_ack/trepo-quick-ack/lib/assistant-outcome.mjs": {
+      "date_time": [
+        2026,
+        9,
+        24,
+        15,
+        3,
+        16
+      ],
+      "compress_type": 8,
+      "create_system": 3,
+      "create_version": 20,
+      "extract_version": 20,
+      "external_attr": 2175008768,
+      "internal_attr": 0,
+      "flag_bits": 0,
+      "extra_b64": "",
+      "comment_b64": ""
+    },
+    "playground12_voice_ack/trepo-quick-ack/lib/kitchen-label-intent.mjs": {
+      "date_time": [
+        2026,
+        9,
+        24,
+        14,
+        57,
+        6
+      ],
+      "compress_type": 8,
+      "create_system": 3,
+      "create_version": 20,
+      "extract_version": 20,
+      "external_attr": 2175008768,
+      "internal_attr": 0,
+      "flag_bits": 0,
+      "extra_b64": "",
+      "comment_b64": ""
+    },
+    "playground12_voice_ack/trepo-quick-ack/lib/action-claims.mjs": {
+      "date_time": [
+        2026,
+        9,
+        24,
+        14,
+        14,
+        54
+      ],
+      "compress_type": 8,
+      "create_system": 3,
+      "create_version": 20,
+      "extract_version": 20,
+      "external_attr": 2175008768,
+      "internal_attr": 0,
+      "flag_bits": 0,
+      "extra_b64": "",
+      "comment_b64": ""
+    },
+    "playground12_voice_ack/trepo-quick-ack/lib/action-narration.mjs": {
+      "date_time": [
+        2026,
+        9,
+        24,
+        15,
+        57,
+        4
+      ],
+      "compress_type": 8,
+      "create_system": 3,
+      "create_version": 20,
+      "extract_version": 20,
+      "external_attr": 2175008768,
+      "internal_attr": 0,
+      "flag_bits": 0,
+      "extra_b64": "",
+      "comment_b64": ""
+    },
+    "playground12_voice_ack/trepo-quick-ack/lib/action-outcomes.mjs": {
+      "date_time": [
+        2026,
+        9,
+        24,
+        15,
+        57,
+        4
+      ],
+      "compress_type": 8,
+      "create_system": 3,
+      "create_version": 20,
+      "extract_version": 20,
+      "external_attr": 2175008768,
+      "internal_attr": 0,
+      "flag_bits": 0,
+      "extra_b64": "",
+      "comment_b64": ""
+    },
+    "playground12_voice_ack/trepo-quick-ack/lib/kitchen-edit-client.mjs": {
+      "date_time": [
+        2026,
+        9,
+        24,
+        15,
+        16,
+        36
+      ],
+      "compress_type": 8,
+      "create_system": 3,
+      "create_version": 20,
+      "extract_version": 20,
+      "external_attr": 2175008768,
+      "internal_attr": 0,
+      "flag_bits": 0,
+      "extra_b64": "",
+      "comment_b64": ""
+    },
+    "shared/voice-assistant/kitchen-correction-intent.mjs": {
+      "date_time": [
+        2026,
+        9,
+        24,
+        14,
+        24,
+        10
+      ],
+      "compress_type": 8,
+      "create_system": 3,
+      "create_version": 20,
+      "extract_version": 20,
+      "external_attr": 2175008768,
+      "internal_attr": 0,
+      "flag_bits": 0,
+      "extra_b64": "",
+      "comment_b64": ""
+    }
+  },
+  "thyme-worker": {
+    "playground12_voice_ack/trepo-quick-ack/lib/kitchen-task-context.mjs": {
+      "date_time": [
+        2026,
+        9,
+        24,
+        16,
+        31,
+        28
+      ],
+      "compress_type": 8,
+      "create_system": 3,
+      "create_version": 20,
+      "extract_version": 20,
+      "external_attr": 2175008768,
+      "internal_attr": 0,
+      "flag_bits": 0,
+      "extra_b64": "",
+      "comment_b64": ""
+    },
+    "playground12_voice_ack/trepo-quick-ack/lib/assistant-outcome.mjs": {
+      "date_time": [
+        2026,
+        9,
+        24,
+        15,
+        3,
+        16
+      ],
+      "compress_type": 8,
+      "create_system": 3,
+      "create_version": 20,
+      "extract_version": 20,
+      "external_attr": 2175008768,
+      "internal_attr": 0,
+      "flag_bits": 0,
+      "extra_b64": "",
+      "comment_b64": ""
+    },
+    "playground12_voice_ack/trepo-quick-ack/lib/kitchen-label-intent.mjs": {
+      "date_time": [
+        2026,
+        9,
+        24,
+        14,
+        57,
+        6
+      ],
+      "compress_type": 8,
+      "create_system": 3,
+      "create_version": 20,
+      "extract_version": 20,
+      "external_attr": 2175008768,
+      "internal_attr": 0,
+      "flag_bits": 0,
+      "extra_b64": "",
+      "comment_b64": ""
+    },
+    "playground12_voice_ack/trepo-quick-ack/lib/action-claims.mjs": {
+      "date_time": [
+        2026,
+        9,
+        24,
+        14,
+        14,
+        54
+      ],
+      "compress_type": 8,
+      "create_system": 3,
+      "create_version": 20,
+      "extract_version": 20,
+      "external_attr": 2175008768,
+      "internal_attr": 0,
+      "flag_bits": 0,
+      "extra_b64": "",
+      "comment_b64": ""
+    },
+    "playground12_voice_ack/trepo-quick-ack/lib/action-narration.mjs": {
+      "date_time": [
+        2026,
+        9,
+        24,
+        15,
+        57,
+        4
+      ],
+      "compress_type": 8,
+      "create_system": 3,
+      "create_version": 20,
+      "extract_version": 20,
+      "external_attr": 2175008768,
+      "internal_attr": 0,
+      "flag_bits": 0,
+      "extra_b64": "",
+      "comment_b64": ""
+    },
+    "playground12_voice_ack/trepo-quick-ack/lib/action-outcomes.mjs": {
+      "date_time": [
+        2026,
+        9,
+        24,
+        15,
+        57,
+        4
+      ],
+      "compress_type": 8,
+      "create_system": 3,
+      "create_version": 20,
+      "extract_version": 20,
+      "external_attr": 2175008768,
+      "internal_attr": 0,
+      "flag_bits": 0,
+      "extra_b64": "",
+      "comment_b64": ""
+    },
+    "playground12_voice_ack/trepo-quick-ack/lib/kitchen-edit-client.mjs": {
+      "date_time": [
+        2026,
+        9,
+        24,
+        15,
+        16,
+        36
+      ],
+      "compress_type": 8,
+      "create_system": 3,
+      "create_version": 20,
+      "extract_version": 20,
+      "external_attr": 2175008768,
+      "internal_attr": 0,
+      "flag_bits": 0,
+      "extra_b64": "",
+      "comment_b64": ""
+    },
+    "shared/voice-assistant/kitchen-correction-intent.mjs": {
+      "date_time": [
+        2026,
+        9,
+        24,
+        14,
+        24,
+        10
+      ],
+      "compress_type": 8,
+      "create_system": 3,
+      "create_version": 20,
+      "extract_version": 20,
+      "external_attr": 2175008768,
+      "internal_attr": 0,
+      "flag_bits": 0,
+      "extra_b64": "",
+      "comment_b64": ""
+    }
+  },
+  "kitchen": {},
+  "recipes": {
+    "recipe_readiness.py": {
+      "date_time": [
+        2026,
+        9,
+        24,
+        14,
+        4,
+        20
+      ],
+      "compress_type": 8,
+      "create_system": 3,
+      "create_version": 20,
+      "extract_version": 20,
+      "external_attr": 2175008768,
+      "internal_attr": 0,
+      "flag_bits": 0,
+      "extra_b64": "",
+      "comment_b64": ""
+    },
+    "recovery_web.py": {
+      "date_time": [
+        2026,
+        9,
+        24,
+        15,
+        43,
+        4
+      ],
+      "compress_type": 8,
+      "create_system": 3,
+      "create_version": 20,
+      "extract_version": 20,
+      "external_attr": 2175008768,
+      "internal_attr": 0,
+      "flag_bits": 0,
+      "extra_b64": "",
+      "comment_b64": ""
+    }
+  },
+  "capture": {
+    "captureSourceRetention.js": {
+      "date_time": [
+        2026,
+        9,
+        24,
+        16,
+        5,
+        40
+      ],
+      "compress_type": 8,
+      "create_system": 3,
+      "create_version": 20,
+      "extract_version": 20,
+      "external_attr": 2175008768,
+      "internal_attr": 0,
+      "flag_bits": 0,
+      "extra_b64": "",
+      "comment_b64": ""
+    },
+    "sceneSourceManifest.js": {
+      "date_time": [
+        2026,
+        9,
+        24,
+        14,
+        49,
+        14
+      ],
+      "compress_type": 8,
+      "create_system": 3,
+      "create_version": 20,
+      "extract_version": 20,
+      "external_attr": 2175008768,
+      "internal_attr": 0,
+      "flag_bits": 0,
+      "extra_b64": "",
+      "comment_b64": ""
+    },
+    "captureRecoveryAdmission.js": {
+      "date_time": [
+        2026,
+        9,
+        24,
+        16,
+        4,
+        36
+      ],
+      "compress_type": 8,
+      "create_system": 3,
+      "create_version": 20,
+      "extract_version": 20,
+      "external_attr": 2175008768,
+      "internal_attr": 0,
+      "flag_bits": 0,
+      "extra_b64": "",
+      "comment_b64": ""
+    },
+    "captureOutcome.js": {
+      "date_time": [
+        2026,
+        9,
+        24,
+        16,
+        56,
+        38
+      ],
+      "compress_type": 8,
+      "create_system": 3,
+      "create_version": 20,
+      "extract_version": 20,
+      "external_attr": 2175008768,
+      "internal_attr": 0,
+      "flag_bits": 0,
+      "extra_b64": "",
+      "comment_b64": ""
+    },
+    "captureRecoveryRuntime.js": {
+      "date_time": [
+        2026,
+        9,
+        24,
+        16,
+        56,
+        38
+      ],
+      "compress_type": 8,
+      "create_system": 3,
+      "create_version": 20,
+      "extract_version": 20,
+      "external_attr": 2175008768,
+      "internal_attr": 0,
+      "flag_bits": 0,
+      "extra_b64": "",
+      "comment_b64": ""
+    },
+    "captureRecovery.js": {
+      "date_time": [
+        2026,
+        9,
+        24,
+        14,
+        53,
+        46
+      ],
+      "compress_type": 8,
+      "create_system": 3,
+      "create_version": 20,
+      "extract_version": 20,
+      "external_attr": 2175008768,
+      "internal_attr": 0,
+      "flag_bits": 0,
+      "extra_b64": "",
+      "comment_b64": ""
+    },
+    "dispatchJournal.js": {
+      "date_time": [
+        2026,
+        9,
+        16,
+        5,
+        39,
+        28
+      ],
+      "compress_type": 8,
+      "create_system": 3,
+      "create_version": 20,
+      "extract_version": 20,
+      "external_attr": 2175008768,
+      "internal_attr": 0,
+      "flag_bits": 0,
+      "extra_b64": "",
+      "comment_b64": ""
+    },
+    "bulkCommit/auth.js": {
+      "date_time": [
+        2026,
+        9,
+        24,
+        16,
+        8,
+        36
+      ],
+      "compress_type": 8,
+      "create_system": 3,
+      "create_version": 20,
+      "extract_version": 20,
+      "external_attr": 2175008768,
+      "internal_attr": 0,
+      "flag_bits": 0,
+      "extra_b64": "",
+      "comment_b64": ""
+    }
+  }
+}
