@@ -1,0 +1,151 @@
+{
+  "at": "2026-09-25T01:38:11.131656+00:00",
+  "existing_private_versioned_bucket": true,
+  "no_bucket_or_access_configuration_changed": true,
+  "artifacts": [
+    {
+      "service": "thyme",
+      "kind": "rollback",
+      "bucket": "aws-sam-cli-managed-default-samclisourcebucket-3lbnr8ujbdol",
+      "key": "trepo-incident-releases/2026-09-24-journey/rollback/thyme/bf385d06e0fab675f2d606c819954f56eba420d0633a03c2f830be37f4b8109a.zip",
+      "version_id": "CsjNtNLyUUbG5wnfffDatqQQ6qFmr6xt",
+      "sha256": "bf385d06e0fab675f2d606c819954f56eba420d0633a03c2f830be37f4b8109a",
+      "code_sha256": "vzhdBuD6tnXy1gbIGZVPVuukINBjOgPC+DC+N/S4EJo=",
+      "bytes": 9571029,
+      "encryption": "aws:kms",
+      "verified_download_sha256": "bf385d06e0fab675f2d606c819954f56eba420d0633a03c2f830be37f4b8109a"
+    },
+    {
+      "service": "thyme",
+      "kind": "release",
+      "bucket": "aws-sam-cli-managed-default-samclisourcebucket-3lbnr8ujbdol",
+      "key": "trepo-incident-releases/2026-09-24-journey/release/thyme/7267d60a5e54d3d3f84b154c557db60a4bdb7b99e9e05a3ea9e46c7ae8d12e7d.zip",
+      "version_id": "Sge_VH4hz76wrPntg5c.jPZlNIjS.1_g",
+      "sha256": "7267d60a5e54d3d3f84b154c557db60a4bdb7b99e9e05a3ea9e46c7ae8d12e7d",
+      "code_sha256": "cmfWCl5U09P4SxVMVX22Ckvbe5np4Fo+qeRseujRLn0=",
+      "bytes": 9598348,
+      "encryption": "aws:kms",
+      "verified_download_sha256": "7267d60a5e54d3d3f84b154c557db60a4bdb7b99e9e05a3ea9e46c7ae8d12e7d"
+    },
+    {
+      "service": "thyme-sync",
+      "kind": "rollback",
+      "bucket": "aws-sam-cli-managed-default-samclisourcebucket-3lbnr8ujbdol",
+      "key": "trepo-incident-releases/2026-09-24-journey/rollback/thyme-sync/c05740c75362fc3b80b2a9cb0dcb75404805761cceefb60aab072e330b156bc4.zip",
+      "version_id": "L01_smVEjlkfvuY3B4EcpHro1IX9ayx3",
+      "sha256": "c05740c75362fc3b80b2a9cb0dcb75404805761cceefb60aab072e330b156bc4",
+      "code_sha256": "wFdAx1Ni/DuAsqnLDct1QEgFdhzO77YKqwcuMwsVa8Q=",
+      "bytes": 9573218,
+      "encryption": "aws:kms",
+      "verified_download_sha256": "c05740c75362fc3b80b2a9cb0dcb75404805761cceefb60aab072e330b156bc4"
+    },
+    {
+      "service": "thyme-sync",
+      "kind": "release",
+      "bucket": "aws-sam-cli-managed-default-samclisourcebucket-3lbnr8ujbdol",
+      "key": "trepo-incident-releases/2026-09-24-journey/release/thyme-sync/9f7cca2a1f33c2c160a6af71353c223318ae0356dbcac95bfc1ec2a2914b0bab.zip",
+      "version_id": "qBhoFRF9JHmKSc1OJmJ2qpUdPXJm2LoO",
+      "sha256": "9f7cca2a1f33c2c160a6af71353c223318ae0356dbcac95bfc1ec2a2914b0bab",
+      "code_sha256": "n3zKKh8zwsFgpq9xNTwiMxiuA1bbyslb/B7CopFLC6s=",
+      "bytes": 9598612,
+      "encryption": "aws:kms",
+      "verified_download_sha256": "9f7cca2a1f33c2c160a6af71353c223318ae0356dbcac95bfc1ec2a2914b0bab"
+    },
+    {
+      "service": "thyme-worker",
+      "kind": "rollback",
+      "bucket": "aws-sam-cli-managed-default-samclisourcebucket-3lbnr8ujbdol",
+      "key": "trepo-incident-releases/2026-09-24-journey/rollback/thyme-worker/69f9652dbdd2586343e5df89865d61141fdb93aff7b448a85383b66adaa3551f.zip",
+      "version_id": "tAdiNo3U4wVTs5g5iP.IFPikwvbjDROj",
+      "sha256": "69f9652dbdd2586343e5df89865d61141fdb93aff7b448a85383b66adaa3551f",
+      "code_sha256": "afllLb3SWGND5d+Jhl1hFB/bk6/3tEioU4O2atqjVR8=",
+      "bytes": 9573116,
+      "encryption": "aws:kms",
+      "verified_download_sha256": "69f9652dbdd2586343e5df89865d61141fdb93aff7b448a85383b66adaa3551f"
+    },
+    {
+      "service": "thyme-worker",
+      "kind": "release",
+      "bucket": "aws-sam-cli-managed-default-samclisourcebucket-3lbnr8ujbdol",
+      "key": "trepo-incident-releases/2026-09-24-journey/release/thyme-worker/ae9b209125186d154aa1e5bed8bd79e103c611e93501ee99b699071360748da5.zip",
+      "version_id": "3uUc28cTFE4BTkscrm_EUy.nqQhHlDSZ",
+      "sha256": "ae9b209125186d154aa1e5bed8bd79e103c611e93501ee99b699071360748da5",
+      "code_sha256": "rpsgkSUYbRVKoeW+2L154QPGEek1Ae6ZtpkHE2B0jaU=",
+      "bytes": 9598556,
+      "encryption": "aws:kms",
+      "verified_download_sha256": "ae9b209125186d154aa1e5bed8bd79e103c611e93501ee99b699071360748da5"
+    },
+    {
+      "service": "kitchen",
+      "kind": "rollback",
+      "bucket": "aws-sam-cli-managed-default-samclisourcebucket-3lbnr8ujbdol",
+      "key": "trepo-incident-releases/2026-09-24-journey/rollback/kitchen/bc2a3b84b82390603674426693a3bce5874a6c7bf1d56857d628ac3938b6f9d4.zip",
+      "version_id": "AquHezBJzfkk6j3z2ztiU5EiV7sPFsle",
+      "sha256": "bc2a3b84b82390603674426693a3bce5874a6c7bf1d56857d628ac3938b6f9d4",
+      "code_sha256": "vCo7hLgjkGA2dEJmk6O85YdKbHvx1WhX1iisOTi2+dQ=",
+      "bytes": 9364506,
+      "encryption": "aws:kms",
+      "verified_download_sha256": "bc2a3b84b82390603674426693a3bce5874a6c7bf1d56857d628ac3938b6f9d4"
+    },
+    {
+      "service": "kitchen",
+      "kind": "release",
+      "bucket": "aws-sam-cli-managed-default-samclisourcebucket-3lbnr8ujbdol",
+      "key": "trepo-incident-releases/2026-09-24-journey/release/kitchen/6ea88c055c95a3cd2dd95c565279c71daaf4ac91572b05081ef878be4c025e15.zip",
+      "version_id": "UlNYNFprCnRPmQCzwv8wHlr2AGpljASW",
+      "sha256": "6ea88c055c95a3cd2dd95c565279c71daaf4ac91572b05081ef878be4c025e15",
+      "code_sha256": "bqiMBVyVo80t2VxWUnnHHar0rJFXKwUIHvh4vkwCXhU=",
+      "bytes": 9364827,
+      "encryption": "aws:kms",
+      "verified_download_sha256": "6ea88c055c95a3cd2dd95c565279c71daaf4ac91572b05081ef878be4c025e15"
+    },
+    {
+      "service": "recipes",
+      "kind": "rollback",
+      "bucket": "aws-sam-cli-managed-default-samclisourcebucket-3lbnr8ujbdol",
+      "key": "trepo-incident-releases/2026-09-24-journey/rollback/recipes/7f1e9054c5f49af200c30990b58a5eb2944e4a0e58d5f47cba6c682fd7193d1d.zip",
+      "version_id": "D.KwJB5XVx17n_OqbyiALD22dw_kPvpK",
+      "sha256": "7f1e9054c5f49af200c30990b58a5eb2944e4a0e58d5f47cba6c682fd7193d1d",
+      "code_sha256": "fx6QVMX0mvIAwwmQtYpespROSg5Y1fR8umxoL9cZPR0=",
+      "bytes": 31134143,
+      "encryption": "aws:kms",
+      "verified_download_sha256": "7f1e9054c5f49af200c30990b58a5eb2944e4a0e58d5f47cba6c682fd7193d1d"
+    },
+    {
+      "service": "recipes",
+      "kind": "release",
+      "bucket": "aws-sam-cli-managed-default-samclisourcebucket-3lbnr8ujbdol",
+      "key": "trepo-incident-releases/2026-09-24-journey/release/recipes/a1d3ade8cf441fb6b0319ad97ed941100127f5598cb58c8e0e33351baaeca218.zip",
+      "version_id": "w6CntS2F3YTl1HYgiTvssXClwalwSVMA",
+      "sha256": "a1d3ade8cf441fb6b0319ad97ed941100127f5598cb58c8e0e33351baaeca218",
+      "code_sha256": "odOt6M9EH7awMZrZftlBEAEn9VmMtYyODjM1G6rsohg=",
+      "bytes": 31139647,
+      "encryption": "aws:kms",
+      "verified_download_sha256": "a1d3ade8cf441fb6b0319ad97ed941100127f5598cb58c8e0e33351baaeca218"
+    },
+    {
+      "service": "capture",
+      "kind": "rollback",
+      "bucket": "aws-sam-cli-managed-default-samclisourcebucket-3lbnr8ujbdol",
+      "key": "trepo-incident-releases/2026-09-24-journey/rollback/capture/4fadf057bcd85af029fe6ff3f02e5b46de095b23b952c60606a198eef5d5440d.zip",
+      "version_id": "rNXn5mUJPffs1LGTvVwvROHR3vHwN6Rk",
+      "sha256": "4fadf057bcd85af029fe6ff3f02e5b46de095b23b952c60606a198eef5d5440d",
+      "code_sha256": "T63wV7zYWvAp/m/z8C5bRt4JWyO5UsYGBqGY7vXVRA0=",
+      "bytes": 48635959,
+      "encryption": "aws:kms",
+      "verified_download_sha256": "4fadf057bcd85af029fe6ff3f02e5b46de095b23b952c60606a198eef5d5440d"
+    },
+    {
+      "service": "capture",
+      "kind": "release",
+      "bucket": "aws-sam-cli-managed-default-samclisourcebucket-3lbnr8ujbdol",
+      "key": "trepo-incident-releases/2026-09-24-journey/release/capture/26d856021b2dbd92938a3fd48f04a460ced687bdd35b0021c6013ca41ad95df7.zip",
+      "version_id": "eJeypyEo4CiKiwKg8b9A_ybbJ7dGuaGj",
+      "sha256": "26d856021b2dbd92938a3fd48f04a460ced687bdd35b0021c6013ca41ad95df7",
+      "code_sha256": "JthWAhstvZKTij/UjwSkYM7Wh73TWwAhxgE8pBrZXfc=",
+      "bytes": 48649501,
+      "encryption": "aws:kms",
+      "verified_download_sha256": "26d856021b2dbd92938a3fd48f04a460ced687bdd35b0021c6013ca41ad95df7"
+    }
+  ]
+}
