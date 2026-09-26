@@ -1,6 +1,6 @@
 # Thyme iPhone session compatibility — September 26, 2026
 
-Status: **Fixed and qualified; not deployed. Awaiting founder release approval.**
+Status: **Deployed September 26, 2026, with founder approval. Reported iOS request/recovery flows verified live.**
 
 ## Incident and root cause
 
@@ -29,6 +29,10 @@ Gstack critical/checklist review and an independent in-host adversarial review f
 
 ## Release and follow-up
 
-Approval is required under the founder's existing release rule. On approval, recheck both live code hashes/revisions, update code only with revision fences, then verify public sync/stream/GET/ack paths with the dedicated QA identity. Keep the original ZIPs for rollback. Do not blindly resend customer requests: old unconfirmed cards remain until the user checks or dismisses them; this repair restores new requests and valid saved-result recovery, not automatic replay of failed commands.
+Matt explicitly approved deployment in the Codex conversation. Both serving code hashes/revisions still matched the qualified bases. The code-only updates completed at 23:52:55 UTC (sync) and 23:53:04 UTC (stream), with configuration unchanged. Public HTTP verification passed four existing iOS/Android receipt checks plus four new iOS cases (text/audio × sync/stream), each with GET recovery and render acknowledgment. Same-endpoint replay returned the original answer. Original ZIPs remain available for rollback. The two recovery modules in the active founder-brain checkout were also synchronized only after confirming both still exactly matched the old serving baseline; unrelated work was preserved. Do not blindly resend customer requests: old unconfirmed cards remain until the user checks or dismisses them; this repair restores new requests and valid saved-result recovery, not automatic replay of failed commands.
 
 Shared context consulted: `apps/trepo/architecture` and the dated Thyme reliability pages under `apps/trepo/sources/20260923/ios/docs/codex/thyme-audit-20260917/`. Historical documents inform scope; current endpoint/package checks establish this incident. No company-brain write was requested or performed.
+
+## Separate limitation uncovered in extended verification
+
+The first public test expected raw-audio replay to work across sync and streaming endpoints. It received `input_conflict`, because the existing sync decoder supplies sample-rate/format defaults that the stream decoder omits. Baseline and patched fingerprint modules both reproduce that difference. This is not introduced by the session-format patch and no action is repeated. The native iOS recovery path uses GET (which passes); it does not resend an interrupted action through the other endpoint. Same-endpoint audio replay also passes. Do not describe cross-endpoint audio replay as supported without a separate, backward-compatible repair and tests. The first failed verification report is retained privately as `live-verification-attempt1.json`.

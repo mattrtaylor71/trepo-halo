@@ -1,72 +1,25 @@
 {
   "status": "deployed_verified_reported_ios_flow",
-  "at": "2026-09-26T22:07:16.064305+00:00",
-  "baseline": {
-    "regressions_passed": 19,
-    "ios_regressions_failed": 7,
-    "stream_live_response": "invalid_session_id",
-    "recovery_live_status": 400,
-    "recovery_live_error": "invalid_request_identity"
+  "startedAt": "2026-09-26T23:52:46.981008+00:00",
+  "functions": {
+    "trepo-quick-ack-sam-dev": {
+      "hash": "WjIoKh4A5skMt5D+dBvFhpPS2ECKdBvSgYVwVD3cokw=",
+      "revision": "2f988440-04d5-4470-888d-f5f5b4219bf8",
+      "configurationUnchanged": true,
+      "at": "2026-09-26T23:52:55.795393+00:00"
+    },
+    "trepo-quick-ack-stream-dev": {
+      "hash": "sRP5jsw2YehCn3TA3F1areOIX9zrBMrqqXRkFq0J7sw=",
+      "revision": "4cd949c7-263b-41cd-b1d1-27dad80876cc",
+      "configurationUnchanged": true,
+      "at": "2026-09-26T23:53:04.869666+00:00"
+    }
   },
-  "candidate": {
-    "node_regressions_passed": 26,
-    "native_swift_contracts_passed": 34,
-    "aws_runtime": "nodejs22.x",
-    "aws_cases": [
-      {
-        "mode": "sync",
-        "platform": "ios",
-        "status": "passed",
-        "answerHash": "d38df9c3599c2deaccc707e8ba1161a206a07cb94ef4b134193d05f80fba3d60",
-        "replayBothTransports": true,
-        "accessChecks": true,
-        "renderAck": true
-      },
-      {
-        "mode": "sync",
-        "platform": "android",
-        "status": "passed",
-        "answerHash": "d38df9c3599c2deaccc707e8ba1161a206a07cb94ef4b134193d05f80fba3d60",
-        "replayBothTransports": true,
-        "accessChecks": true,
-        "renderAck": true
-      },
-      {
-        "mode": "stream",
-        "platform": "ios",
-        "status": "passed",
-        "answerHash": "d38df9c3599c2deaccc707e8ba1161a206a07cb94ef4b134193d05f80fba3d60",
-        "replayBothTransports": true,
-        "accessChecks": true,
-        "renderAck": true
-      },
-      {
-        "mode": "stream",
-        "platform": "android",
-        "status": "passed",
-        "answerHash": "d38df9c3599c2deaccc707e8ba1161a206a07cb94ef4b134193d05f80fba3d60",
-        "replayBothTransports": true,
-        "accessChecks": true,
-        "renderAck": true
-      }
-    ],
-    "temporary_functions_removed": [
-      {
-        "function": "trepo-thyme-ios-qual-20260926-sync",
-        "removed": true
-      },
-      {
-        "function": "trepo-thyme-ios-qual-20260926-stream",
-        "removed": true
-      }
-    ]
-  },
-  "limits": [
-    "No customer-device confirmation.",
-    "Native checks compile the shipped Swift transport/storage; they are not a full iPhone simulator UI run.",
-    "Pre-existing cross-endpoint audio replay metadata mismatch safely returns input_conflict; same-endpoint replay and GET recovery pass. Preserved first failed probe and verified mismatch against baseline. No customer-device confirmation."
-  ],
-  "public_http_verification": {
+  "approval": "Matt approved this two-file deployment in the Codex conversation.",
+  "verifiedAt": "2026-09-26T23:55:44.112855+00:00",
+  "sourceCommit": "7bb6262",
+  "productionChanges": "Code-only overlay; two modules per function; configuration unchanged.",
+  "verification": {
     "recoveryChecks": [
       {
         "platform": "ios",
@@ -139,5 +92,6 @@
         "recoveryAndReplay": true
       }
     ]
-  }
+  },
+  "limitation": "Pre-existing cross-endpoint audio replay metadata mismatch safely returns input_conflict; same-endpoint replay and GET recovery pass. Preserved first failed probe and verified mismatch against baseline. No customer-device confirmation."
 }

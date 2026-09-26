@@ -1,0 +1,49 @@
+{
+  "from": "2026-09-26T23:52:46.981008+00:00",
+  "to": "2026-09-26T23:56:17.360155+00:00",
+  "scope": "Short post-release observation; CloudWatch metric ingestion may lag. Handled validation errors are not counted as Lambda Errors. Functional endpoint tests are the primary evidence.",
+  "functions": {
+    "trepo-quick-ack-sam-dev": {
+      "hashVerified": true,
+      "state": "Active",
+      "update": "Successful",
+      "Invocations": {
+        "sum": 70.0,
+        "datapoints": 3
+      },
+      "Errors": {
+        "sum": 0.0,
+        "datapoints": 3
+      },
+      "Throttles": {
+        "sum": 0.0,
+        "datapoints": 3
+      },
+      "errorQuery": {
+        "status": "Complete",
+        "results": []
+      }
+    },
+    "trepo-quick-ack-stream-dev": {
+      "hashVerified": true,
+      "state": "Active",
+      "update": "Successful",
+      "Invocations": {
+        "sum": 11.0,
+        "datapoints": 3
+      },
+      "Errors": {
+        "sum": 0.0,
+        "datapoints": 3
+      },
+      "Throttles": {
+        "sum": 0.0,
+        "datapoints": 3
+      },
+      "errorQuery": {
+        "status": "Complete",
+        "results": []
+      }
+    }
+  }
+}
