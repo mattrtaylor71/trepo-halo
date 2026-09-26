@@ -32,6 +32,6 @@ Private original reports, test inputs, screenshots, baseline/candidate ZIPs and 
 
 The release operator must compare the current Lambda revision/code hash, verify the committed handler and candidate ZIP hashes, then use the current `RevisionId` for an optimistic update. Keep the original ZIP. Independently read back active/successful state, code hash and configuration; preserve a sanitized receipt here. Code-only rollback uses the original ZIP and the then-current revision, after checking for concurrent changes.
 
-Deployment has not yet occurred at this commit. A subsequent receipt records actual completion; neither a passing test nor a Git commit is proof of deployment.
+Released at 2026-09-26 04:54:53 UTC (September 25 Pacific). See deployment.json and live-canary.json. Independent Lambda readback confirmed Active/Successful, the exact candidate hash and unchanged configuration. The affected household live read returned 20 items with 20 unique canonical string IDs; the former numeric mapping still demonstrated one collision. No customer write requests were used. Code commit: 3c2877d5ff2154b1703c9cd071c596b09c3ef75c. This documentation commit does not change serving code.
 
 Shared context consulted: `apps/trepo/architecture`. No customer-facing design changed and no brand exception applies.

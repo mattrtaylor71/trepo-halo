@@ -1,0 +1,6 @@
+{
+  "isolated_test_database_removed": true,
+  "absence_verified": true,
+  "isolated_mysql_shutdown_requested": true,
+  "customer_write_requests": false
+}

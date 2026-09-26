@@ -1,0 +1,11 @@
+{
+  "at": "2026-09-26T04:55:25.042Z",
+  "status": 200,
+  "union": true,
+  "items": 20,
+  "unique_ids": 20,
+  "legacy_numeric_id_collisions": 1,
+  "canonical_string_ids": true,
+  "customer_write_requests": false,
+  "active_items_all_categorized": true
+}

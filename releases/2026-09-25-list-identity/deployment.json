@@ -1,0 +1,18 @@
+{
+  "issue_id": "TR-1790374208533179",
+  "approved_by": "Matt",
+  "approval": "Explicit parent Codex request to commit and deploy, 2026-09-25",
+  "commit": "3c2877d5ff2154b1703c9cd071c596b09c3ef75c",
+  "function": "trepo-list-handler",
+  "region": "us-east-1",
+  "deployed_at": 1790398493.0038972,
+  "verified_at": 1790398496.868611,
+  "artifact_sha256": "618fd5c6b61b53b0134d94bdb8712ecceba3128678a06951625401ed2ef573be",
+  "deployed_code_sha256": "YY/VxrYbU7ATTZS9uHEuzOujEoZ4oGlRYlQB7S71c74=",
+  "deployment_revision": "a6668300-a820-42c5-a3a6-f4a6d41a658d",
+  "configuration_sha256": "e777a0bea14cb2b847d92a54437885054b32cee1e48dc8a68d29dcf99de7c6b7",
+  "configuration_unchanged": true,
+  "state": "Active",
+  "last_update_status": "Successful",
+  "rollback_sha256": "18b9906b3a0b2393d3f397b8a7c1a2cf157cf117779e5164fd544e76c16063df"
+}
