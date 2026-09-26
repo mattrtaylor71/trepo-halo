@@ -635,7 +635,7 @@ exports.handler = async (event) => {
       if (effectiveAction === 'ADDED') {
         try {
           const [dupes] = await pool.execute(
-            `SELECT _id FROM \`${ownerId}_new_list\`
+            `SELECT * FROM \`${ownerId}_new_list\`
               WHERE LOWER(TRIM(product_name)) = LOWER(TRIM(?))
                 AND action = 'ADDED'
               LIMIT 1`,
@@ -643,7 +643,13 @@ exports.handler = async (event) => {
           );
           if (Array.isArray(dupes) && dupes.length > 0) {
             console.log(JSON.stringify({ evt: 'list_add_deduped', owner: ownerId, item: product_name }));
-            return response(200, { message: 'Item already on the list', deduped: true });
+            // Released clients require a canonical item even when the add is
+            // idempotent. Preserve the existing row's identity and metadata.
+            return response(200, {
+              message: 'Item already on the list',
+              deduped: true,
+              items: [mapListRow(dupes[0])],
+            });
           }
         } catch (e) {
           // Never block a genuine add because the dedupe probe failed.
