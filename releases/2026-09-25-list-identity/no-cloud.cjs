@@ -1,0 +1,1 @@
+const Module=require('module'),original=Module._load; Module._load=function(id,...args){if(id==='@aws-sdk/client-lambda')return {LambdaClient:class{send(){return Promise.resolve({})}},InvokeCommand:class{}};return original.call(this,id,...args)};

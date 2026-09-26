@@ -22,6 +22,7 @@ The current GitHub default branch is an older, separate application tree without
 - 2 compiled historical/current Swift model contracts accepted the candidate and selected the intended item. Android string-ID and itemUUID usage were inspected, not UI-tested.
 - Native Release simulator test `20260925-153736-0970b3`: 1/1 passed, checked/un-checked the intended item with SQL verification and cold relaunches. All 484 native inputs match the manifest. Screenshots inspected in the original run.
 - Baseline native duplicate rendering reproduced. Failure collection stalled and was interrupted; this is not counted as a passing test.
+- Release rerun: all 8 SQL checks passed again on the Mac mini, plus 2 real-SQL fresh-add/deduplicated-add identity and persistence cases. Only asynchronous cloud categorization dispatch was stubbed; SQL and handler behavior were real.
 - 7 new dependency-free regression cases run directly against the actual source mapper: `node --test releases/2026-09-25-list-identity/identity.test.cjs`.
 - JavaScript syntax and Git whitespace checks pass.
 

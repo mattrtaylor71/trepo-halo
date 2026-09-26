@@ -1,0 +1,6 @@
+{
+  "passed": 2,
+  "real_isolated_mysql": true,
+  "cloud_dispatch_stubbed": true,
+  "customer_mutations": false
+}
