@@ -1,0 +1,9 @@
+{
+  "run": "20260925-152539-02432d",
+  "status": "baseline_reproduced_then_interrupted",
+  "observed": "Native List renders Triage collision target twice and omits the checked sibling; duplicate public IDs cause the two distinct model rows to share SwiftUI identity. XCTest enters ambiguous-element failure collection without progress for over 3 minutes.",
+  "screenshot": "/Users/MattTaylor/Documents/Codex/2026-09-25/trepo-app-triage/state/evidence/TR-1790374208533179/baseline-screen.png",
+  "screenshot_pixels_inspected": true,
+  "test_assertions_weakened": false,
+  "termination": "SIGINT then SIGTERM to verified owned xcodebuild PID 97648; runner finished nonzero and released lock"
+}

@@ -1,0 +1,9 @@
+{
+  "candidate_sha256": "618fd5c6b61b53b0134d94bdb8712ecceba3128678a06951625401ed2ef573be",
+  "serving_sha256": "18b9906b3a0b2393d3f397b8a7c1a2cf157cf117779e5164fd544e76c16063df",
+  "changed_entries": [
+    "listHandler.js"
+  ],
+  "handler_sha256": "e514e1f6267b52eeaf76f29594da3c19f524ce287580f9d3b5bb03cb13612ec5",
+  "deployed": false
+}

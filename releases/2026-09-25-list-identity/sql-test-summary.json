@@ -1,0 +1,15 @@
+{
+  "passed": 8,
+  "cases": [
+    "serving handler reproduces duplicate id and wrong toggle target",
+    "candidate returns two unique household identities",
+    "existing client check persists both mirrors without touching sibling or foreign household",
+    "refresh and mirror winner change retain row identity",
+    "uncheck persists and older UUID request contract remains valid",
+    "single-table response preserves same string identity",
+    "UUID-less legacy single-table numeric ID and non-strict mutation remain compatible",
+    "unknown UUID still returns 404"
+  ],
+  "sql": "real isolated MySQL",
+  "customer_mutations": false
+}

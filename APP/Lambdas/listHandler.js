@@ -281,7 +281,10 @@ function unionReadActiveFor(ownerId, memberIds) {
 // path and the legacy single-table path so they never drift).
 function mapListRow(r) {
   return {
-    id: String(r._id),
+    // A household union can select rows from different per-member tables.
+    // Their numeric primary keys can collide or change when another mirror wins.
+    // Keep the public row identity tied to the same UUID used for mutations.
+    id: r.household_item_uuid || String(r._id),
     product_name: r.product_name,
     action: r.action,
     product_brand: r.product_brand || null,
