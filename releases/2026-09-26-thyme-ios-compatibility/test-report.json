@@ -1,0 +1,69 @@
+{
+  "status": "qualified_not_deployed",
+  "at": "2026-09-26T22:07:16.064305+00:00",
+  "baseline": {
+    "regressions_passed": 19,
+    "ios_regressions_failed": 7,
+    "stream_live_response": "invalid_session_id",
+    "recovery_live_status": 400,
+    "recovery_live_error": "invalid_request_identity"
+  },
+  "candidate": {
+    "node_regressions_passed": 26,
+    "native_swift_contracts_passed": 34,
+    "aws_runtime": "nodejs22.x",
+    "aws_cases": [
+      {
+        "mode": "sync",
+        "platform": "ios",
+        "status": "passed",
+        "answerHash": "d38df9c3599c2deaccc707e8ba1161a206a07cb94ef4b134193d05f80fba3d60",
+        "replayBothTransports": true,
+        "accessChecks": true,
+        "renderAck": true
+      },
+      {
+        "mode": "sync",
+        "platform": "android",
+        "status": "passed",
+        "answerHash": "d38df9c3599c2deaccc707e8ba1161a206a07cb94ef4b134193d05f80fba3d60",
+        "replayBothTransports": true,
+        "accessChecks": true,
+        "renderAck": true
+      },
+      {
+        "mode": "stream",
+        "platform": "ios",
+        "status": "passed",
+        "answerHash": "d38df9c3599c2deaccc707e8ba1161a206a07cb94ef4b134193d05f80fba3d60",
+        "replayBothTransports": true,
+        "accessChecks": true,
+        "renderAck": true
+      },
+      {
+        "mode": "stream",
+        "platform": "android",
+        "status": "passed",
+        "answerHash": "d38df9c3599c2deaccc707e8ba1161a206a07cb94ef4b134193d05f80fba3d60",
+        "replayBothTransports": true,
+        "accessChecks": true,
+        "renderAck": true
+      }
+    ],
+    "temporary_functions_removed": [
+      {
+        "function": "trepo-thyme-ios-qual-20260926-sync",
+        "removed": true
+      },
+      {
+        "function": "trepo-thyme-ios-qual-20260926-stream",
+        "removed": true
+      }
+    ]
+  },
+  "limits": [
+    "No customer-device confirmation.",
+    "Native checks compile the shipped Swift transport/storage; they are not a full iPhone simulator UI run.",
+    "Live production deployment requires founder approval."
+  ]
+}

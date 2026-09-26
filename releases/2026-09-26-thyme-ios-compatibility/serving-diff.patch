@@ -1,0 +1,47 @@
+--- serving/playground12_voice_ack/trepo-quick-ack/lib/operation-recovery.mjs
++++ candidate/playground12_voice_ack/trepo-quick-ack/lib/operation-recovery.mjs
+@@ -22,6 +22,15 @@
+   return {id:`v1.${created}.${m[2].toLowerCase()}`,expires:created+86400};
+ }
+ 
++// Shipped iOS clients use chat_ + UUID().uuidString.prefix(12); Android uses
++// the complete UUID. Preserve each exact session key for receipt ownership.
++export function validSessionId(value) {
++  return typeof value === 'string' && (
++    (value.length === 36 && uuid.test(value)) ||
++    (value.length === 17 && /^chat_[0-9a-f]{8}-[0-9a-f]{3}$/i.test(value))
++  );
++}
++
+ export function inputIdentity(event, input) {
+   const body = input?.requestMeta || {};
+   const rawHeader = header(event.headers,'x-operation-id');
+@@ -33,7 +42,7 @@
+   if (a && b && a.id !== b.id) throw fail('conflicting_operation_id',400);
+   const identity = a || b;
+   if (!identity) return null;
+-  if (input.responseSurface !== 'app' || typeof input.sessionId !== 'string' || !uuid.test(input.sessionId)) throw fail('invalid_session_id',400);
++  if (input.responseSurface !== 'app' || !validSessionId(input.sessionId)) throw fail('invalid_session_id',400);
+   const audio = input.audioBuffer;
+   const value = audio ? crypto.createHash('sha256').update(audio).digest('hex') : String(input.transcript || '').trim();
+   if (!value) throw fail('empty_request',400);
+--- serving/playground12_voice_ack/trepo-quick-ack/lib/operation-bridge.mjs
++++ candidate/playground12_voice_ack/trepo-quick-ack/lib/operation-bridge.mjs
+@@ -1,7 +1,7 @@
+ import { lookupUserContextByOwnerId } from './user-context.mjs';
+ import { prepareBrainSession, candidateOwner } from './family-brain.mjs';
+ import { jsonResponse } from './http.mjs';
+-import { header, operationIdentity, verifiedActor, operationScope, readOperation, acknowledgeOperation } from './operation-recovery.mjs';
++import { header, operationIdentity, validSessionId, verifiedActor, operationScope, readOperation, acknowledgeOperation } from './operation-recovery.mjs';
+ 
+ export function resolvedOperationScope(identity, proof, context, brainSession, event, env) {
+   if (candidateOwner(header(event.headers,'authorization'),env) && !brainSession) {
+@@ -23,7 +23,7 @@
+       payload=JSON.parse(raw);
+     }
+     const identity = operationIdentity(payload.operation_id);
+-    if (!identity || typeof payload.session_id !== 'string' || !/^[0-9a-f-]{36}$/i.test(payload.session_id)) {
++    if (!identity || !validSessionId(payload.session_id)) {
+       return jsonResponse(400,{error:'invalid_request_identity'});
+     }
+     const context = await lookupUserContextByOwnerId(proof.actor,{env});

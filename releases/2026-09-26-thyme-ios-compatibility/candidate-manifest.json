@@ -1,0 +1,46 @@
+{
+  "trepo-quick-ack-sam-dev": {
+    "base": {
+      "FunctionName": "trepo-quick-ack-sam-dev",
+      "LastModified": "2026-09-25T18:35:03.000+0000",
+      "CodeSha256": "htEMNIO+rd0kNc+ONfYcO5Rjc+dJJWhr9EUJGEcwvWY=",
+      "RevisionId": "f9526962-b34e-4913-bb4c-7e1730ba5aca",
+      "Handler": "playground12_voice_ack/trepo-quick-ack/index.handler",
+      "Runtime": "nodejs22.x",
+      "Timeout": 150,
+      "State": "Active",
+      "LastUpdateStatus": "Successful"
+    },
+    "candidateHash": "WjIoKh4A5skMt5D+dBvFhpPS2ECKdBvSgYVwVD3cokw=",
+    "changedFiles": [
+      "playground12_voice_ack/trepo-quick-ack/lib/operation-recovery.mjs",
+      "playground12_voice_ack/trepo-quick-ack/lib/operation-bridge.mjs"
+    ],
+    "fileHashes": {
+      "playground12_voice_ack/trepo-quick-ack/lib/operation-recovery.mjs": "cce8651c51bdeba77b1850b46b34c85deb196af3de84f712722aa1d22ae97618",
+      "playground12_voice_ack/trepo-quick-ack/lib/operation-bridge.mjs": "ddd5315c5a628c985bea6ce4d068f89c22afc7455bc8b2944035bf82201884e3"
+    }
+  },
+  "trepo-quick-ack-stream-dev": {
+    "base": {
+      "FunctionName": "trepo-quick-ack-stream-dev",
+      "LastModified": "2026-09-25T18:35:14.000+0000",
+      "CodeSha256": "n4blKZ+NRn5L49H4K+41SMzbG8lgb3scfru5W45B5XI=",
+      "RevisionId": "141ee2c3-984c-43a6-ba42-5138537663e9",
+      "Handler": "playground12_voice_ack/trepo-quick-ack/index-stream.handler",
+      "Runtime": "nodejs22.x",
+      "Timeout": 150,
+      "State": "Active",
+      "LastUpdateStatus": "Successful"
+    },
+    "candidateHash": "sRP5jsw2YehCn3TA3F1areOIX9zrBMrqqXRkFq0J7sw=",
+    "changedFiles": [
+      "playground12_voice_ack/trepo-quick-ack/lib/operation-recovery.mjs",
+      "playground12_voice_ack/trepo-quick-ack/lib/operation-bridge.mjs"
+    ],
+    "fileHashes": {
+      "playground12_voice_ack/trepo-quick-ack/lib/operation-recovery.mjs": "cce8651c51bdeba77b1850b46b34c85deb196af3de84f712722aa1d22ae97618",
+      "playground12_voice_ack/trepo-quick-ack/lib/operation-bridge.mjs": "ddd5315c5a628c985bea6ce4d068f89c22afc7455bc8b2944035bf82201884e3"
+    }
+  }
+}
