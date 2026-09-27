@@ -1,0 +1,95 @@
+{
+  "liveSimulator": {
+    "status": "passed",
+    "run": "20260927-004909-d5527d",
+    "tests": {
+      "expected": 2,
+      "executed": 2,
+      "missing": [],
+      "unexpected": [],
+      "skipped": [],
+      "failed": [],
+      "duplicates": [],
+      "unresolved_filters": [],
+      "complete": true
+    },
+    "configuration": "Release",
+    "app": "frozen final distributed1.17(124) source",
+    "appInputsCompared": 278,
+    "appInputDifferences": 0,
+    "publicEndpoints": true,
+    "nativeAndroidUI": false,
+    "physicalMicrophone": false,
+    "screenshotsVisuallyInspected": true,
+    "verifiedEvidenceHashes": true,
+    "at": "2026-09-27T07:56:44.301930+00:00"
+  },
+  "liveSignedContracts": {
+    "status": "passed",
+    "startedAt": "2026-09-27T07:48:32.889652+00:00",
+    "scope": "Signed public HTTP contract checks; not native Android UI",
+    "cases": [
+      {
+        "case": "signed-ios-v1",
+        "passed": true,
+        "durationSeconds": 5.79,
+        "recoveryChecked": true
+      },
+      {
+        "case": "signed-android-v1",
+        "passed": true,
+        "durationSeconds": 5.37,
+        "recoveryChecked": true
+      },
+      {
+        "case": "signed-ios-legacy-correlation",
+        "passed": true,
+        "durationSeconds": 5.41,
+        "recoveryChecked": false
+      }
+    ],
+    "completedAt": "2026-09-27T07:48:49.465329+00:00"
+  },
+  "liveNative": {
+    "status": "passed",
+    "clientBuild": "1.17(124) final r2",
+    "sourceHashes": {
+      "APIConfig.swift": "be109e20a7c264ac4e991818b0a0fc890c33c2ec289d109d4f54f5bd5a4b1584",
+      "TrepoAuth.swift": "df135cf3bedd9d0f108a85f4992e475a1d3afabc82d0eade9fcec5f1194d8d06",
+      "ThymeRequestRecovery.swift": "4c2b8f1847cf2aeab486530dc880f773920f062a89c46f27d1d491a674aadfb0",
+      "VoiceAssistantService.swift": "fb28854e90b3a99f932ae1b057aebf13333b9dbeec105588f97c47ac0fac2fb9",
+      "VoiceAssistantStreamService.swift": "1dfc72366ea1707e23cf299d0fc331fd1e2fe412e03c6ff3daacacf0d905f4b2"
+    },
+    "testChanges": "Public endpoints unchanged; QA Keychain accessor and no-op analytics/debug only; exact frozen124 transport/auth/recovery source",
+    "HTTPS": true,
+    "syntheticVoice": true,
+    "simulatorUI": false
+  },
+  "initialCanary": {
+    "scope": "Bounded post-release Lambda runtime/error log scan; no customer bodies retained",
+    "startEpochMs": 1790495233395,
+    "endEpochMs": 1790495429993,
+    "functions": {
+      "trepo-quick-ack-stream-dev": {
+        "errorSignals": {
+          "count": 0,
+          "pages": 1
+        },
+        "timeouts": {
+          "count": 0,
+          "pages": 1
+        }
+      },
+      "trepo-quick-ack-sam-dev": {
+        "errorSignals": {
+          "count": 0,
+          "pages": 1
+        },
+        "timeouts": {
+          "count": 0,
+          "pages": 1
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "status": "deployed_and_verified",
+  "startedAt": "2026-09-27T07:47:13.395491+00:00",
+  "functions": {
+    "trepo-quick-ack-stream-dev": {
+      "hash": "V9I7HDLrpzCJIbJPNPBHZqae0qzbC1eHhjyaqbW8F5Q=",
+      "revision": "931198c5-32b6-4d3b-ae4d-5a03d4d3e542",
+      "configurationUnchanged": true,
+      "at": "2026-09-27T07:47:29.815019+00:00"
+    },
+    "trepo-quick-ack-sam-dev": {
+      "hash": "SRgbVQOH1fjgbe654z8B2mY4wJD6P8QI7QtXUn13nNQ=",
+      "revision": "c42bbb25-7752-4ab2-8a4f-bf5431a02b09",
+      "configurationUnchanged": true,
+      "at": "2026-09-27T07:47:40.941123+00:00"
+    }
+  },
+  "verifiedAt": "2026-09-27T07:56:44.301930+00:00",
+  "verification": {
+    "old124NativeTextAudio": "passed",
+    "signedIOSAndroidLegacyContracts": "passed",
+    "publicSimulatorReconnectLifecycleAndSmoke": "2/2 passed",
+    "runtimeErrorTimeoutScan": "0 in bounded initial window",
+    "configurationUnchanged": true,
+    "customerMutations": false
+  }
+}

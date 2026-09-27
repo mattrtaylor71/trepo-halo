@@ -1,0 +1,17 @@
+{
+  "status": "no_actionable_findings",
+  "scope": "exact captured serving-package overlay; not whole historical Git branch",
+  "source": "independent in-host gstack adversarial agent",
+  "completed": true,
+  "converged": true,
+  "edits": 0,
+  "outsideProvider": "disabled_by_company_policy",
+  "fixtureReview": "summary_only",
+  "testsIndependentlyRerunByReviewer": false,
+  "boundedConcern": "Receipt snapshot uses authorization at issuance for up to 60 seconds; subsequent commands recheck current membership",
+  "runtimeHashes": {
+    "index-stream.js": "09b49e7ecf935ec7a905da373949968dd47c204e13ca22227057a68d37e9092f",
+    "lib/ios-reconnect.mjs": "e7bfd30491c1109b8f18afc4f05d758d6ddfdd8d73a267a7e65b203fab2f7f8e",
+    "lib/operation-bridge.mjs": "2a10065b75a36391db902317d6d11a1f481c439de3b69eb8d2b59cb35bc72279"
+  }
+}
