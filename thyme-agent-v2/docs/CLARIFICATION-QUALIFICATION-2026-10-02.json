@@ -1,0 +1,638 @@
+{
+  "automatedTests": {
+    "passed": 82,
+    "failed": 0
+  },
+  "liveModelEvaluation": {
+    "turns": 70,
+    "passed": 70,
+    "models": [
+      "gpt-6-astra",
+      "gpt-6-luna",
+      "gpt-6.1-sol"
+    ],
+    "scope": "57 matrix turns, 9 acknowledgment regression turns, 4 post-provider-fix continuation turns; earlier failed attempts and fixes retained separately",
+    "results": [
+      {
+        "model": "gpt-6-astra",
+        "case": "broad recipe then multi-answer and continuation",
+        "want": "ask",
+        "pass": true,
+        "seconds": 11.13
+      },
+      {
+        "model": "gpt-6-astra",
+        "case": "broad recipe then multi-answer and continuation",
+        "want": "recipe",
+        "pass": true,
+        "seconds": 14.342
+      },
+      {
+        "model": "gpt-6-astra",
+        "case": "broad recipe then multi-answer and continuation",
+        "want": "recipe",
+        "pass": true,
+        "seconds": 13.449
+      },
+      {
+        "model": "gpt-6-astra",
+        "case": "broad recipe then multi-answer and continuation",
+        "want": "recipe",
+        "pass": true,
+        "seconds": 16.771
+      },
+      {
+        "model": "gpt-6-astra",
+        "case": "yes is not an answer to an either-or question",
+        "want": "ask",
+        "pass": true,
+        "seconds": 9.418
+      },
+      {
+        "model": "gpt-6-astra",
+        "case": "yes is not an answer to an either-or question",
+        "want": "ask",
+        "pass": true,
+        "seconds": 10.671
+      },
+      {
+        "model": "gpt-6-astra",
+        "case": "yes is not an answer to an either-or question",
+        "want": "recipe",
+        "pass": true,
+        "seconds": 12.053
+      },
+      {
+        "model": "gpt-6-astra",
+        "case": "ordinal choice remembered",
+        "want": "ask",
+        "pass": true,
+        "seconds": 8.967
+      },
+      {
+        "model": "gpt-6-astra",
+        "case": "ordinal choice remembered",
+        "want": "recipe",
+        "pass": true,
+        "seconds": 16.702
+      },
+      {
+        "model": "gpt-6-astra",
+        "case": "heldout trip to store",
+        "want": "answer",
+        "pass": true,
+        "seconds": 22.628
+      },
+      {
+        "model": "gpt-6-astra",
+        "case": "specific named dish is actionable",
+        "want": "recipe",
+        "pass": true,
+        "seconds": 13.547
+      },
+      {
+        "model": "gpt-6-astra",
+        "case": "explicit pantry request skips question",
+        "want": "recipe",
+        "pass": true,
+        "seconds": 75.817
+      },
+      {
+        "model": "gpt-6-astra",
+        "case": "shopping permission skips question",
+        "want": "recipe",
+        "pass": true,
+        "seconds": 21.271
+      },
+      {
+        "model": "gpt-6-astra",
+        "case": "clear list action proceeds to review",
+        "want": "proposal",
+        "pass": true,
+        "seconds": 11.897
+      },
+      {
+        "model": "gpt-6-astra",
+        "case": "ambiguous destination asks",
+        "want": "ask",
+        "pass": true,
+        "seconds": 10.823
+      },
+      {
+        "model": "gpt-6-astra",
+        "case": "isolated voice fragment asks",
+        "want": "ask",
+        "pass": true,
+        "seconds": 11.004
+      },
+      {
+        "model": "gpt-6-astra",
+        "case": "healthier needs a goal",
+        "want": "recipe",
+        "pass": true,
+        "seconds": 16.758
+      },
+      {
+        "model": "gpt-6-astra",
+        "case": "healthier needs a goal",
+        "want": "ask",
+        "pass": true,
+        "seconds": 10.136
+      },
+      {
+        "model": "gpt-6-astra",
+        "case": "technique answers without recipe intake",
+        "want": "answer",
+        "pass": true,
+        "seconds": 10.516
+      },
+      {
+        "model": "gpt-6-luna",
+        "case": "broad recipe then multi-answer and continuation",
+        "want": "ask",
+        "pass": true,
+        "seconds": 11.24
+      },
+      {
+        "model": "gpt-6-luna",
+        "case": "broad recipe then multi-answer and continuation",
+        "want": "recipe",
+        "pass": true,
+        "seconds": 17.337
+      },
+      {
+        "model": "gpt-6-luna",
+        "case": "broad recipe then multi-answer and continuation",
+        "want": "recipe",
+        "pass": true,
+        "seconds": 11.921
+      },
+      {
+        "model": "gpt-6-luna",
+        "case": "broad recipe then multi-answer and continuation",
+        "want": "recipe",
+        "pass": true,
+        "seconds": 19.515
+      },
+      {
+        "model": "gpt-6-luna",
+        "case": "yes is not an answer to an either-or question",
+        "want": "ask",
+        "pass": true,
+        "seconds": 9.926
+      },
+      {
+        "model": "gpt-6-luna",
+        "case": "yes is not an answer to an either-or question",
+        "want": "ask",
+        "pass": true,
+        "seconds": 9.649
+      },
+      {
+        "model": "gpt-6-luna",
+        "case": "yes is not an answer to an either-or question",
+        "want": "recipe",
+        "pass": true,
+        "seconds": 13.089
+      },
+      {
+        "model": "gpt-6-luna",
+        "case": "ordinal choice remembered",
+        "want": "ask",
+        "pass": true,
+        "seconds": 8.7
+      },
+      {
+        "model": "gpt-6-luna",
+        "case": "ordinal choice remembered",
+        "want": "recipe",
+        "pass": true,
+        "seconds": 16.091
+      },
+      {
+        "model": "gpt-6-luna",
+        "case": "heldout trip to store",
+        "want": "answer",
+        "pass": true,
+        "seconds": 17.101
+      },
+      {
+        "model": "gpt-6-luna",
+        "case": "specific named dish is actionable",
+        "want": "recipe",
+        "pass": true,
+        "seconds": 13.34
+      },
+      {
+        "model": "gpt-6-luna",
+        "case": "explicit pantry request skips question",
+        "want": "recipe",
+        "pass": true,
+        "seconds": 16.382
+      },
+      {
+        "model": "gpt-6-luna",
+        "case": "shopping permission skips question",
+        "want": "recipe",
+        "pass": true,
+        "seconds": 14.837
+      },
+      {
+        "model": "gpt-6-luna",
+        "case": "clear list action proceeds to review",
+        "want": "proposal",
+        "pass": true,
+        "seconds": 8.891
+      },
+      {
+        "model": "gpt-6-luna",
+        "case": "ambiguous destination asks",
+        "want": "ask",
+        "pass": true,
+        "seconds": 9.519
+      },
+      {
+        "model": "gpt-6-luna",
+        "case": "isolated voice fragment asks",
+        "want": "ask",
+        "pass": true,
+        "seconds": 8.656
+      },
+      {
+        "model": "gpt-6-luna",
+        "case": "healthier needs a goal",
+        "want": "recipe",
+        "pass": true,
+        "seconds": 17.053
+      },
+      {
+        "model": "gpt-6-luna",
+        "case": "healthier needs a goal",
+        "want": "ask",
+        "pass": true,
+        "seconds": 9.468
+      },
+      {
+        "model": "gpt-6-luna",
+        "case": "technique answers without recipe intake",
+        "want": "answer",
+        "pass": true,
+        "seconds": 6.485
+      },
+      {
+        "model": "gpt-6.1-sol",
+        "case": "broad recipe then multi-answer and continuation",
+        "want": "ask",
+        "pass": true,
+        "seconds": 13.458
+      },
+      {
+        "model": "gpt-6.1-sol",
+        "case": "broad recipe then multi-answer and continuation",
+        "want": "recipe",
+        "pass": true,
+        "seconds": 21.494
+      },
+      {
+        "model": "gpt-6.1-sol",
+        "case": "broad recipe then multi-answer and continuation",
+        "want": "recipe",
+        "pass": true,
+        "seconds": 18.354
+      },
+      {
+        "model": "gpt-6.1-sol",
+        "case": "broad recipe then multi-answer and continuation",
+        "want": "recipe",
+        "pass": true,
+        "seconds": 19.917
+      },
+      {
+        "model": "gpt-6.1-sol",
+        "case": "yes is not an answer to an either-or question",
+        "want": "ask",
+        "pass": true,
+        "seconds": 10.806
+      },
+      {
+        "model": "gpt-6.1-sol",
+        "case": "yes is not an answer to an either-or question",
+        "want": "ask",
+        "pass": true,
+        "seconds": 11.89
+      },
+      {
+        "model": "gpt-6.1-sol",
+        "case": "yes is not an answer to an either-or question",
+        "want": "recipe",
+        "pass": true,
+        "seconds": 17.306
+      },
+      {
+        "model": "gpt-6.1-sol",
+        "case": "ordinal choice remembered",
+        "want": "ask",
+        "pass": true,
+        "seconds": 13.219
+      },
+      {
+        "model": "gpt-6.1-sol",
+        "case": "ordinal choice remembered",
+        "want": "recipe",
+        "pass": true,
+        "seconds": 19.613
+      },
+      {
+        "model": "gpt-6.1-sol",
+        "case": "heldout trip to store",
+        "want": "answer",
+        "pass": true,
+        "seconds": 31.34
+      },
+      {
+        "model": "gpt-6.1-sol",
+        "case": "specific named dish is actionable",
+        "want": "recipe",
+        "pass": true,
+        "seconds": 19.02
+      },
+      {
+        "model": "gpt-6.1-sol",
+        "case": "explicit pantry request skips question",
+        "want": "recipe",
+        "pass": true,
+        "seconds": 22.205
+      },
+      {
+        "model": "gpt-6.1-sol",
+        "case": "shopping permission skips question",
+        "want": "recipe",
+        "pass": true,
+        "seconds": 29.325
+      },
+      {
+        "model": "gpt-6.1-sol",
+        "case": "clear list action proceeds to review",
+        "want": "proposal",
+        "pass": true,
+        "seconds": 26.154
+      },
+      {
+        "model": "gpt-6.1-sol",
+        "case": "ambiguous destination asks",
+        "want": "ask",
+        "pass": true,
+        "seconds": 15.816
+      },
+      {
+        "model": "gpt-6.1-sol",
+        "case": "isolated voice fragment asks",
+        "want": "ask",
+        "pass": true,
+        "seconds": 15.423
+      },
+      {
+        "model": "gpt-6.1-sol",
+        "case": "healthier needs a goal",
+        "want": "recipe",
+        "pass": true,
+        "seconds": 23.443
+      },
+      {
+        "model": "gpt-6.1-sol",
+        "case": "healthier needs a goal",
+        "want": "ask",
+        "pass": true,
+        "seconds": 14.473
+      },
+      {
+        "model": "gpt-6.1-sol",
+        "case": "technique answers without recipe intake",
+        "want": "answer",
+        "pass": true,
+        "seconds": 20.773
+      },
+      {
+        "model": "gpt-6-astra",
+        "case": "acknowledgment still remembers choices",
+        "want": "ask",
+        "pass": true,
+        "seconds": 16.506
+      },
+      {
+        "model": "gpt-6-astra",
+        "case": "acknowledgment still remembers choices",
+        "want": "answer",
+        "pass": true,
+        "seconds": 16.776
+      },
+      {
+        "model": "gpt-6-astra",
+        "case": "acknowledgment still remembers choices",
+        "want": "answer",
+        "pass": true,
+        "seconds": 11.272
+      },
+      {
+        "model": "gpt-6-luna",
+        "case": "acknowledgment still remembers choices",
+        "want": "ask",
+        "pass": true,
+        "seconds": 8.593
+      },
+      {
+        "model": "gpt-6-luna",
+        "case": "acknowledgment still remembers choices",
+        "want": "answer",
+        "pass": true,
+        "seconds": 10.679
+      },
+      {
+        "model": "gpt-6-luna",
+        "case": "acknowledgment still remembers choices",
+        "want": "answer",
+        "pass": true,
+        "seconds": 5.056
+      },
+      {
+        "model": "gpt-6.1-sol",
+        "case": "acknowledgment still remembers choices",
+        "want": "ask",
+        "pass": true,
+        "seconds": 10.854
+      },
+      {
+        "model": "gpt-6.1-sol",
+        "case": "acknowledgment still remembers choices",
+        "want": "answer",
+        "pass": true,
+        "seconds": 11.537
+      },
+      {
+        "model": "gpt-6.1-sol",
+        "case": "acknowledgment still remembers choices",
+        "want": "answer",
+        "pass": true,
+        "seconds": 5.471
+      },
+      {
+        "model": "gpt-6.1-sol",
+        "case": "broad recipe then multi-answer and continuation",
+        "want": "ask",
+        "pass": true,
+        "seconds": 11.417
+      },
+      {
+        "model": "gpt-6.1-sol",
+        "case": "broad recipe then multi-answer and continuation",
+        "want": "recipe",
+        "pass": true,
+        "seconds": 17.091
+      },
+      {
+        "model": "gpt-6.1-sol",
+        "case": "broad recipe then multi-answer and continuation",
+        "want": "recipe",
+        "pass": true,
+        "seconds": 14.025
+      },
+      {
+        "model": "gpt-6.1-sol",
+        "case": "broad recipe then multi-answer and continuation",
+        "want": "recipe",
+        "pass": true,
+        "seconds": 18.308
+      }
+    ]
+  },
+  "durableCloudChecks": [
+    {
+      "name": "Durable new chat preferences",
+      "values": {
+        "max_minutes": 30,
+        "inventory_mode": "shopping_ok",
+        "servings": 3
+      },
+      "pendingQuestionCleared": true,
+      "pass": true
+    },
+    {
+      "name": "Durable upgraded chat preferences",
+      "values": {
+        "max_minutes": 25,
+        "inventory_mode": "shopping_ok",
+        "servings": 2
+      },
+      "pendingQuestionCleared": true,
+      "pass": true
+    }
+  ],
+  "privateDeployment": {
+    "scope": "private founder web pilot only",
+    "previousSHA256": "078a40a8aa3724a0c06dd6cf5d2b7880975b664f4aea37110ac39a562e38927c",
+    "artifactSHA256": "566ebe4c4efd533df21ee5c2486d63efd502194b8b49dc7f55648fdbe0b66e7e",
+    "functions": [
+      {
+        "name": "trepo-thyme-agent-v2-pilot-worker",
+        "codeSHA256": "566ebe4c4efd533df21ee5c2486d63efd502194b8b49dc7f55648fdbe0b66e7e",
+        "state": "Active",
+        "updateStatus": "Successful",
+        "revisionId": "0d89937b-912f-4b25-a010-6b8dc346542a"
+      },
+      {
+        "name": "trepo-thyme-agent-v2-pilot-api",
+        "codeSHA256": "566ebe4c4efd533df21ee5c2486d63efd502194b8b49dc7f55648fdbe0b66e7e",
+        "state": "Active",
+        "updateStatus": "Successful",
+        "revisionId": "f76778c5-68b4-4749-8928-2af07e589160"
+      }
+    ],
+    "verifiedAt": "2026-10-02T07:06:13.552778+00:00",
+    "existingCustomerRoutesChanged": false
+  },
+  "cloudConversation": {
+    "passed": true,
+    "turns": 4,
+    "oldHistoryPreserved": true,
+    "preferencesConfirmedByDatabase": true,
+    "duplicateQuestionAbsent": true,
+    "accountMutations": 0
+  },
+  "authAndDataCanary": [
+    {
+      "name": "unsigned or forged connection rejected",
+      "status": 401
+    },
+    {
+      "name": "unenrolled principal rejected",
+      "status": 403
+    },
+    {
+      "name": "client cannot select another household",
+      "status": 403
+    },
+    {
+      "name": "read-only canary cannot approve changes",
+      "status": 403
+    },
+    {
+      "name": "Matt live household read",
+      "status": 200
+    },
+    {
+      "name": "live context counts",
+      "kitchen": 60,
+      "shopping": 4
+    },
+    {
+      "name": "durable message accepted",
+      "status": 200
+    },
+    {
+      "name": "duplicate request returns same conversation",
+      "ok": true
+    },
+    {
+      "name": "poll 0",
+      "status": 200
+    },
+    {
+      "name": "poll 1",
+      "status": 200
+    },
+    {
+      "name": "poll 2",
+      "status": 200
+    },
+    {
+      "name": "poll 3",
+      "status": 200
+    },
+    {
+      "name": "real AWS durable worker + managed agent + Matt data",
+      "status": "completed",
+      "seconds": 9.2,
+      "liveMutations": 0,
+      "metrics": {
+        "seconds": 7.531,
+        "model": "gpt-6-luna",
+        "inputTokens": null,
+        "toolCalls": 0,
+        "outputTokens": null,
+        "cachedTokens": null
+      }
+    }
+  ],
+  "browser": {
+    "passed": true,
+    "turns": 3,
+    "questionOnce": true,
+    "recipeForTwoWithin20Minutes": true,
+    "reloadAndReopenRemembersAllChoices": true,
+    "warningsOrErrors": 0,
+    "screenshots": [
+      "clarifying-question.png",
+      "clarification-after-reload.png"
+    ]
+  }
+}

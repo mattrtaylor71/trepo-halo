@@ -2,6 +2,14 @@
   "status": "private founder pilot",
   "existingCustomerRoutesChanged": false,
   "site": {
+    "url": "https://trepo-thyme-pilot.trepo-2057.chatgpt.site",
+    "changedByThisRelease": false
+  },
+  "backendArtifactSHA256": "566ebe4c4efd533df21ee5c2486d63efd502194b8b49dc7f55648fdbe0b66e7e",
+  "apiFunction": "trepo-thyme-agent-v2-pilot-api",
+  "workerFunction": "trepo-thyme-agent-v2-pilot-worker",
+  "backendDeployedAt": "2026-10-02T07:06:13.552778+00:00",
+  "initialSiteDeployment": {
     "id": "appgdep_6abf4a46f9fc8191a92b41e6702462a4",
     "project_id": "appgprj_6abf3a2970fc819188a587e3383c4d92",
     "title": "Thyme \u00b7 Your kitchen, connected",
@@ -16,9 +24,7 @@
     "env_set_revision": 1,
     "updated_at": "2026-10-02T06:08:14.593952+00:00"
   },
-  "sourceCommit": "015fee9915924149084c1ba25e2335406aed44c5",
-  "backendArtifactSHA256": "5e20423b23e47976df15135dc1f507fcb70cb61c233d1a2c0c962b1768fd9198",
-  "apiFunction": "trepo-thyme-agent-v2-pilot-api",
-  "workerFunction": "trepo-thyme-agent-v2-pilot-worker",
-  "backendDeployedAt": "2026-10-02T06:05:13.231777+00:00"
+  "initialSiteSourceCommit": "015fee9915924149084c1ba25e2335406aed44c5",
+  "backendSourceCommit": "9967aed677709e3059feffd706389d79b14bae41",
+  "releaseEvidence": "docs/CLARIFICATION-QUALIFICATION-2026-10-02.json"
 }
