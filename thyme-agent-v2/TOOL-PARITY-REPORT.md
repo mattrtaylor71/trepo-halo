@@ -1,6 +1,14 @@
 # Thyme private pilot: app tool parity
 
-Prepared October 2, 2026 for Matt. Implementation and automated testing complete; deployment is recorded separately in the private pilot receipt. This change is on `codex/thyme-agent-v2`, without a merge or changes to public Thyme/iOS routes.
+Prepared October 2, 2026 for Matt. Implementation and automated testing complete. Deployed to the private pilot at 07:56 UTC and verified after deployment. This change is on `codex/thyme-agent-v2`, without a merge or changes to public Thyme/iOS routes.
+
+## Verified private release
+
+Runtime source commit: `482698cc4e66e4c7b965eaddef36b9a6fb69af15`. Artifact SHA-256: `cb0e78ad90b59b1af62820bc2052fa11377a4c7e24c6ce0d9e6e394dad565dbd`. Both private API and worker functions reported Active / Successful with this code hash. Revision guards passed; environment, role, handler, runtime, timeout, memory and network configuration were unchanged.
+
+The deployed cloud check passed signature, enrollment, household-scope, read-only approval rejection, durable request deduplication and a real read-only model turn (13.6 seconds). The browser displayed the current 60-item kitchen and prepared a new shopping-list review card with the exact name and quantity. The test proposal was dismissed through the UI and visibly marked **Not applied**. A subsequent live read confirmed the original four shopping items and no test-list items. No customer mutation was performed for qualification.
+
+Release evidence: `deployment-receipt.json`, `cloud-check.json`, `browser-check.json`, and `live-proposal-dismissed.png` in the evidence directory below. The private account mapping currently contains Matt only; this release did not add another user.
 
 ## Capability map
 
