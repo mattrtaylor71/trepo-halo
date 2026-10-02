@@ -2,6 +2,7 @@ import { Fault, key, scope, hash, now, publicError } from "./core.mjs";
 import { record } from "./store.mjs";
 import { recipeFromText } from "./recipe-text.mjs";
 import { createRecipe, checkRecipe } from "./recipes.mjs";
+import { readConversation } from "./conversation.mjs";
 import { INSTRUCTIONS } from "./instructions.mjs";
 import { fingerprint, collection } from "./gateway.mjs";
 import { verifyChange } from "./verification.mjs";
@@ -113,7 +114,29 @@ export class Runner {
         .filter((x) => x.status === "applied")
         .slice(-12)
         .map((x) => ({ action: x.action, args: x.args, status: x.status }));
+      const agentVersion = hash([INSTRUCTIONS, this.definitions]);
+      let conversationHistory;
+      // Instructions/tools are immutable at the provider. Upgrade only between
+      // turns, preserving app history, recipes, approvals and explicit preferences.
+      // Never rotate a submitted/in-flight request: it must reconcile first.
+      if (s.providerId && s.agentVersion !== agentVersion && !req.submitted && !req.baselineTurns) {
+        const oldTurns = await this.provider.turns(s.providerId);
+        if (oldTurns.some((t) => !["completed", "failed", "cancelled"].includes(t.status)))
+          throw new Fault("previous_turn_active", "The earlier answer is still finishing. Resume it before continuing.", 409);
+        const messages = (await this.store.list(pk, key(s.id, "M") + "#"))
+          .filter((m) => m.id !== req.id).sort((x, y) => x.order - y.order);
+        // No silent context loss during upgrades. Oversized histories keep their
+        // saved work and ask for a new chat rather than guessing what was omitted.
+        conversationHistory = messages.map(({ role, text }) => ({ role, text }));
+        if (Buffer.byteLength(JSON.stringify(conversationHistory)) > 180000)
+          throw new Fault("history_too_large", "This long chat is saved. Start a new conversation to use Thyme’s latest improvements.", 409);
+        req = await this.store.put(pk, "Q#" + rid, { ...req, upgradeHistory: conversationHistory }, req.version);
+        s = await this.store.put(pk, key(s.id), { ...s, previousProviderId: s.providerId, providerId: null }, s.version);
+      }
       const input = JSON.stringify({
+        conversation_preferences: await readConversation(this.store, a, s.id),
+        conversation_history: req.upgradeHistory,
+
         confirmed_changes: receipts,
         current_review_requests: {
           complete: true,
@@ -163,6 +186,7 @@ export class Runner {
             {
               ...req,
               baselineTurns: previous.map((t) => t.id),
+              upgradeHistory: undefined,
               submittedInput: input,
             },
             req.version,
@@ -181,7 +205,7 @@ export class Runner {
               item: record(
                 pk,
                 key(s.id),
-                { ...s, providerId: created.id },
+                { ...s, providerId: created.id, agentVersion },
                 s.version,
               ),
               expected: s.version,
@@ -371,6 +395,15 @@ export class Runner {
   }
   async saveMessages(pk, s, req, items, dietary) {
     let n = 0;
+    const question = (await readConversation(this.store, { actor: req.actor, household: req.household }, s.id)).pending_question;
+    if (question && question.requestId === req.id) {
+      const sk = key(s.id, "M", "clarify-" + req.id);
+      if (!(await this.store.get(pk, sk))) await this.store.put(pk, sk, {
+        type: "message", id: "clarify-" + req.id, role: "assistant", phase: "final_answer",
+        text: question.question, order: req.createdAt + 1,
+      });
+      return;
+    }
     const rows = await this.store.list(pk, key(s.id, "P") + "#"),
       pending = rows.some((x) => x.status === "pending");
     for (const item of items) {

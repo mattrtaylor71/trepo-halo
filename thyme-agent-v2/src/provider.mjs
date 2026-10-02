@@ -98,12 +98,15 @@ export class AgentProvider {
   turns(sid) {
     return this.list(sid, "turns");
   }
-  items(sid, turn) {
-    return this.list(
+  async items(sid, turn) {
+    const items = await this.list(
       sid,
       "items",
       turn ? "&turn_id=" + encodeURIComponent(turn) : "",
     );
+    // The provider currently returns earlier items even with turn_id in the
+    // query. Enforce ownership locally so old questions/drafts never reappear.
+    return turn ? items.filter((item) => item.turn_id === turn) : items;
   }
   result(sid, action, result) {
     return this.request(

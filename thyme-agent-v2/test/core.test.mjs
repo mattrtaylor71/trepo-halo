@@ -409,6 +409,16 @@ test("malformed pagination fails rather than dropping output", async () => {
   });
   await assert.rejects(p.items("s"), { code: "pagination" });
 });
+test("provider turn filter is enforced locally across every page", async () => {
+  let calls = 0;
+  const p = new AgentProvider("test", {
+    fetcher: async () => new Response(JSON.stringify(++calls === 1
+      ? {data: [{id:"old", turn_id:"older-turn"}], has_more:true, last_id:"old"}
+      : {data: [{id:"new", turn_id:"current-turn"}, {id:"unknown"}], has_more:false})),
+  });
+  assert.deepEqual(await p.items("s", "current-turn"), [{id:"new",turn_id:"current-turn"}]);
+  assert.equal(calls, 2);
+});
 test("old response envelope retains text and recipes", () => {
   const s = {
     id: "s",

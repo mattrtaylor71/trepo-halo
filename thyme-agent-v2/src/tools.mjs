@@ -2,6 +2,7 @@ import Ajv from "ajv";
 import { Fault, id, key, scope, hash, now } from "./core.mjs";
 import { READS, resourceFor, collection, fingerprint } from "./gateway.mjs";
 import { createRecipe, patchRecipe, checkRecipe } from "./recipes.mjs";
+import { CONVERSATION_TOOLS, conversationTool, readConversation } from "./conversation.mjs";
 const obj = (properties, required = []) => ({
   type: "object",
   properties,
@@ -11,6 +12,7 @@ const obj = (properties, required = []) => ({
 const str = { type: "string" };
 export async function toolDefinitions(gateway) {
   return [
+    ...CONVERSATION_TOOLS,
     {
       type: "function",
       name: "read_trepo",
@@ -172,6 +174,10 @@ export class ToolGateway {
     const args = structuredClone(call.arguments),
       pk = scope(a),
       tool = call.name;
+    if (CONVERSATION_TOOLS.some((t) => t.name === tool)) return conversationTool(this.store, a, s, call);
+    if ((tool === "create_recipe" || tool === "edit_recipe" || tool.startsWith("request_")) &&
+      (await readConversation(this.store, a, s.id)).pending_question?.requestId === s.activeRequest)
+      throw new Fault("awaiting_clarification", "Wait for the user's answer before creating a recipe or preparing a change.");
     if (tool === "read_trepo") {
       const data = await this.gateway.read(a, args.resource, args);
       const body = JSON.stringify(data);

@@ -8,6 +8,7 @@ import { ToolGateway, toolDefinitions } from "../src/tools.mjs";
 import { createRecipe, checkRecipe } from "../src/recipes.mjs";
 import { recipeFromText } from "../src/recipe-text.mjs";
 import { verifyChange } from "../src/verification.mjs";
+import { INSTRUCTIONS } from "../src/instructions.mjs";
 import { FixtureGateway, ACTOR } from "./fixtures.mjs";
 const pk = scope(ACTOR),
   recipeArgs = {
@@ -136,7 +137,7 @@ test("new request never accepts an older completed turn", async () => {
   await r.store.put(
     pk,
     meta.sk,
-    { ...meta, providerId: "provider-session", lastTurnId: "older-turn" },
+    { ...meta, providerId: "provider-session", agentVersion: hash([INSTRUCTIONS, r.definitions]), lastTurnId: "older-turn" },
     meta.version,
   );
   await new Runner({ ...r, provider: fakeProvider() }).run(pk, "first-request");
