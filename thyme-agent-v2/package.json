@@ -1,0 +1,1 @@
+{"name":"trepo-thyme-agent-v2","version":"0.1.0","private":true,"type":"module","scripts":{"test":"node --test test/*.test.mjs"},"dependencies":{"@aws-sdk/client-dynamodb":"^3.899.0","@aws-sdk/lib-dynamodb":"^3.899.0","ajv":"^8.17.1"}}

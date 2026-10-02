@@ -1,0 +1,1516 @@
+[
+  {
+    "type": "function",
+    "name": "add_to_shopping_list",
+    "description": "Add a grocery item to the user's shopping list.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "item_name": {
+          "type": "string",
+          "description": "The grocery item to add."
+        },
+        "quantity": {
+          "type": "string",
+          "description": "Optional quantity or amount such as '1 carton' or '2'."
+        },
+        "store": {
+          "type": "string",
+          "description": "Optional store tab such as Costco or Whole Foods."
+        }
+      },
+      "required": [
+        "item_name"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "type": "function",
+    "name": "add_many_to_shopping_list",
+    "description": "Add multiple grocery items to the shopping list in one request.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "description": "The items to add.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "item_name": {
+                "type": "string",
+                "description": "The grocery item to add."
+              },
+              "quantity": {
+                "type": "string",
+                "description": "Optional quantity or amount such as '1 carton' or '2'."
+              },
+              "store": {
+                "type": "string",
+                "description": "Optional store tab such as Costco or Whole Foods."
+              }
+            },
+            "required": [
+              "item_name"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "items"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "type": "function",
+    "name": "update_shopping_item_store",
+    "description": "Move an existing shopping list item to a specific store tab.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "item_name": {
+          "type": "string",
+          "description": "The grocery item already on the shopping list."
+        },
+        "store": {
+          "type": "string",
+          "description": "The destination store tab such as Costco or Whole Foods."
+        }
+      },
+      "required": [
+        "item_name",
+        "store"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "type": "function",
+    "name": "update_many_shopping_item_stores",
+    "description": "Move multiple existing shopping list items to specific store tabs.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "description": "The shopping items to move.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "item_name": {
+                "type": "string",
+                "description": "The grocery item already on the shopping list."
+              },
+              "store": {
+                "type": "string",
+                "description": "The destination store tab."
+              }
+            },
+            "required": [
+              "item_name",
+              "store"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "items"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "type": "function",
+    "name": "mark_shopping_item_bought",
+    "description": "Mark a shopping list item as bought or checked off.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "item_name": {
+          "type": "string",
+          "description": "The grocery item to mark as bought."
+        }
+      },
+      "required": [
+        "item_name"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "type": "function",
+    "name": "mark_shopping_item_unbought",
+    "description": "Mark a shopping list item as not bought or unchecked.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "item_name": {
+          "type": "string",
+          "description": "The grocery item to mark as not bought."
+        }
+      },
+      "required": [
+        "item_name"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "type": "function",
+    "name": "remove_from_shopping_list",
+    "description": "Remove a grocery item from the user's shopping list.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "item_name": {
+          "type": "string",
+          "description": "The grocery item to remove."
+        }
+      },
+      "required": [
+        "item_name"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "type": "function",
+    "name": "clear_shopping_list",
+    "description": "Remove every item from the user's shopping list.",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    }
+  },
+  {
+    "type": "function",
+    "name": "get_shopping_list",
+    "description": "Get the current shopping list items.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "limit": {
+          "type": "number",
+          "description": "Optional number of shopping list items to return."
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "type": "function",
+    "name": "list_store_tabs",
+    "description": "List the current shopping store tabs already in use.",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    }
+  },
+  {
+    "type": "function",
+    "name": "get_kitchen_overview",
+    "description": "Get a summary of the current kitchen inventory.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "limit": {
+          "type": "number",
+          "description": "Optional number of kitchen items to return."
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "type": "function",
+    "name": "search_kitchen_item",
+    "description": "Look up a specific item already in the kitchen, including amount left, location, expiration, and opened state when available.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "item_name": {
+          "type": "string",
+          "description": "The kitchen item to look up."
+        },
+        "item_id": {
+          "type": "string",
+          "description": "Optional exact kitchen row id when resolving a previously ambiguous item."
+        },
+        "selection_hint": {
+          "type": "string",
+          "description": "Optional disambiguation hint such as most_recent, oldest, or other."
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "type": "function",
+    "name": "check_in_item",
+    "description": "Add one item to the kitchen inventory.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "item_name": {
+          "type": "string",
+          "description": "The kitchen item to add."
+        },
+        "quantity": {
+          "type": "string",
+          "description": "Optional freeform quantity such as 'half full' or '2 eggs left'."
+        },
+        "quantity_value": {
+          "type": "number",
+          "description": "Optional numeric quantity value."
+        },
+        "quantity_unit": {
+          "type": "string",
+          "description": "Optional unit such as 'cup', 'bottle', or 'item'."
+        },
+        "fill_percent": {
+          "type": "number",
+          "description": "Optional fill percentage from 0 to 100."
+        },
+        "location": {
+          "type": "string",
+          "description": "Optional kitchen location such as fridge, freezer, or pantry."
+        },
+        "expiration_date": {
+          "type": "string",
+          "description": "Optional expiration date, including natural phrases like 'next Friday'."
+        },
+        "is_opened": {
+          "type": "boolean",
+          "description": "Optional opened state."
+        },
+        "brand": {
+          "type": "string",
+          "description": "Optional brand."
+        },
+        "category": {
+          "type": "string",
+          "description": "Optional category."
+        }
+      },
+      "required": [
+        "item_name"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "type": "function",
+    "name": "check_in_many_items",
+    "description": "Add multiple items to the kitchen inventory in one request.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "description": "Kitchen items for the requested operation.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "item_name": {
+                "type": "string",
+                "description": "The kitchen item name."
+              },
+              "quantity": {
+                "type": "string",
+                "description": "Optional freeform quantity such as 'half full' or '2 eggs left'."
+              },
+              "quantity_value": {
+                "type": "number",
+                "description": "Optional numeric quantity value."
+              },
+              "quantity_unit": {
+                "type": "string",
+                "description": "Optional unit such as 'cup', 'bottle', or 'item'."
+              },
+              "fill_percent": {
+                "type": "number",
+                "description": "Optional fill percentage from 0 to 100."
+              },
+              "location": {
+                "type": "string",
+                "description": "Optional kitchen location such as fridge, freezer, or pantry."
+              },
+              "expiration_date": {
+                "type": "string",
+                "description": "Optional expiration date, including natural phrases like 'next Friday'."
+              },
+              "is_opened": {
+                "type": "boolean",
+                "description": "Optional opened state."
+              },
+              "brand": {
+                "type": "string",
+                "description": "Optional brand."
+              },
+              "category": {
+                "type": "string",
+                "description": "Optional category."
+              }
+            },
+            "required": [
+              "item_name"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "items"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "type": "function",
+    "name": "update_item_quantity",
+    "description": "Update the remaining amount or fullness of a kitchen item for partial-state changes, including phrases like 'only 4 left', 'half full', or 'almost empty'. Do not use this when the user wants the item removed from the kitchen entirely.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "item_name": {
+          "type": "string",
+          "description": "The kitchen item to update."
+        },
+        "item_id": {
+          "type": "string",
+          "description": "Optional exact kitchen row id when resolving a previously ambiguous item."
+        },
+        "selection_hint": {
+          "type": "string",
+          "description": "Optional disambiguation hint such as most_recent, oldest, or other."
+        },
+        "remaining_quantity": {
+          "type": "string",
+          "description": "Freeform quantity such as 'half full' or '2 eggs left'."
+        },
+        "quantity_value": {
+          "type": "number",
+          "description": "Optional numeric quantity value."
+        },
+        "quantity_unit": {
+          "type": "string",
+          "description": "Optional unit such as 'cup', 'bottle', or 'item'."
+        },
+        "fill_percent": {
+          "type": "number",
+          "description": "Optional fill percentage from 0 to 100."
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "type": "function",
+    "name": "mark_item_opened",
+    "description": "Mark a kitchen item as opened.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "item_name": {
+          "type": "string",
+          "description": "The kitchen item to mark as opened."
+        },
+        "item_id": {
+          "type": "string",
+          "description": "Optional exact kitchen row id when resolving a previously ambiguous item."
+        },
+        "selection_hint": {
+          "type": "string",
+          "description": "Optional disambiguation hint such as most_recent, oldest, or other."
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "type": "function",
+    "name": "update_item_expiration",
+    "description": "Update the expiration date for a kitchen item.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "item_name": {
+          "type": "string",
+          "description": "The kitchen item to update."
+        },
+        "item_id": {
+          "type": "string",
+          "description": "Optional exact kitchen row id when resolving a previously ambiguous item."
+        },
+        "selection_hint": {
+          "type": "string",
+          "description": "Optional disambiguation hint such as most_recent, oldest, or other."
+        },
+        "expiration_date": {
+          "type": "string",
+          "description": "The expiration date, including natural phrases like 'next Friday'."
+        }
+      },
+      "required": [
+        "expiration_date"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "type": "function",
+    "name": "update_item_location",
+    "description": "Move a kitchen item to a different storage location.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "item_name": {
+          "type": "string",
+          "description": "The kitchen item to move."
+        },
+        "item_id": {
+          "type": "string",
+          "description": "Optional exact kitchen row id when resolving a previously ambiguous item."
+        },
+        "selection_hint": {
+          "type": "string",
+          "description": "Optional disambiguation hint such as most_recent, oldest, or other."
+        },
+        "location": {
+          "type": "string",
+          "description": "The destination location such as pantry, fridge, or freezer."
+        }
+      },
+      "required": [
+        "location"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "type": "function",
+    "name": "update_item_details",
+    "description": "Correct a kitchen item's name or other explicitly requested details. item_name identifies the existing item; new_name is its replacement name. For a name correction, send only the target and new_name. Preserve quantity, brand, opened state and location unless the user explicitly changes them.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "item_name": {
+          "type": "string",
+          "description": "The kitchen item to update."
+        },
+        "new_name": {
+          "type": "string",
+          "description": "The exact replacement name explicitly requested by the user. Do not use this to identify the existing item."
+        },
+        "item_id": {
+          "type": "string",
+          "description": "Optional exact kitchen row id when resolving a previously ambiguous item."
+        },
+        "selection_hint": {
+          "type": "string",
+          "description": "Optional disambiguation hint such as most_recent, oldest, or other."
+        },
+        "remaining_quantity": {
+          "type": "string",
+          "description": "Freeform quantity such as 'half full' or '2 eggs left'."
+        },
+        "quantity_value": {
+          "type": "number",
+          "description": "Optional numeric quantity value."
+        },
+        "quantity_unit": {
+          "type": "string",
+          "description": "Optional unit such as 'cup', 'bottle', or 'item'."
+        },
+        "fill_percent": {
+          "type": "number",
+          "description": "Optional fill percentage from 0 to 100."
+        },
+        "expiration_date": {
+          "type": "string",
+          "description": "Optional expiration date, including natural phrases like 'next Friday'."
+        },
+        "location": {
+          "type": "string",
+          "description": "Optional location such as pantry, fridge, or freezer."
+        },
+        "is_opened": {
+          "type": "boolean",
+          "description": "Optional opened state."
+        },
+        "brand": {
+          "type": "string",
+          "description": "Optional brand."
+        },
+        "category": {
+          "type": "string",
+          "description": "Optional category."
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "type": "function",
+    "name": "discard_item",
+    "description": "Discard or fully remove an item from the kitchen inventory (and log the discard reason if provided). This is the tool to use whenever the user finished / ate / used up / ran out of a kitchen item, or asks to remove / get rid of / take out / toss an item they have — including with a pronoun ('I just had strawberries, remove them'). Use reason 'finished' when they consumed it. If the item isn't in their kitchen it returns not-found — report that honestly.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "item_name": {
+          "type": "string",
+          "description": "The kitchen item to discard."
+        },
+        "item_id": {
+          "type": "string",
+          "description": "Optional exact kitchen row id when resolving a previously ambiguous item."
+        },
+        "selection_hint": {
+          "type": "string",
+          "description": "Optional disambiguation hint such as most_recent, oldest, or other."
+        },
+        "reason": {
+          "type": "string",
+          "description": "Optional discard reason such as spoiled, finished, or moldy."
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "type": "function",
+    "name": "clear_kitchen_inventory",
+    "description": "Remove every active item from the kitchen inventory in one action.",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    }
+  },
+  {
+    "type": "function",
+    "name": "get_recent_discards",
+    "description": "Get the user's recent discard history, including discarded item names and reasons when available.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "limit": {
+          "type": "number",
+          "description": "Optional number of recent discards to return."
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "type": "function",
+    "name": "delete_recent_discard",
+    "description": "Remove one item from the user's recent discard history.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "item_name": {
+          "type": "string",
+          "description": "The discarded item to remove from discard history."
+        }
+      },
+      "required": [
+        "item_name"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "type": "function",
+    "name": "clear_recent_discards",
+    "description": "Remove every item from the user's recent discard history.",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    }
+  },
+  {
+    "type": "function",
+    "name": "log_dish_from_voice",
+    "description": "Log a new meal or food from a voice description.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "dish_name": {
+          "type": "string",
+          "description": "The food or meal name such as '2 apples' or 'turkey sandwich'."
+        },
+        "serving_size": {
+          "type": "string",
+          "description": "Optional serving description such as '2 apples' or '1 bowl'."
+        },
+        "ingredients": {
+          "type": "array",
+          "description": "Dish ingredients or foods mentioned in the meal.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "calories": {
+          "type": "number",
+          "description": "Optional calories if the amount is known."
+        },
+        "protein_g": {
+          "type": "number",
+          "description": "Optional protein grams."
+        },
+        "carbs_g": {
+          "type": "number",
+          "description": "Optional carbohydrate grams."
+        },
+        "fat_g": {
+          "type": "number",
+          "description": "Optional fat grams."
+        }
+      },
+      "required": [
+        "dish_name"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "type": "function",
+    "name": "log_dish_ingredients",
+    "description": "Log a new recent dish when the user mainly lists ingredients or foods eaten together.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "dish_name": {
+          "type": "string",
+          "description": "Optional short dish name if one is obvious."
+        },
+        "serving_size": {
+          "type": "string",
+          "description": "Optional serving description."
+        },
+        "ingredients": {
+          "type": "array",
+          "description": "Dish ingredients or foods mentioned in the meal.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "calories": {
+          "type": "number",
+          "description": "Optional calories if known."
+        },
+        "protein_g": {
+          "type": "number",
+          "description": "Optional protein grams."
+        },
+        "carbs_g": {
+          "type": "number",
+          "description": "Optional carbohydrate grams."
+        },
+        "fat_g": {
+          "type": "number",
+          "description": "Optional fat grams."
+        }
+      },
+      "required": [
+        "ingredients"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "type": "function",
+    "name": "append_to_recent_dish",
+    "description": "Append foods or ingredients to the most recent dish context when the user says follow-up phrases like also or add too.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "ingredients": {
+          "type": "array",
+          "description": "Dish ingredients or foods mentioned in the meal.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "serving_size": {
+          "type": "string",
+          "description": "Optional replacement serving description for the recent dish."
+        }
+      },
+      "required": [
+        "ingredients"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "type": "function",
+    "name": "update_recent_dish",
+    "description": "Update the most recent dish context for follow-up changes like add, remove, or revise details.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "dish_name": {
+          "type": "string",
+          "description": "Optional replacement dish name."
+        },
+        "serving_size": {
+          "type": "string",
+          "description": "Optional replacement serving description."
+        },
+        "ingredients": {
+          "type": "array",
+          "description": "Dish ingredients or foods mentioned in the meal.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "add_ingredients": {
+          "type": "array",
+          "description": "Dish ingredients or foods mentioned in the meal.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "remove_ingredients": {
+          "type": "array",
+          "description": "Dish ingredients or foods mentioned in the meal.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "calories": {
+          "type": "number",
+          "description": "Optional calories if known."
+        },
+        "protein_g": {
+          "type": "number",
+          "description": "Optional protein grams."
+        },
+        "carbs_g": {
+          "type": "number",
+          "description": "Optional carbohydrate grams."
+        },
+        "fat_g": {
+          "type": "number",
+          "description": "Optional fat grams."
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "type": "function",
+    "name": "get_recent_dishes",
+    "description": "Get the user's recent dish logs.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "limit": {
+          "type": "number",
+          "description": "Optional number of recent dishes to return."
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "type": "function",
+    "name": "get_dish_detail",
+    "description": "Get details for a specific recent dish, or the recent dish context if no identifier is needed.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "dish_name": {
+          "type": "string",
+          "description": "Optional dish name to look up."
+        },
+        "dish_id": {
+          "type": "string",
+          "description": "Optional exact dish id."
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "type": "function",
+    "name": "mark_dish_consumed",
+    "description": "Mark a dish as finished or consumed.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "dish_name": {
+          "type": "string",
+          "description": "Optional dish name to mark consumed."
+        },
+        "dish_id": {
+          "type": "string",
+          "description": "Optional exact dish id."
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "type": "function",
+    "name": "delete_dish_log",
+    "description": "Delete a recent dish log entry.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "dish_name": {
+          "type": "string",
+          "description": "Optional dish name to delete."
+        },
+        "dish_id": {
+          "type": "string",
+          "description": "Optional exact dish id."
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "type": "function",
+    "name": "add_dish_ingredients_to_shopping_list",
+    "description": "Add ingredients from a dish or recent dish context to the shopping list.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "dish_name": {
+          "type": "string",
+          "description": "Optional dish name to source ingredients from."
+        },
+        "dish_id": {
+          "type": "string",
+          "description": "Optional exact dish id."
+        },
+        "ingredients": {
+          "type": "array",
+          "description": "Dish ingredients or foods mentioned in the meal.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "store": {
+          "type": "string",
+          "description": "Optional store tab for the shopping items."
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "type": "function",
+    "name": "get_health_metrics",
+    "description": "Get the latest health metrics such as Kitchen IQ, UPF, points, and harmful ingredients.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "metric_name": {
+          "type": "string",
+          "description": "Optional specific metric such as Kitchen IQ, UPF, points, or harmful ingredients."
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "type": "function",
+    "name": "get_recipe_suggestions",
+    "description": "Get current recipe suggestions based on what is in the kitchen and what would need groceries.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "limit": {
+          "type": "number",
+          "description": "Optional maximum number of recipes to emphasize from each group."
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "type": "function",
+    "name": "get_recipe_detail",
+    "description": "Get details for one recipe suggestion, including ingredients, steps, and any missing grocery items.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "recipe_title": {
+          "type": "string",
+          "description": "The recipe title to look up."
+        },
+        "recipe_bucket": {
+          "type": "string",
+          "description": "Optional recipe group such as kitchen_only or need_grocery."
+        }
+      },
+      "required": [
+        "recipe_title"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "type": "function",
+    "name": "add_recipe_ingredients_to_shopping_list",
+    "description": "Add ingredients for a recipe suggestion to the shopping list, usually the missing grocery items.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "recipe_title": {
+          "type": "string",
+          "description": "The recipe title to source ingredients from."
+        },
+        "recipe_bucket": {
+          "type": "string",
+          "description": "Optional recipe group such as kitchen_only or need_grocery."
+        },
+        "only_missing": {
+          "type": "boolean",
+          "description": "If true, add only missing grocery items. If false, add the full ingredient list."
+        },
+        "store": {
+          "type": "string",
+          "description": "Optional store tab for the shopping items."
+        }
+      },
+      "required": [
+        "recipe_title"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "type": "function",
+    "name": "get_saved_recipes",
+    "description": "Get the user's saved recipes, including recipes imported from TikTok links, Instagram Reels, or recipe webpages.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "limit": {
+          "type": "number",
+          "description": "Optional number of saved recipes to return."
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "type": "function",
+    "name": "get_saved_recipe_detail",
+    "description": "Get one saved recipe by title, including ingredients, instructions, notes, and source link.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "recipe_title": {
+          "type": "string",
+          "description": "The saved recipe title to look up."
+        }
+      },
+      "required": [
+        "recipe_title"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "type": "function",
+    "name": "search_web_recipes",
+    "description": "Search the web for recipes matching a query. Use when the user asks for a specific recipe not found in their suggestions or saved recipes, or wants recipes for specific dietary needs, allergies, cuisines, or ingredients.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string",
+          "description": "The recipe search query, e.g. 'gluten free apple crumble' or 'quick chicken dinner for two'."
+        },
+        "max_results": {
+          "type": "number",
+          "description": "Optional maximum number of recipes to return, default 3."
+        }
+      },
+      "required": [
+        "query"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "type": "function",
+    "name": "save_recipe_from_tiktok",
+    "description": "Import a recipe from a TikTok link, Instagram Reel URL, or recipe webpage URL and save it to the user's saved recipes.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "url": {
+          "type": "string",
+          "description": "A TikTok recipe link to import."
+        }
+      },
+      "required": [
+        "url"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "type": "function",
+    "name": "save_generated_recipe",
+    "description": "Save a recipe that YOU generated or described in this chat (not from a URL and not one of their existing saved/suggested recipes) to the user's saved recipes. Pass the exact title, ingredients, and ordered steps you presented.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string",
+          "description": "The recipe title exactly as presented."
+        },
+        "ingredients": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Every ingredient line you listed."
+        },
+        "steps": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "The ordered preparation steps you listed."
+        }
+      },
+      "required": [
+        "title",
+        "ingredients",
+        "steps"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "type": "function",
+    "name": "remove_saved_recipe",
+    "description": "Remove a saved recipe by title from the user's saved recipes.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "recipe_title": {
+          "type": "string",
+          "description": "The saved recipe title to remove."
+        }
+      },
+      "required": [
+        "recipe_title"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "type": "function",
+    "name": "add_saved_recipe_ingredients_to_shopping_list",
+    "description": "Add ingredients from a saved recipe to the shopping list.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "recipe_title": {
+          "type": "string",
+          "description": "Optional saved recipe title to source ingredients from."
+        },
+        "store": {
+          "type": "string",
+          "description": "Optional store tab for the shopping items."
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "type": "function",
+    "name": "get_meal_plan",
+    "description": "Get the current meal plan, including current focus and regeneration status.",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    }
+  },
+  {
+    "type": "function",
+    "name": "refresh_meal_plan",
+    "description": "Regenerate the meal plan, optionally with a new focus such as higher protein or easier meals.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "focus": {
+          "type": "string",
+          "description": "Optional meal-plan focus such as higher protein, cheaper meals, or great overall health."
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "type": "function",
+    "name": "recommend_items_to_buy",
+    "description": "Recommend grocery items to buy next based on current kitchen and shopping context.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "limit": {
+          "type": "number",
+          "description": "Optional number of recommendations to return."
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "type": "function",
+    "name": "recommend_items_to_use_up",
+    "description": "Recommend kitchen items to use soon based on expiration, opened state, or low stock.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "limit": {
+          "type": "number",
+          "description": "Optional number of recommendations to return."
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "type": "function",
+    "name": "list_recipe_categories",
+    "description": "List the user's custom saved-recipe categories (their own tags/folders for organizing saved recipes). Use this to see what categories exist before offering to file a recipe.",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    }
+  },
+  {
+    "type": "function",
+    "name": "create_recipe_category",
+    "description": "Create a new custom saved-recipe category (tag/folder) by name, without filing any recipe into it yet. Idempotent — if a category with that name already exists it is returned unchanged. Use when the user explicitly asks to make/add a new category. This does NOT log a dish and does NOT save a recipe.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "category_name": {
+          "type": "string",
+          "description": "The name of the category to create, e.g. 'Seafood' or 'Weeknight Dinners'."
+        }
+      },
+      "required": [
+        "category_name"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "type": "function",
+    "name": "move_recipe_to_category",
+    "description": "File saved recipe(s) into one of the user's custom recipe categories (tag/folder). Adds the tag without removing existing tags. If the named category doesn't exist yet, it is created automatically. Identify a single recipe by title (recipe_name), or file several at once with recipe_names (an array of titles). This does NOT log a dish and does NOT save a new recipe.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "recipe_name": {
+          "type": "string",
+          "description": "A single saved recipe's title to file (use the exact title, e.g. the recipe you just saved)."
+        },
+        "recipe_names": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Optional: file MULTIPLE saved recipes at once, by their titles. Each is resolved independently and reported per-recipe."
+        },
+        "recipe_id": {
+          "type": "string",
+          "description": "Optional saved recipe id, if known. When provided it is used instead of recipe_name to resolve a single recipe."
+        },
+        "category_name": {
+          "type": "string",
+          "description": "The custom category to file the recipe(s) under, e.g. 'Gluten-Free' or 'Weeknight Dinners'. Created if it doesn't exist."
+        }
+      },
+      "required": [
+        "category_name"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "type": "function",
+    "name": "get_meal_calendar",
+    "description": "View the user's planned meal calendar (recipes they've scheduled onto specific days and meal slots). Use this to see what's already planned before adding — e.g. to avoid double-booking a slot or to compose a plan. This is the hand-planned calendar, NOT the auto-generated meal plan (get_meal_plan).",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "start_date": {
+          "type": "string",
+          "description": "Optional start date (YYYY-MM-DD). Defaults to today."
+        },
+        "end_date": {
+          "type": "string",
+          "description": "Optional end date (YYYY-MM-DD). Defaults to about a week out."
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "type": "function",
+    "name": "add_recipe_to_meal_calendar",
+    "description": "Schedule ONE saved recipe onto the user's meal calendar for a specific date and meal slot. Resolve the recipe by title (recipe_name). This plans a meal to cook later — it does NOT log a dish the user ate and does NOT save a new recipe. Confirm only after the tool returns ok:true; if it returns recipe_not_found / recipe_ambiguous / invalid_date, say so honestly and do not claim it was scheduled.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "recipe_name": {
+          "type": "string",
+          "description": "The saved recipe's title to schedule."
+        },
+        "recipe_id": {
+          "type": "string",
+          "description": "Optional saved recipe id, if known (used instead of recipe_name)."
+        },
+        "plan_date": {
+          "type": "string",
+          "description": "The date to schedule it on (YYYY-MM-DD). Resolve relative dates like 'tomorrow' against today's date given in the system prompt."
+        },
+        "meal_slot": {
+          "type": "string",
+          "enum": [
+            "breakfast",
+            "lunch",
+            "dinner",
+            "snack"
+          ],
+          "description": "Which meal slot on that day."
+        }
+      },
+      "required": [
+        "plan_date",
+        "meal_slot"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "type": "function",
+    "name": "add_many_to_meal_calendar",
+    "description": "Schedule MULTIPLE saved recipes onto the meal calendar in one call. Each entry is resolved and written independently and reported per-entry (partial success is possible). Use this to commit a whole proposed plan AFTER the user has explicitly confirmed it. Plans meals to cook later — never a dish log or a recipe save.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "entries": {
+          "type": "array",
+          "description": "The recipes to schedule.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "recipe_name": {
+                "type": "string",
+                "description": "The saved recipe's title."
+              },
+              "recipe_id": {
+                "type": "string",
+                "description": "Optional saved recipe id."
+              },
+              "plan_date": {
+                "type": "string",
+                "description": "Date (YYYY-MM-DD)."
+              },
+              "meal_slot": {
+                "type": "string",
+                "enum": [
+                  "breakfast",
+                  "lunch",
+                  "dinner",
+                  "snack"
+                ],
+                "description": "Meal slot."
+              }
+            },
+            "required": [
+              "plan_date",
+              "meal_slot"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "entries"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "type": "function",
+    "name": "add_generated_recipes_to_meal_calendar",
+    "description": "Add recipes YOU composed yourself (not the user's saved recipes) to the meal calendar as MEAL-PLAN-ONLY entries. Use this when the user asks you to GENERATE/CREATE/'make me' a meal plan or recipes rather than schedule existing saved ones. Each entry carries the full recipe inline (title + ingredients + numbered instructions); it shows in the meal plan and renders on tap but does NOT create a saved recipe. Only call AFTER the user has explicitly confirmed the plan you proposed in text. Never a dish log or a recipe save. Written per-entry (partial success possible); report only what actually landed.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "entries": {
+          "type": "array",
+          "description": "The generated recipes to place on the calendar (max 21).",
+          "items": {
+            "type": "object",
+            "properties": {
+              "plan_date": {
+                "type": "string",
+                "description": "Date (YYYY-MM-DD). Resolve relative dates against today first."
+              },
+              "meal_slot": {
+                "type": "string",
+                "enum": [
+                  "breakfast",
+                  "lunch",
+                  "dinner",
+                  "snack"
+                ],
+                "description": "Meal slot."
+              },
+              "title": {
+                "type": "string",
+                "description": "The generated recipe's title (a real dish name, e.g. 'Lemon Garlic Chicken')."
+              },
+              "ingredients": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "The full ingredient list (each an item string). At least one required."
+              },
+              "instructions": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "The numbered preparation steps, each a string."
+              },
+              "notes": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Optional extra notes/tips."
+              },
+              "meal_category": {
+                "type": "string",
+                "description": "Optional category label. Never a reserved sentinel."
+              }
+            },
+            "required": [
+              "plan_date",
+              "meal_slot",
+              "title",
+              "ingredients"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "entries"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "type": "function",
+    "name": "move_meal_calendar_entry",
+    "description": "Move an already-scheduled meal calendar entry to a new date (and optionally a new meal slot). Identify the entry by entry_id if known, otherwise by title (plus from_date to disambiguate). If it can't be pinned down it returns entry_not_found / entry_ambiguous — say so honestly and do not claim it moved.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "entry_id": {
+          "type": "string",
+          "description": "The calendar entry's id, if known."
+        },
+        "title": {
+          "type": "string",
+          "description": "The scheduled recipe's title, if the id isn't known."
+        },
+        "from_date": {
+          "type": "string",
+          "description": "Optional current date (YYYY-MM-DD) of the entry, to disambiguate by title."
+        },
+        "from_meal_slot": {
+          "type": "string",
+          "enum": [
+            "breakfast",
+            "lunch",
+            "dinner",
+            "snack"
+          ],
+          "description": "Optional current meal slot, to disambiguate by title."
+        },
+        "new_date": {
+          "type": "string",
+          "description": "The new date to move it to (YYYY-MM-DD)."
+        },
+        "new_meal_slot": {
+          "type": "string",
+          "enum": [
+            "breakfast",
+            "lunch",
+            "dinner",
+            "snack"
+          ],
+          "description": "Optional new meal slot (keeps the current slot if omitted)."
+        }
+      },
+      "required": [
+        "new_date"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "type": "function",
+    "name": "remove_meal_calendar_entry",
+    "description": "Remove a scheduled entry from the user's meal calendar. Identify it by entry_id if known, otherwise by title (plus plan_date and/or meal_slot to disambiguate). If it can't be pinned down it returns entry_not_found / entry_ambiguous — say so honestly and do not claim it was removed.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "entry_id": {
+          "type": "string",
+          "description": "The calendar entry's id, if known."
+        },
+        "title": {
+          "type": "string",
+          "description": "The scheduled recipe's title, if the id isn't known."
+        },
+        "plan_date": {
+          "type": "string",
+          "description": "Optional date (YYYY-MM-DD) to disambiguate by title."
+        },
+        "meal_slot": {
+          "type": "string",
+          "enum": [
+            "breakfast",
+            "lunch",
+            "dinner",
+            "snack"
+          ],
+          "description": "Optional meal slot to disambiguate by title."
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+]
