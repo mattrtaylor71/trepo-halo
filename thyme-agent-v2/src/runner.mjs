@@ -1,3 +1,4 @@
+import {proposalSnapshot} from "./prepare-actions.mjs";
 import { Fault, key, scope, hash, now, publicError } from "./core.mjs";
 import { record } from "./store.mjs";
 import { recipeFromText } from "./recipe-text.mjs";
@@ -553,8 +554,8 @@ export class Runner {
             409,
           );
       }
-      const before = await this.gateway.read(a, p.resource);
-      if (fingerprint(before) !== p.beforeHash)
+      const before = await this.gateway.read(a, p.resource,p.readArgs||{});
+      if (fingerprint(p.fenceVersion===2?proposalSnapshot(p.action,p.args,before):before) !== p.beforeHash)
         throw new Fault(
           "stale_approval",
           "Your data changed after approval. Ask Thyme to prepare it again.",
@@ -590,7 +591,7 @@ export class Runner {
     }
     let after;
     try {
-      after = await this.gateway.read(a, p.resource);
+      after = await this.gateway.read(a, p.resource,p.readArgs||{});
     } catch {
       await this.uncertain(
         pk,
@@ -601,13 +602,22 @@ export class Runner {
       );
       return;
     }
-    const changed = verifyChange(
+    let changed = verifyChange(
       p.action,
       p.args,
       p.before,
       after,
       p.result,
     ).verified;
+    if (!changed && ["save_recipe_from_tiktok","refresh_meal_plan"].includes(p.action)) {
+      s = await this.progress(pk,s,"verifying",p.action==="refresh_meal_plan"?"Your meal plan is being prepared…":"Your recipe is being imported…");
+      // These existing app jobs are asynchronous. Only read again; never start
+      // the same import/generation twice because its first response was queued.
+      for(let attempt=0;attempt<5 && !changed;attempt++) {
+        await this.pause(2000);
+        try {after=await this.gateway.read(a,p.resource,p.readArgs||{}); changed=verifyChange(p.action,p.args,p.before,after,p.result).verified;} catch {break;}
+      }
+    }
     // An unchanged snapshot may be a legitimate no-op, but it is not proof of the requested effect.
     if (!changed) {
       await this.uncertain(
@@ -615,7 +625,9 @@ export class Runner {
         s,
         req,
         p,
-        "The server accepted the change, but the expected update is not visible yet. Check your data before retrying.",
+        ["save_recipe_from_tiktok","refresh_meal_plan"].includes(p.action)
+          ? "The app is still processing this request. Use Check result to look again; the request will not be sent twice."
+          : "The server accepted the change, but the expected update is not visible yet. Check your data before retrying.",
       );
       return;
     }

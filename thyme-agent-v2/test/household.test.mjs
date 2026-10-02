@@ -33,22 +33,18 @@ test('membership loss between checks fails closed',async()=>{
   const {gateway,state}=setup();state.members=['member'];
   await assert.rejects(gateway.read(actor,'kitchen'),{code:'membership'});
 });
-test('approved member item uses exact owning row while retaining acting user',async()=>{
-  const {gateway,state}=setup();
-  await gateway.mutate(actor,'update_item_details',{item_id:'b',new_name:'Fresh eggs'},'operation');
-  assert.equal(state.calls[0].userContext.tableOwnerId,'member');
-  assert.equal(state.calls[0].userContext.userId,'matt');
-  assert.equal(state.calls[0].userContext.requireExactKitchenId,true);
-  assert.equal(state.calls[0].mutationContext.actor,'matt');
-  assert.equal(actor.ctx.tableOwnerId,'matt');
+test('kitchen edits retain the acting user and exact reviewed ID/revision',async()=>{
+  const {gateway}=setup();let request;
+  gateway.appAPI=async(a,path,opts)=>{request={a,path,body:opts.body};return {operation_id:opts.body.operation_id,items:[{item:{_id:'b'}}]};};
+  await gateway.mutate(actor,'update_item_details',{item_id:'b',new_name:'Fresh eggs'},'operation',[{id:'b',amount_revision:9}]);
+  assert.equal(request.a.actor,'matt');assert.match(request.path,/kitchen\/matt/);
+  assert.deepEqual(request.body.items,[{item_id:'b',revision:9,fields:{product_name:'Fresh eggs'}}]);
 });
-test('missing, ambiguous and outside-household IDs cannot fall back to an item with the same name',async()=>{
-  const {gateway,state}=setup();
-  for (const item_id of [undefined,'foreign','gone'])
-    await assert.rejects(gateway.mutate(actor,'discard_item',{item_id,item_name:'Milk'},'operation'),{code:'item_changed'});
-  state.rows.push({...state.rows[0],owner_id:'member'});
-  await assert.rejects(gateway.mutate(actor,'discard_item',{item_id:'a'},'operation'),{code:'item_changed'});
-  assert.equal(state.calls.length,0);
+test('missing and ambiguous kitchen targets fail before an API call',async()=>{
+  const {gateway}=setup();let calls=0;gateway.appAPI=async()=>{calls++;};
+  for(const item_id of [undefined,'foreign','gone']) await assert.rejects(gateway.mutate(actor,'discard_item',{item_id,item_name:'Milk'},'operation',[{id:'a',amount_revision:1}]),{code:'ambiguous_item'});
+  await assert.rejects(gateway.mutate(actor,'discard_item',{item_id:'a'},'operation',[{id:'a',amount_revision:1},{id:'a',amount_revision:1}]),{code:'ambiguous_item'});
+  assert.equal(calls,0);
 });
 test('fresh inventory preserves zero, unknown amounts and dates, excludes bulky marketing fields, and never silently truncates',()=>{
   const k=[{id:'a',item_name:'Milk',quantity_value:0,is_opened:false,created_at:'2026-10-01',description:'noise'},{id:'b',item_name:'Eggs',quantity_value:null}];

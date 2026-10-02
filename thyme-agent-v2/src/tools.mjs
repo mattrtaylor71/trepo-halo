@@ -1,4 +1,6 @@
 import Ajv from "ajv";
+import {proposalReadArgs,proposalSnapshot,pageData} from "./prepare-actions.mjs";
+import { READ_TOOLS } from "./capabilities.mjs";
 import { Fault, id, key, scope, hash, now } from "./core.mjs";
 import { READS, resourceFor, collection, fingerprint } from "./gateway.mjs";
 import { createRecipe, patchRecipe, checkRecipe } from "./recipes.mjs";
@@ -23,6 +25,7 @@ export async function toolDefinitions(gateway) {
           resource: { type: "string", enum: READS },
           start_date: str,
           end_date: str,
+          query:str, limit:{type:"integer",minimum:1,maximum:100},offset:{type:"integer",minimum:0,maximum:100000}, max_results:{type:"integer",minimum:1,maximum:10},
         },
         ["resource"],
       ),
@@ -178,8 +181,9 @@ export class ToolGateway {
     if ((tool === "create_recipe" || tool === "edit_recipe" || tool.startsWith("request_")) &&
       (await readConversation(this.store, a, s.id)).pending_question?.requestId === s.activeRequest)
       throw new Fault("awaiting_clarification", "Wait for the user's answer before creating a recipe or preparing a change.");
-    if (tool === "read_trepo") {
-      const data = await this.gateway.read(a, args.resource, args);
+    if (tool === "read_trepo" || READ_TOOLS[tool]) {
+      let data = tool === "read_trepo" ? await this.gateway.read(a, args.resource, args) : await this.gateway.readTool(a,tool,args);
+      if(tool==="read_trepo" && ["dishes","discards","saved_recipes"].includes(args.resource)) data=pageData(data,args);
       const body = JSON.stringify(data);
       if (Buffer.byteLength(body) > 140000)
         return {
@@ -260,30 +264,11 @@ export class ToolGateway {
           proposal_id: pid,
           applied: false,
         };
-      const resource = resourceFor(name),
-        before = await this.gateway.read(a, resource),
-        beforeHash = fingerprint(before);
+      const resource = resourceFor(name), readArgs=proposalReadArgs(name,args),
+        before = await this.gateway.read(a, resource,readArgs);
       if (this.gateway.normalizeProposal)
         await this.gateway.normalizeProposal(name, args, a);
-      if (name.includes("shopping") && !name.startsWith("add_")) {
-        for (const item of args.items || [args]) {
-          const rows = collection(before).filter(
-            (x) =>
-              String(x.item_name || x.name)
-                .trim()
-                .toLowerCase() ===
-              String(item.item_name || "")
-                .trim()
-                .toLowerCase(),
-          );
-          if (rows.length !== 1)
-            throw new Fault(
-              "ambiguous_item",
-              "Read the shopping list and choose one exact, unique item name before preparing this change.",
-            );
-          item.item_name = rows[0].item_name || rows[0].name;
-        }
-      }
+      if (this.gateway.prepare) await this.gateway.prepare(a,name,args,before);
       // Freeze a single owned target before showing the approval. Never let a fuzzy name
       // select a different kitchen row at execution time.
       if (/^(update_item_|mark_item_|discard_item)/.test(name)) {
@@ -305,16 +290,17 @@ export class ToolGateway {
         args.item_id = String(rows[0].id || rows[0]._id);
       }
       let dietaryFence;
-      if (name === "add_generated_recipes_to_meal_calendar") {
+      if (["add_generated_recipes_to_meal_calendar","add_recipe_to_meal_calendar","add_many_to_meal_calendar","edit_saved_recipe"].includes(name)) {
         const prefs = await this.gateway.read(a, "preferences");
         dietaryFence = hash(prefs.dietary);
-        for (const entry of args.entries)
+        const checkedRecipes = name === "edit_saved_recipe" ? [{...collection(before).find(r=>String(r.id)===args.recipe_id),...args}] : args.entries;
+        for (const entry of checkedRecipes)
           checkRecipe(
             createRecipe({
               title: entry.title,
               servings: 1,
               ingredients: entry.ingredients,
-              steps: entry.instructions || [],
+              steps: entry.instructions || entry.steps || [],
             }),
             prefs.dietary,
           );
@@ -362,8 +348,10 @@ export class ToolGateway {
         args,
         action: name,
         resource,
-        before,
-        beforeHash,
+        before:proposalSnapshot(name,args,before),
+        beforeHash:fingerprint(proposalSnapshot(name,args,before)),
+        fenceVersion:2,
+        readArgs,
         at: now(),
         validUntil: Date.now() + 30 * 60000,
       };
@@ -383,6 +371,7 @@ export class ToolGateway {
 function describe(name, args, names) {
   if (name.startsWith("clear_"))
     return `Remove all ${names.length} current items: ${names.slice(0, 15).join(", ")}${names.length > 15 ? "…" : ""}.`;
+  if (args.targets) return `${name === "rename_shopping_list" ? "Move" : "Remove"} ${args.targets.length} items${args.store ? " in " + args.store : ""}: ${args.targets.map(x=>x.item_name).join(", ")}.`;
   if (args.items)
     return args.items
       .map((x) =>

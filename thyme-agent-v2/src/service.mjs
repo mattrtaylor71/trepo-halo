@@ -1,3 +1,4 @@
+import {proposalSnapshot} from "./prepare-actions.mjs";
 import {
   Fault,
   id,
@@ -250,8 +251,8 @@ export class Service {
       );
       return this.session(a, sid);
     }
-    const fresh = await this.gateway.read(a, p.resource);
-    if (fingerprint(fresh) !== p.beforeHash)
+    const fresh = await this.gateway.read(a, p.resource,p.readArgs||{});
+    if (fingerprint(p.fenceVersion===2?proposalSnapshot(p.action,p.args,fresh):fresh) !== p.beforeHash)
       throw new Fault(
         "stale_approval",
         "Your data changed since this proposal. Ask Thyme to prepare it again.",

@@ -309,7 +309,7 @@ test("removed indirect calendar action cannot report success", () =>
     ).verified,
     false,
   ));
-test("clear all is unavailable until target fencing is implemented", async () => {
+test("clear all is discoverable only as a reviewed request", async () => {
   const r = await setup();
   assert.equal(
     r.definitions.some(
@@ -317,7 +317,7 @@ test("clear all is unavailable until target fencing is implemented", async () =>
         t.name === "request_clear_kitchen_inventory" ||
         t.name === "request_clear_shopping_list",
     ),
-    false,
+    true,
   );
 });
 test("timeout exhaustion preserves resume identity and blocks new messages", async () => {
@@ -452,7 +452,7 @@ test("inline calendar checks every ingredient and distinct entry", () => {
     false,
   );
 });
-test("unscoped legacy dish tools and mutable source shortcuts are not exposed", async () => {
+test("scoped dish and frozen source adapters are discoverable, but timestamps never prove consumption", async () => {
   const r = await setup();
   for (const name of [
     "mark_dish_consumed",
@@ -465,7 +465,7 @@ test("unscoped legacy dish tools and mutable source shortcuts are not exposed", 
   ])
     assert.equal(
       r.definitions.some((t) => t.name === "request_" + name),
-      false,
+      true,
     );
   assert.equal(
     verifyChange(

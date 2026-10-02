@@ -1,6 +1,8 @@
 import fs from "node:fs";
 import { Fault, hash } from "../src/core.mjs";
-import { ACTIONS } from "../src/gateway.mjs";
+import { catalog } from "../src/capabilities.mjs";
+import { prepareAction } from "../src/prepare-actions.mjs";
+import { ACTIONS, TrepoGateway } from "../src/gateway.mjs";
 export const ACTOR = {
   actor: "fixture-matt",
   household: "fixture-home",
@@ -66,6 +68,7 @@ export class FixtureGateway {
       meal_plan: { status: "ready" },
       dishes: [],
       discards: [],
+      recipe_categories:{categories:[],assignments:{}},
     };
   }
   async init() {}
@@ -88,21 +91,10 @@ export class FixtureGateway {
     return structuredClone(this.data[resource]);
   }
   async definitions() {
-    return JSON.parse(
-      fs.readFileSync(
-        new URL("../vendor/tool-definitions.json", import.meta.url),
-      ),
-    )
-      .filter((t) => ACTIONS.includes(t.name))
-      .map((t) => ({
-        ...t,
-        name: "request_" + t.name,
-        description:
-          "Propose a change for user review. Does not apply yet. " +
-          t.description,
-        defer_loading: true,
-      }));
+    return catalog(JSON.parse(fs.readFileSync(new URL("../vendor/tool-definitions.json",import.meta.url))),ACTIONS);
   }
+  async prepare(a,name,args,before) {return prepareAction(this,a,name,args,before);}
+  async readTool(a,name,args) {return TrepoGateway.prototype.readTool.call(this,a,name,args);}
   async mutate(a, action, args, operationId) {
     await this.check(a);
     this.writes++;

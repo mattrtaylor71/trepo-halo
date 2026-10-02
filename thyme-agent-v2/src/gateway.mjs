@@ -1,3 +1,6 @@
+import { READ_TOOLS, LEGACY_WRITES, EXTRA_ACTIONS, catalog } from "./capabilities.mjs";
+import { personalWrite, shoppingWrite, discardWrite, categoryWrite, discardFields, operationUUID } from "./app-writes.mjs";
+import { prepareAction, exact, rowID, storeName, pageData } from "./prepare-actions.mjs";
 import { saveCanonical } from "./canonical-save.mjs";
 import { pathToFileURL } from "node:url";
 import { resolve } from "node:path";
@@ -19,9 +22,9 @@ export const READS = [
   "calendar",
   "dishes",
   "discards",
-  "preferences",
+  "preferences", "stores", "recipe_categories", "health", "web_recipes", "buy_suggestions", "use_up_suggestions",
 ];
-export const ACTIONS = [
+export const ACTIONS = [...LEGACY_WRITES, ...EXTRA_ACTIONS,
   "add_to_shopping_list",
   "add_many_to_shopping_list",
   "update_shopping_item_store",
@@ -45,6 +48,8 @@ export const ACTIONS = [
 ];
 export function resourceFor(name) {
   if (name.includes("shopping")) return "shopping";
+  if (name.includes("recipe_category") || name === "move_recipe_to_category") return "recipe_categories";
+  if (name.includes("discard") && name !== "discard_item") return "discards";
   if (
     name.includes("kitchen") ||
     /^(check_in_|update_item_|mark_item_|discard_item)/.test(name)
@@ -65,6 +70,7 @@ export function collection(x) {
     "dishes",
     "saved_recipes",
     "results",
+    "categories",
   ])
     if (Array.isArray(x?.[k])) return x[k];
   return [];
@@ -190,7 +196,7 @@ export class TrepoGateway {
     let result;
     switch (resource) {
       case "kitchen":
-        result = (await this.kitchenRows(a)).map((row) => this.data.mapKitchenRow(row));
+        result = (await this.kitchenRows(a)).map((row) => ({...this.data.mapKitchenRow(row), amount_revision:Number(row.amount_revision), reference_amount:row.reference_amount==null?null:Number(row.reference_amount)}));
         break;
       case "shopping":
         result = await this.mysql.withDbConnection(async (c) => {
@@ -213,6 +219,7 @@ export class TrepoGateway {
         result = await this.data.getMealPlan(a.ctx, o);
         break;
       case "calendar":
+        if(args.entry_id) {result=await this.calendarEntry(a,args.entry_id);break;}
         result = await this.data.getMealCalendar(
           a.ctx,
           {
@@ -228,11 +235,40 @@ export class TrepoGateway {
         );
         break;
       case "dishes":
-        result = await this.data.getRecentDishes(a.ctx, { ...o, limit: 100 });
+        result = await this.personalDishes(a);
         break;
       case "discards":
-        result = await this.data.getRecentDiscards(a.ctx, { ...o, limit: 100 });
+        result = await this.mysql.withDbConnection(async c=> {
+          const table=a.actor+"_discards";
+          if(!/^[a-zA-Z0-9_-]{1,64}$/.test(a.actor)) throw new Fault("identity","Invalid account.",403);
+          if(!await this.mysql.tableExists(c,table)) return [];
+          const [rows]=await c.execute(`SELECT * FROM \`${table}\` WHERE action='IN' ORDER BY _createdDate DESC,_id`);
+          return rows.map(discardFields);
+        },o);
         break;
+      case "stores": {
+        const items = await this.read(a, "shopping");
+        result = { stores: [...new Set(items.map(r=>storeName(r.store)))] };
+        break;
+      }
+      case "recipe_categories": result = await this.data.listRecipeCategories(a.ctx,o); break;
+      case "health": result = await this.data.getHealthMetrics(a.ctx,o); break;
+      case "web_recipes": result = await this.data.searchWebRecipes(a.ctx,args,o); break;
+      case "buy_suggestions": {
+        const [kitchen,shopping]=await Promise.all([this.read(a,"kitchen"),this.read(a,"shopping")]);
+        const listed=new Set(shopping.map(r=>String(r.item_name).trim().toLowerCase()));
+        result={items:kitchen.filter(r=>!listed.has(String(r.item_name).trim().toLowerCase()) &&
+          (r.quantity_value===0 || (r.fill_percent!=null && r.fill_percent<=25))).slice(0,10).map(r=>({item_id:r.id,item_name:r.item_name,reason:"Recorded amount is low; check whether you want to restock."})),
+          note:"These are measured low-stock candidates, not dietary recommendations. For recipe groceries compare the exact recipe with the fresh kitchen and shopping data; never assume an unrecorded amount is low."};
+        break;
+      }
+      case "use_up_suggestions": {
+        const kitchen=await this.read(a,"kitchen");
+        result={items:kitchen.filter(r=>r.expiration_date || r.is_opened).sort((x,y)=>String(x.expiration_date||"9999").localeCompare(String(y.expiration_date||"9999"))).slice(0,10).map(r=>({item_id:r.id,item_name:r.item_name,expiration_date:r.expiration_date,is_opened:r.is_opened,
+          reason:r.expiration_date?"Check the recorded date and condition before using.":"Opened item; check condition and storage before using."})),
+          note:"Dates are estimates, not a guarantee of food safety. Do not recommend eating an item past its usable life."};
+        break;
+      }
       case "preferences":
         result = {
           dietary: await this.data.getDietaryPreferences(a.ctx, o),
@@ -254,11 +290,34 @@ export class TrepoGateway {
       if (!ids.includes(a.actor))
         throw new Fault("membership", "Your household changed. Refresh your kitchen.", 403);
       const [rows] = await c.execute(
-        `SELECT * FROM shared_kitchen WHERE owner_id IN (${ids.map(() => '?').join(',')}) AND action='IN' ORDER BY COALESCE(_updatedDate,_createdDate) DESC,_id,owner_id`,
+        `SELECT k.*,COALESCE(e.revision,0) AS amount_revision,e.reference_amount FROM shared_kitchen k LEFT JOIN kitchen_item_edits e ON e.item_id=CONVERT(k._id USING utf8mb4) COLLATE utf8mb4_unicode_ci WHERE k.owner_id IN (${ids.map(() => '?').join(',')}) AND k.action='IN' ORDER BY COALESCE(k._updatedDate,k._createdDate) DESC,k._id,k.owner_id`,
         ids,
       );
       return rows;
     }, { env: this.env, strict: true });
+  }
+  async calendarEntry(a,id) {
+    if(!/^[a-zA-Z0-9_-]{1,64}$/.test(a.actor)) throw new Fault("identity","Invalid account.",403);
+    const dates=await this.mysql.withDbConnection(async c=> {
+      const [members]=await c.execute("SELECT user_id FROM new_users WHERE COALESCE(NULLIF(owner_id,''),user_id)=?",[a.household]);
+      const ids=[...new Set([a.actor,a.household,...members.map(x=>x.user_id)])],dates=[];
+      if(await this.mysql.tableExists(c,"shared_meal_calendar")) {
+        const [rows]=await c.execute(`SELECT plan_date FROM shared_meal_calendar WHERE _id=? AND owner_id IN (${ids.map(()=>"?").join(",")})`,[id,...ids]);dates.push(...rows.map(r=>r.plan_date));
+      }
+      const table=a.actor+"_meal_calendar";
+      if(await this.mysql.tableExists(c,table)) {
+        const [rows]=await c.execute(`SELECT plan_date FROM \`${table}\` WHERE _id=?`,[id]);dates.push(...rows.map(r=>r.plan_date));
+      }
+      return [...new Set(dates.map(d=>new Date(d).toISOString().slice(0,10)))];
+    },{env:this.env});
+    const entries=[];
+    // SQL only locates dates. The app endpoint remains authoritative for which
+    // entries this member may see; it also handles shared/per-user read modes.
+    for(const date of dates) {
+      const data=await this.data.getMealCalendar(a.ctx,{start_date:date,end_date:date},{env:this.env,strict:true});
+      entries.push(...collection(data).filter(r=>rowID(r)===String(id)));
+    }
+    return {entries:[...new Map(entries.map(r=>[rowID(r),r])).values()]};
   }
   async dietary(a) {
     await this.check(a);
@@ -292,7 +351,7 @@ export class TrepoGateway {
     );
   }
   async normalizeProposal(name, args, a) {
-    if (name.includes("shopping")) {
+    if (name.includes("shopping") && !["remove_shopping_list","rename_shopping_list"].includes(name)) {
       await this.init();
       for (const item of args.items || [args])
         if (item.store)
@@ -342,16 +401,68 @@ export class TrepoGateway {
     const raw = this.defs
       .buildChatTools()
       .map((t) => ({ type: "function", ...t.function }));
-    return raw
-      .filter((t) => ACTIONS.includes(t.name))
-      .map((t) => ({
-        ...t,
-        name: "request_" + t.name,
-        description:
-          "Propose for user review; DOES NOT apply yet. " + t.description,
-        defer_loading: true,
-      }));
+    return catalog(raw, ACTIONS);
   }
+  async personalDishes(a) {
+    if (!/^[a-zA-Z0-9_-]{1,64}$/.test(a.actor)) throw new Fault("identity","Invalid account.",403);
+    return this.mysql.withDbConnection(async c=> {
+      const table=a.actor+"_dishes";
+      if(!await this.mysql.tableExists(c,table)) return {items:[],count:0};
+      const [rows]=await c.execute(`SELECT * FROM \`${table}\` ORDER BY COALESCE(_updatedDate,_createdDate) DESC,_id`);
+      return {items:rows.map(r=>({...this.data.mapDishRow(r)})),count:rows.length};
+    },{env:this.env});
+  }
+  async readTool(a,name,args) {
+    const resource=READ_TOOLS[name];
+    if(!resource) throw new Fault("unknown_tool","That read is unavailable.");
+    const data=await this.read(a,resource,args);
+    if(name==="search_kitchen_item") return {items:collection(data).filter(r=>args.item_id?rowID(r)===args.item_id:r.item_name.toLowerCase().includes(String(args.item_name||"").toLowerCase()))};
+    if(name==="get_saved_recipe_detail") return {recipe:exact(collection(data),args.recipe_id,args.recipe_title)};
+    if(name==="get_dish_detail") return {dish:exact(collection(data),args.dish_id,args.dish_name,"dish_name")};
+    if(name==="get_recipe_detail") return {recipe:exact([...(data.kitchen_only||[]),...(data.need_grocery||[]),...collection(data)],null,args.recipe_title)};
+    if(["get_recent_dishes","get_recent_discards","get_saved_recipes"].includes(name)) return pageData(data,args);
+    if(args.limit && Array.isArray(data)) return data.slice(0,Math.min(100,args.limit));
+    return data;
+  }
+  async prepare(a,name,args,before) { return prepareAction(this,a,name,args,before); }
+  async kitchenEdit(a,name,args,operationId,expected) {
+    const old=exact(collection(expected),args.item_id);
+    const fields={};
+    const map={new_name:"product_name",location:"storage_location",expiration_date:"product_expiration"};
+    for(const k of ["new_name","brand","category","location","expiration_date","is_opened","quantity_value","quantity_unit"])
+      if(args[k]!==undefined) fields[map[k]||k]=args[k];
+    if(name==="mark_item_opened") fields.is_opened=true;
+    if(args.fill_percent!==undefined) {
+      if(!old.reference_amount) throw new Fault("amount","Set a measured amount before adjusting its percentage.");
+      fields.quantity_value=Math.round(old.reference_amount*args.fill_percent)/100;
+      fields.quantity_unit=args.quantity_unit||old.quantity_unit;
+    }
+    if(args.remaining_quantity!==undefined && fields.quantity_value===undefined)
+      throw new Fault("amount","Specify a numerical amount and its unit.");
+    if(fields.quantity_value!==undefined) fields.quantity_unit=fields.quantity_unit||old.quantity_unit;
+    if(!Object.keys(fields).length || !Number.isSafeInteger(old.amount_revision)) throw new Fault("revision","Refresh this kitchen item before changing it.",409);
+    let body={operation_id:operationUUID(a.actor,operationId),kind:"edit",items:[{item_id:args.item_id,revision:old.amount_revision,fields}]};
+    if(fields.quantity_value===0) {
+      if(Object.keys(fields).some(k=>!["quantity_value","quantity_unit"].includes(k))) throw new Fault("amount","Empty the item separately from changes to its details.");
+      const known=old.quantity_value>0 && old.quantity_unit;
+      body={operation_id:body.operation_id,kind:known?"consume":"discard",items:[{item_id:args.item_id,revision:old.amount_revision,
+        ...(known?{amount:old.quantity_value,expected_amount:old.quantity_value,unit:old.quantity_unit}:{})}]};
+    }
+    const result=await this.appAPI(a,`/kitchen/${encodeURIComponent(a.actor)}?amount_operation=v1`,{method:"POST",body});
+    if(result.operation_id!==body.operation_id || result.items?.length!==1 || result.items[0]?.item?._id!==args.item_id)
+      throw new Fault("unconfirmed","The kitchen result could not be confirmed.",503);
+    return {ok:true,toolResult:result};
+  }
+  async appAPI(a,path,{method="GET",body}={}) {
+    await this.check(a);
+    const base=new URL(this.env.HOUSEHOLD_API_BASE_URL || "https://7tn3gvwvh7.execute-api.us-east-1.amazonaws.com");
+    if(base.protocol!=="https:" || base.username || base.password || base.search || base.hash) throw new Fault("configuration","App connection unavailable.",503);
+    const response=await fetch(base.href.replace(/\/$/,"")+path,{method,redirect:"error",signal:AbortSignal.timeout(25000),headers:{"content-type":"application/json"},...(body?{body:JSON.stringify(body)}:{})});
+    let result;try{result=await response.json();}catch{throw new Fault("unconfirmed","The app response could not be read.",503);}
+    if(!response.ok) throw new Fault("app_request",result.error||result.message||"The app could not complete this request.",response.status);
+    return result;
+  }
+
   async mutate(a, name, args, operationId, expected) {
     a = await this.check(a);
     if (name === "save_generated_recipe")
@@ -363,23 +474,33 @@ export class TrepoGateway {
       return this.controlMemory(a, args, operationId, expected);
     if (!ACTIONS.includes(name))
       throw new Fault("tool_forbidden", "That action is not available.", 403);
-    let context = a.ctx;
-    if (/^(update_item_|mark_item_|discard_item)/.test(name)) {
-      // The legacy resolver searches one member at a time. Resolve the exact
-      // approved ID inside the current household before selecting that member.
-      // Never fall back to a same-name item when an ID disappeared.
-      const rows = (await this.kitchenRows(a)).filter((r) => String(r._id) === String(args.item_id));
-      if (!args.item_id || rows.length !== 1)
-        throw new Fault("item_changed", "That kitchen item changed. Refresh and review it again.", 409);
-      context = { ...a.ctx, tableOwnerId: rows[0].owner_id, requireExactKitchenId: true };
+    if (["edit_saved_recipe","remove_saved_recipe","log_dish_from_voice","log_dish_ingredients","append_to_recent_dish","update_recent_dish","update_dish","mark_dish_consumed","delete_dish_log"].includes(name))
+      return this.mysql.withDbConnection(c=>personalWrite(c,a,name,args,operationId,collection(expected)),{env:this.env});
+    if (["update_shopping_item","update_shopping_item_store","update_many_shopping_item_stores","mark_shopping_item_bought","mark_shopping_item_unbought","remove_from_shopping_list","rename_shopping_list","remove_shopping_list","clear_shopping_list"].includes(name))
+      return this.mysql.withDbConnection(c=>shoppingWrite(c,a,name,args,collection(expected),operationId),{env:this.env});
+    if (/^(update_item_|mark_item_)/.test(name)) return this.kitchenEdit(a,name,args,operationId,expected);
+    if (["delete_recent_discard","clear_recent_discards"].includes(name))
+      return this.mysql.withDbConnection(c=>discardWrite(c,a,args,collection(expected)),{env:this.env});
+    if (["move_recipe_to_category","create_recipe_category"].includes(name))
+      return this.mysql.withDbConnection(c=>categoryWrite(c,a,args),{env:this.env});
+    if (["clear_kitchen_inventory","discard_item"].includes(name)) {
+      const selected=name==="discard_item"?[exact(collection(expected),args.item_id)]:collection(expected);
+      if(!selected.length || selected.some(r=>!Number.isSafeInteger(r.amount_revision))) throw new Fault("revision","Refresh the kitchen before removing items.",409);
+      const body={operation_id:operationUUID(a.actor,operationId),kind:"discard",items:selected.map(r=>({item_id:rowID(r),revision:r.amount_revision}))};
+      const result=await this.appAPI(a,`/kitchen/${encodeURIComponent(a.actor)}?amount_operation=v1`,{method:"POST",body});
+      if(result.operation_id!==body.operation_id) throw new Fault("unconfirmed","The kitchen result could not be confirmed.",503);
+      return {ok:true,toolResult:result};
     }
+    if(name === "create_shopping_list" || name.includes("ingredients_to_shopping_list")) { name="add_many_to_shopping_list"; args={items:args.items}; }
+    if(name === "add_recipe_to_meal_calendar" || name === "add_many_to_meal_calendar") { name="add_generated_recipes_to_meal_calendar"; args={entries:args.entries}; }
+    const requestedAt=new Date().toISOString();
     const result = await this.actions.executeToolAction({
       toolName: name,
       args,
       env: { ...this.env, ACTION_MODE: "real" },
-      userContext: context,
+      userContext: a.ctx,
       responseSurface: "app",
-      mutationContext: { requestId: operationId, actor: a.actor },
+      mutationContext: { requestId: operationId, actor: a.actor, operations:new Map(), editIntents:new Map() },
       sourceTranscript:
         "User approved the exact changes in the private Thyme tester." + (args.item_id ? " Item " + args.item_id : ""),
     });
@@ -389,7 +510,7 @@ export class TrepoGateway {
         result?.error || "The change could not be applied.",
         409,
       );
-    return result;
+    return {...result,requestedAt};
   }
   async controlMemory(a, args, operationId, expected) {
     if (!SOFT.includes(args.key))

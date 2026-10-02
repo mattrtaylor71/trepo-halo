@@ -1,0 +1,38 @@
+# Thyme private pilot: app tool parity
+
+Prepared October 2, 2026 for Matt. Implementation and automated testing complete; deployment is recorded separately in the private pilot receipt. This change is on `codex/thyme-agent-v2`, without a merge or changes to public Thyme/iOS routes.
+
+## Capability map
+
+| Area | Available in the new pilot | Persistence / safeguards |
+|---|---|---|
+| Shopping | Pull list; suggest groceries; add items; create, rename or remove a store group; edit name/quantity/store; check/uncheck; remove/clear | Exact reviewed IDs; current household membership; supports actor-only shared mirrors plus per-member app tables; transactional history snapshots before deletes. Empty lists are not representable in the app. |
+| Kitchen | Read/search; check in one/many items; edit name, brand, category, quantity/unit, storage, opened state or expiry; remove one/clear | Existing check-in adapter; canonical amount-operation endpoint for edits/removal; exact item ID/revision and deterministic operation ID. Preserves manual edits against delayed enrichment, including shelf-life metadata. Clear limited to canonical 100-item atomic batches. |
+| Recipes | Read saved/suggested recipes; search web; create/edit conversation recipes; save exact conversation recipe; edit/delete saved recipe; categories; ingredient-to-list actions; supported social URL imports | No second generation during save. Targeted saved edits preserve unrequested fields. Availability cache invalidated after edits; tags added atomically without replacing concurrent tags. Imports stay processing until a complete ready recipe is visible. |
+| Meal plans | Read generated plan and dated calendar; create dated plans from full recipe snapshots; schedule saved recipes; move/delete entries; request automatic-plan refresh | Dated recipes are stored in the app calendar after approval. Exact-ID moves locate their current date for lookup/readback. Automatic recommendations are a distinct async job; a started job is not reported finished. |
+| Dish Log | Read/search/paginate personal log; log a dish/ingredients; append or edit exact dish; mark consumed/delete; add ingredients to shopping | Personal actor scope, both app stores; unknown nutrition stays unknown. Repair absent owned shared mirror transactionally; no unrelated kitchen deduction. |
+| Context | Food preferences/family memory, recent discards, health metrics, current stores, buy/use-up candidates | Live scoped reads; estimated dates never establish food safety. Discard history removal freezes every approved ID and preserves later additions. |
+
+The 57 pinned original Thyme tools each have a discoverable equivalent; six additional explicit editing/group tools bring this to 63 domain tools (18 reads, 45 reviewed writes). Including conversation-memory/recipe/read helpers, the agent exposes 71 tool definitions. Catalog parity is not a claim of all app-screen parity. Purchases, outgoing messages, native capture, push controls, account deletion and device commands need separate integrations and are not exposed.
+
+## Verification performed
+
+- **100 automated unit/regression checks passed.** Existing session ownership, auth, dietary checks, recipe consistency, proposal/recovery and legacy tests remain green. New cases cover all 57 tool names, exact IDs, duplicate names, frozen ingredient sources, calendar dates and distant moves, full discard targets, default Groceries groups, missing-only additions, pagination and derived amount labels.
+- **31 isolated MySQL checks passed.** Recipe save/edit/delete; dish log/edit/consume/delete; both app stores; ownership and membership changes; absent-mirror repair with database timestamps; correct old household mirror shape; category additions; exact discard removal beyond 20 rows; delete history; stale edits; partial-batch rollback. Three cases run the complete proposal → approval → worker → SQL → readback flow. No mutation occurs before approval; duplicate worker delivery does not repeat the write.
+- **7 canonical kitchen database checks passed** using the actual serving amount-operation module and MySQL triggers. Quantity/name/storage/opened/expiry persistence, replay receipts, shelf-life timestamps/provenance, delayed enrichment protection, stale revisions, whole-batch rollback on a foreign item, zero-quantity archival and removal of an owned household member's item.
+- **6 compatibility checks passed with the actual pinned legacy adapter**, not a reimplementation: add shopping item → edit → check → uncheck → delete/history; kitchen check-in verifies quantity/unit/storage and terminal analysis status. Fixtures contain synthetic data only.
+- **39 model behavior scenarios eventually passed**, 13 each on GPT-6.1 Sol, GPT-6 Astra and GPT-6 Luna. Tested list reads/groups, kitchen add/edit/remove, saved recipe edits, dish log/edit, saved-recipe scheduling, recipe groceries and a complete two-day calendar plan. Every scenario produced the correct read/proposal without account writes. Seven initial calls returned provider internal errors; fresh reruns passed. These are not represented as first-attempt passes. Median successful times were 16.4s Sol, 13.1s Luna and 14.3s Astra; two-day plans took approximately 39–44s. This small sample is not a speed/reliability guarantee.
+- **Live reads** matched Matt's 60 kitchen items, 4 shopping items, 56 saved recipes, 231 personal dishes and 3 calendar entries at qualification time. Canonical kitchen GET was reachable and every kitchen row had a valid revision. Live schema checks confirmed the needed app/history/category tables. Counts are time-specific, not permanent account facts.
+- **In-host gstack adversarial review:** ten identified defects repaired and rechecked; final reviewer found no remaining P1/P2 findings. Tests/fixtures were reviewed in summary mode, without outside-provider review or live mutations.
+
+## Release boundaries and remaining validation
+
+This is the private web pilot. Existing public Thyme and App Store/TestFlight builds are unchanged. Automated real-account tests use a read-only qualification principal; all writes above use isolated synthetic fixtures. No customer data was changed to produce these results. A founder's manually approved pilot write is real and should appear in Trepo.
+
+Before broader rollout, exercise harmless founder-approved writes in the actual iOS app, including refresh/relaunch; qualify asynchronous import/generation jobs and every legacy batch error path end-to-end; cover newly created accounts whose historical per-user tables have not yet been provisioned. A missing history table currently blocks a removal rather than silently discarding its history. Tool exposure does not establish that every tool has received live production mutation testing.
+
+Uncertain or partial effects never earn “Done.” The existing adapters are not all a single cross-service transaction; recovery checks the saved request instead of automatically repeating it. The provider had transient failures during qualification, so these changes do not imply the model service cannot fail.
+
+Evidence resides under `Documents/Codex/2026-10-01/thyme-agent-pilot/evidence/tool-parity-20261002/`. The local private cache also retains the pinned artifact, serving kitchen source hashes, model diagnostics and revision-guarded deployment receipt. No credentials or customer conversation contents are committed here.
+
+Company context consulted: `apps/trepo/sources/20260923/ios/trepo-v0/technical-overview`; reviewer also used `apps/trepo/sources/20260923/ios/docs/codex/proposed-fixes`. Historical context was checked against serving code. No automatic gbrain save or brand change.

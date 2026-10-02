@@ -23,7 +23,7 @@ with zipfile.ZipFile(base) as src,zipfile.ZipFile(out,'w',zipfile.ZIP_DEFLATED) 
    store=b'async function resolveShoppingStore(connection, context, requestedStore) {'
    if content.count(store)!=1:raise SystemExit('Store normalizer export patch changed.')
    content=content.replace(store,b'export async function resolveShoppingStore(connection, context, requestedStore) {')
-   for mapper in [b'mapKitchenRow',b'mapShoppingRow']:
+   for mapper in [b'mapKitchenRow',b'mapShoppingRow',b'mapDishRow']:
     old=b'function '+mapper+b'(row) {'
     if content.count(old)!=1:raise SystemExit('Row mapper export changed.')
     content=content.replace(old,b'export '+old)
