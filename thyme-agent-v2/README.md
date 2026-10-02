@@ -1,6 +1,6 @@
 # Thyme private agent pilot
 
-Matt approved this pilot on October 1, 2026. This replaces neither the public Thyme endpoint nor the native iOS app. The private tester is https://trepo-thyme-pilot.trepo-2057.chatgpt.site. It requires the site owner's ChatGPT sign-in and a server-side account binding. Current web audience: Matt only.
+Matt approved this pilot on October 1, 2026. This does not replace the public Thyme endpoint. An opt-in native integration is now implemented for Matt only; see [native pilot status and verification limits](docs/NATIVE-PILOT-2026-10-02.md). The private tester is https://trepo-thyme-pilot.trepo-2057.chatgpt.site. It requires the site owner's ChatGPT sign-in and a server-side account binding. Current web audience: Matt only.
 
 ## What is implemented
 
@@ -14,11 +14,11 @@ Matt approved this pilot on October 1, 2026. This replaces neither the public Th
 
 ## Scope boundaries
 
-Purchases, outgoing messages, native camera/microphone entry, notifications, account deletion and Kitchen Assistant device control are not implied by tool parity. Those require separate native/transactional integrations. “All 57” refers to the pinned existing Thyme catalog, not every screen or every possible app operation. Recipe ingredients and calendar entries are frozen as explicit reviewed content before approval. Dish Log and saved-library edits are scoped to the enrolled actor. Empty store groups cannot persist because the app derives groups from list items.
+Purchases, outgoing messages, native camera entry, notifications, account deletion and Kitchen Assistant device control are not implied by tool parity. Recorded voice is provided separately by the private native pilot. Those require separate native/transactional integrations. “All 57” refers to the pinned existing Thyme catalog, not every screen or every possible app operation. Recipe ingredients and calendar entries are frozen as explicit reviewed content before approval. Dish Log and saved-library edits are scoped to the enrolled actor. Empty store groups cannot persist because the app derives groups from list items.
 
 URL imports and automatic meal-plan refresh use existing asynchronous jobs. A queued response never earns a completed receipt; the pilot polls/read-reconciles without resubmitting uncertain writes. Other legacy batch adapters can partially succeed; the pilot reports an unconfirmed result unless every requested change is visible. See [TOOL-PARITY-REPORT.md](TOOL-PARITY-REPORT.md) for coverage and boundaries.
 
-Existing app routes, login compatibility and unrelated production resources are unchanged. Native iOS integration, voice entry, push notifications and a general customer rollout are separate work. This is not evidence that every legacy action or every iOS build has been tested.
+Existing app routes, login compatibility and unrelated production resources are unchanged. Native iOS integration and voice entry are covered by the private native pilot status document. Push notifications and a general customer rollout remain separate work. This is not evidence that every legacy action or every iOS build has been tested.
 
 ## Runtime
 

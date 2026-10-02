@@ -6,7 +6,7 @@ import { Service } from "./service.mjs";
 import { Runner } from "./runner.mjs";
 import { Fault, verifyRequest, publicError, hash, scope } from "./core.mjs";
 let runtime;
-async function getRuntime() {
+export async function getRuntime() {
   if (runtime) return runtime;
   const store = new DynamoStore(process.env.STATE_TABLE),
     gateway = new TrepoGateway();
