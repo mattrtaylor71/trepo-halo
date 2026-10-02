@@ -3,7 +3,7 @@ import { record } from "./store.mjs";
 import { recipeFromText } from "./recipe-text.mjs";
 import { createRecipe, checkRecipe } from "./recipes.mjs";
 import { INSTRUCTIONS } from "./instructions.mjs";
-import { fingerprint } from "./gateway.mjs";
+import { fingerprint, collection } from "./gateway.mjs";
 import { verifyChange } from "./verification.mjs";
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 export class Runner {
@@ -88,8 +88,18 @@ export class Runner {
         await this.apply(a, s, req);
         return;
       }
-      s = await this.progress(pk, s, "running", "Checking your request…");
-      const preferences = await this.gateway.read(a, "preferences");
+      s = await this.progress(pk, s, "running", "Checking your kitchen and shopping list…");
+      const [preferences, kitchen, shopping] = await Promise.all([
+        this.gateway.read(a, "preferences"),
+        this.gateway.read(a, "kitchen"),
+        this.gateway.read(a, "shopping"),
+      ]);
+      const asOf = now();
+      s = await this.progress(pk, s, "running", "Putting your answer together…", [
+        `Checked ${collection(kitchen).length} kitchen items`,
+        `Checked ${collection(shopping).length} shopping items`,
+        "Checked food preferences",
+      ]);
       if (!req.preferencesHash) {
         req = await this.store.put(
           pk,
@@ -126,6 +136,9 @@ export class Runner {
         timezone: "America/Los_Angeles",
         current_preferences: preferences.dietary,
         food_memory: preferences.memory,
+        // A fresh, complete, compact snapshot saves model round trips. It is
+        // rebuilt per request and never reuses a previous turn's stock.
+        current_inventory: compactInventory(kitchen, shopping, asOf),
         user_message: req.text,
       });
       if (!req.submitted) {
@@ -201,7 +214,10 @@ export class Runner {
       let rounds = 0;
       while (this.clock() - started < this.budgetMs) {
         await this.gateway.check(a);
-        const turns = await this.provider.turns(s.providerId);
+        const [turns, state] = await Promise.all([
+          this.provider.turns(s.providerId),
+          this.provider.session(s.providerId),
+        ]);
         const candidates = turns.filter(
           (t) => !(req.baselineTurns || []).includes(t.id),
         );
@@ -221,13 +237,18 @@ export class Runner {
             { ...req, turnId: turn.id },
             req.version,
           );
-        const state = await this.provider.session(s.providerId);
         if (state.status === "failed")
           throw new Fault(
             "agent_failed",
             "Thyme could not continue this conversation. Start a new conversation; your prior work is saved.",
             502,
           );
+        // Concurrent provider reads can observe the action before its turn is
+        // visible in the paginated turn list. Wait for ownership evidence.
+        if (!req.turnId && (state.required_actions || []).length) {
+          await this.pause(600);
+          continue;
+        }
         for (const action of state.required_actions || []) {
           if (action.turn_id !== req.turnId)
             throw new Fault(
@@ -246,13 +267,17 @@ export class Runner {
               "tool_limit",
               "This request needs more steps than the pilot allows. Try a smaller part.",
             );
-          s = await this.progress(pk, s, "running", progressText(action.name));
+          s = await this.progress(pk, s, "running", progressText(action.name, action.arguments));
           const result = await this.tools.call({
             actor: a,
             session: s,
             action,
           });
           await this.provider.result(s.providerId, action, result);
+          s = await this.progress(pk, s, "running", "Putting your answer together…", [
+            ...(s.progressDetails || []),
+            ...(result.ok ? [completedText(action, result)].filter(Boolean) : []),
+          ].slice(-3));
         }
         if (turn) {
           if (["completed", "failed", "cancelled"].includes(turn.status)) {
@@ -292,7 +317,7 @@ export class Runner {
             return;
           }
         }
-        await this.pause(900);
+        if (!(state.required_actions || []).length) await this.pause(600);
       }
       throw new Fault(
         "timeout",
@@ -340,9 +365,9 @@ export class Runner {
       });
     }
   }
-  async progress(pk, s, status, progress) {
-    if (s.status === status && s.progress === progress) return s;
-    return this.store.put(pk, key(s.id), { ...s, status, progress }, s.version);
+  async progress(pk, s, status, progress, progressDetails = s.progressDetails || []) {
+    if (s.status === status && s.progress === progress && hash(s.progressDetails || []) === hash(progressDetails)) return s;
+    return this.store.put(pk, key(s.id), { ...s, status, progress, progressDetails }, s.version);
   }
   async saveMessages(pk, s, req, items, dietary) {
     let n = 0;
@@ -603,10 +628,35 @@ export class Runner {
     });
   }
 }
-function progressText(name) {
-  if (name === "read_trepo") return "Checking your current Trepo data…";
+function progressText(name, args = {}) {
+  if (name === "read_trepo") return ({
+    kitchen: "Checking your kitchen…", shopping: "Checking your shopping list…",
+    saved_recipes: "Looking through your saved recipes…", preferences: "Checking your food preferences…",
+    suggestions: "Finding recipe ideas…", calendar: "Checking your meal calendar…",
+  })[args.resource] || "Checking your current Trepo data…";
   if (name.includes("recipe")) return "Working on your recipe…";
   if (name.startsWith("request_"))
     return "Preparing the changes for your review…";
   return "Working through your request…";
+}
+
+function completedText(action, result) {
+  if (action.name === "read_trepo") {
+    const label = { kitchen: "kitchen items", shopping: "shopping items", saved_recipes: "saved recipes" }[action.arguments.resource];
+    return label ? `Checked ${collection(result.data).length} ${label}` : "Checked your Trepo data";
+  }
+  if (action.name === "create_recipe" || action.name === "edit_recipe") return "Recipe ready";
+  if (action.name.startsWith("request_")) return "Change ready for your review";
+  return null;
+}
+
+export function compactInventory(kitchen, shopping, asOf) {
+  const pick = (row, keys) => Object.fromEntries(keys.filter((k) => row[k] !== undefined && row[k] !== null).map((k) => [k, row[k]]));
+  const snapshot = {
+    asOf, complete: true,
+    kitchen: collection(kitchen).map((row) => pick(row, ["id", "item_name", "brand", "variant", "category", "quantity_value", "quantity_unit", "fill_percent", "remaining_quantity", "is_opened", "storage_location", "expiration_date", "created_at", "ingredients"])),
+    shopping: collection(shopping).map((row) => pick(row, ["shopping_id", "household_item_uuid", "item_name", "quantity", "store", "action"])),
+  };
+  // Never silently truncate a kitchen and call it complete.
+  return Buffer.byteLength(JSON.stringify(snapshot)) <= 60000 ? snapshot : { asOf, complete: false, use_read_trepo: true };
 }

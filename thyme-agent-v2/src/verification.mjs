@@ -89,7 +89,7 @@ export function verifyChange(action, args, before, after, result) {
   else if (action === "mark_shopping_item_unbought")
     verified =
       matches(a, args).length === 1 &&
-      ["1", "out", "unbought", "unchecked"].includes(
+      ["1", "out", "unbought", "unchecked", "added"].includes(
         normalized(matches(a, args)[0].action),
       );
   else if (

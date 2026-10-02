@@ -67,6 +67,46 @@ test("every turn includes authoritative review state even when no proposal exist
     assert.equal(r.gateway.writes, 0);
   }
 });
+test("each turn gets new complete stock and truthful progress, not a stale previous snapshot", async () => {
+  const r = await setup();
+  const received = [], progress = [];
+  const provider = fakeProvider();
+  const create = provider.create, send = provider.send;
+  provider.create = async (body) => { received.push(JSON.parse(body.input)); return create(body); };
+  provider.send = async (sid, input, requestId) => { received.push(JSON.parse(input)); return send(sid,input,requestId); };
+  const put = r.store.put.bind(r.store);
+  r.store.put = async (pk,sk,value,version) => { if (value.type === 'session') progress.push(structuredClone(value)); return put(pk,sk,value,version); };
+  const s = await message(r);
+  await new Runner({...r,provider}).run(pk,'first-request');
+  r.gateway.data.kitchen = [{id:'new',item_name:'New groceries',quantity_value:null}];
+  await r.service.message(ACTOR,{sessionId:s.id,requestId:'second-request',text:'What can I cook now?'});
+  await new Runner({...r,provider}).run(pk,'second-request');
+  assert.equal(received[0].current_inventory.kitchen.length,3);
+  assert.deepEqual(received[1].current_inventory.kitchen.map(x=>x.item_name),['New groceries']);
+  assert.equal(received[1].current_inventory.complete,true);
+  assert.ok(progress.some(x=>x.progressDetails?.includes('Checked 3 kitchen items')));
+  assert.ok(progress.some(x=>x.progressDetails?.includes('Checked 1 kitchen items')));
+  assert.equal(r.gateway.writes,0);
+});
+test("inventory read failure never claims it was checked or sends a guessed snapshot", async()=>{
+  const r = await setup(); const s = await message(r);
+  r.gateway.failRead = 'kitchen';
+  let sent = false;
+  await assert.rejects(new Runner({...r,provider:{create:async()=>{sent=true}}}).run(pk,'first-request'), /read failure/);
+  const out = await r.service.session(ACTOR,s.id);
+  assert.equal(sent,false);
+  assert.deepEqual(out.progressDetails,[]);
+});
+test("parallel provider reads wait for turn ownership rather than acting on an unowned action", async()=>{
+  const r = await setup(), s = await message(r), provider = fakeProvider();
+  let reads=0, pauses=0;
+  provider.turns=async()=>++reads===1?[]:[{id:'old-turn',status:'completed'}];
+  provider.session=async()=>({required_actions:reads===1?[{turn_id:'old-turn',type:'function_call',name:'read_trepo',arguments:{resource:'kitchen'},call_id:'early'}]:[]});
+  await new Runner({...r,provider,pause:async()=>{pauses++}}).run(pk,'first-request');
+  assert.equal((await r.service.session(ACTOR,s.id)).status,'completed');
+  assert.equal(pauses,1);
+  assert.equal((await r.store.list(pk,key(s.id,'T')+'#')).length,0);
+});
 for (const [allergy, line] of [
   ["peanut", "peanut butter mixed with almond milk"],
   ["soy", "1 cup soy milk"],

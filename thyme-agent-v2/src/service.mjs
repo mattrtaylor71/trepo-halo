@@ -170,6 +170,7 @@ export class Service {
         status: "queued",
         activeRequest: rid,
         progress: "Request saved. Thyme is getting started…",
+        progressDetails: [],
         error: null,
         updatedAt: now(),
       };

@@ -185,15 +185,23 @@ export class TrepoGateway {
     );
   }
   async read(a, resource, args = {}) {
-    await this.check(a);
+    a = await this.check(a);
     const o = { env: this.env, strict: true, all: true };
     let result;
     switch (resource) {
       case "kitchen":
-        result = await this.data.getKitchenItemsFull(a.ctx, o);
+        result = (await this.kitchenRows(a)).map((row) => this.data.mapKitchenRow(row));
         break;
       case "shopping":
-        result = await this.data.getShoppingItems(a.ctx, o);
+        result = await this.mysql.withDbConnection(async (c) => {
+          // The app's list is mirrored per member. Read this actor's current
+          // rows once, not every member's copies or the removed history.
+          const [rows] = await c.execute(
+            "SELECT * FROM shared_shopping_list WHERE owner_id=? AND action IN ('ADDED','CHECKED') ORDER BY COALESCE(updated_at,created_at,_createdDate) DESC,_id",
+            [a.actor],
+          );
+          return rows.map((row) => this.data.mapShoppingRow(row));
+        }, o);
         break;
       case "saved_recipes":
         result = await this.savedRecipes(a);
@@ -235,6 +243,22 @@ export class TrepoGateway {
         throw new Fault("unknown_tool", "That data source is unavailable.");
     }
     return result;
+  }
+  async kitchenRows(a) {
+    return this.mysql.withDbConnection(async (c) => {
+      const [members] = await c.execute(
+        "SELECT user_id FROM new_users WHERE COALESCE(NULLIF(owner_id,''),user_id)=? ORDER BY user_id",
+        [a.household],
+      );
+      const ids = [...new Set(members.map((m) => m.user_id))];
+      if (!ids.includes(a.actor))
+        throw new Fault("membership", "Your household changed. Refresh your kitchen.", 403);
+      const [rows] = await c.execute(
+        `SELECT * FROM shared_kitchen WHERE owner_id IN (${ids.map(() => '?').join(',')}) AND action='IN' ORDER BY COALESCE(_updatedDate,_createdDate) DESC,_id,owner_id`,
+        ids,
+      );
+      return rows;
+    }, { env: this.env, strict: true });
   }
   async dietary(a) {
     await this.check(a);
@@ -329,7 +353,7 @@ export class TrepoGateway {
       }));
   }
   async mutate(a, name, args, operationId, expected) {
-    await this.check(a);
+    a = await this.check(a);
     if (name === "save_generated_recipe")
       return this.mysql.withDbConnection(
         (c) => saveCanonical(c, a, args, operationId),
@@ -339,15 +363,25 @@ export class TrepoGateway {
       return this.controlMemory(a, args, operationId, expected);
     if (!ACTIONS.includes(name))
       throw new Fault("tool_forbidden", "That action is not available.", 403);
+    let context = a.ctx;
+    if (/^(update_item_|mark_item_|discard_item)/.test(name)) {
+      // The legacy resolver searches one member at a time. Resolve the exact
+      // approved ID inside the current household before selecting that member.
+      // Never fall back to a same-name item when an ID disappeared.
+      const rows = (await this.kitchenRows(a)).filter((r) => String(r._id) === String(args.item_id));
+      if (!args.item_id || rows.length !== 1)
+        throw new Fault("item_changed", "That kitchen item changed. Refresh and review it again.", 409);
+      context = { ...a.ctx, tableOwnerId: rows[0].owner_id, requireExactKitchenId: true };
+    }
     const result = await this.actions.executeToolAction({
       toolName: name,
       args,
       env: { ...this.env, ACTION_MODE: "real" },
-      userContext: a.ctx,
+      userContext: context,
       responseSurface: "app",
       mutationContext: { requestId: operationId, actor: a.actor },
       sourceTranscript:
-        "User approved the exact changes in the private Thyme tester.",
+        "User approved the exact changes in the private Thyme tester." + (args.item_id ? " Item " + args.item_id : ""),
     });
     if (!result?.ok)
       throw new Fault(

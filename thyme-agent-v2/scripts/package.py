@@ -23,6 +23,18 @@ with zipfile.ZipFile(base) as src,zipfile.ZipFile(out,'w',zipfile.ZIP_DEFLATED) 
    store=b'async function resolveShoppingStore(connection, context, requestedStore) {'
    if content.count(store)!=1:raise SystemExit('Store normalizer export patch changed.')
    content=content.replace(store,b'export async function resolveShoppingStore(connection, context, requestedStore) {')
+   for mapper in [b'mapKitchenRow',b'mapShoppingRow']:
+    old=b'function '+mapper+b'(row) {'
+    if content.count(old)!=1:raise SystemExit('Row mapper export changed.')
+    content=content.replace(old,b'export '+old)
+   old=b'''    if (rowById?.action === "IN") {
+      return [rowById];
+    }
+  }
+
+  if (!resolved.item_name)'''
+   if content.count(old)!=1:raise SystemExit('Exact kitchen ID resolver patch changed.')
+   content=content.replace(old,old.replace(b'    }\n  }',b'    }\n    if (context?.requireExactKitchenId) return [];\n  }'))
   dst.writestr(name,content)
  for directory in ['src','node_modules']:
   for f in sorted((root/directory).rglob('*')):
