@@ -123,7 +123,7 @@ export async function toolDefinitions(gateway) {
     },
     ...(await gateway.definitions()),
     { type: "tool_search" },
-  ];
+  ].filter(t => gateway.env?.HOUSEHOLD_BRAIN_V2 !== '1' || t.name !== 'request_update_food_memory');
 }
 export class ToolGateway {
   constructor({ store, gateway, definitions }) {

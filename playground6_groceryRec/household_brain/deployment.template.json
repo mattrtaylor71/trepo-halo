@@ -1,0 +1,58 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "Private household brain reader and coalescing worker. Capture, schedule and serving initially off.",
+  "Parameters": {
+    "ArtifactBucket": {"Type": "String"},
+    "ArtifactKey": {"Type": "String"},
+    "DBSecretArn": {"Type": "String", "NoEcho": true},
+    "PrivateSubnetIds": {"Type": "List<AWS::EC2::Subnet::Id>"},
+    "SecurityGroupIds": {"Type": "List<AWS::EC2::SecurityGroup::Id>"},
+    "WorkerScheduleState": {"Type": "String", "Default": "DISABLED", "AllowedValues": ["DISABLED", "ENABLED"]}
+  },
+  "Resources": {
+    "RuntimeRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "AssumeRolePolicyDocument": {"Version": "2012-10-17", "Statement": [{"Effect": "Allow", "Principal": {"Service": "lambda.amazonaws.com"}, "Action": "sts:AssumeRole"}]},
+        "ManagedPolicyArns": ["arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole"],
+        "Policies": [{"PolicyName": "DatabaseSecret", "PolicyDocument": {"Version": "2012-10-17", "Statement": [{"Effect": "Allow", "Action": "secretsmanager:GetSecretValue", "Resource": {"Ref": "DBSecretArn"}}]}}]
+      }
+    },
+    "Reader": {
+      "Type": "AWS::Lambda::Function",
+      "Properties": {
+        "Runtime": "python3.12", "Handler": "household_brain.runtime.reader_handler", "Timeout": 15, "MemorySize": 512,
+        "ReservedConcurrentExecutions": 10,
+        "Role": {"Fn::GetAtt": ["RuntimeRole", "Arn"]},
+        "Code": {"S3Bucket": {"Ref": "ArtifactBucket"}, "S3Key": {"Ref": "ArtifactKey"}},
+        "Environment": {"Variables": {"HOUSEHOLD_BRAIN_DB_SECRET": {"Ref": "DBSecretArn"}}},
+        "VpcConfig": {"SubnetIds": {"Ref": "PrivateSubnetIds"}, "SecurityGroupIds": {"Ref": "SecurityGroupIds"}}
+      }
+    },
+    "Worker": {
+      "Type": "AWS::Lambda::Function",
+      "Properties": {
+        "Runtime": "python3.12", "Handler": "household_brain.runtime.worker_handler", "Timeout": 120, "MemorySize": 512,
+        "ReservedConcurrentExecutions": 1,
+        "Role": {"Fn::GetAtt": ["RuntimeRole", "Arn"]},
+        "Code": {"S3Bucket": {"Ref": "ArtifactBucket"}, "S3Key": {"Ref": "ArtifactKey"}},
+        "Environment": {"Variables": {"HOUSEHOLD_BRAIN_DB_SECRET": {"Ref": "DBSecretArn"}}},
+        "VpcConfig": {"SubnetIds": {"Ref": "PrivateSubnetIds"}, "SecurityGroupIds": {"Ref": "SecurityGroupIds"}}
+      }
+    },
+    "RefreshSchedule": {
+      "Type": "AWS::Events::Rule",
+      "Properties": {"ScheduleExpression": "rate(1 minute)", "State": {"Ref": "WorkerScheduleState"},
+        "Targets": [{"Id": "BrainRefresh", "Arn": {"Fn::GetAtt": ["Worker", "Arn"]}}]}
+    },
+    "SchedulePermission": {
+      "Type": "AWS::Lambda::Permission",
+      "Properties": {"FunctionName": {"Ref": "Worker"}, "Action": "lambda:InvokeFunction", "Principal": "events.amazonaws.com", "SourceArn": {"Fn::GetAtt": ["RefreshSchedule", "Arn"]}}
+    },
+    "WorkerFailures": {
+      "Type": "AWS::CloudWatch::Alarm",
+      "Properties": {"AlarmDescription": "Household brain refresh failed; read repair remains active.", "Namespace": "AWS/Lambda", "MetricName": "Errors", "Statistic": "Sum", "Period": 300, "EvaluationPeriods": 1, "Threshold": 1, "ComparisonOperator": "GreaterThanOrEqualToThreshold", "TreatMissingData": "notBreaching", "Dimensions": [{"Name": "FunctionName", "Value": {"Ref": "Worker"}}]}
+    }
+  },
+  "Outputs": {"ReaderArn": {"Value": {"Fn::GetAtt": ["Reader", "Arn"]}}, "WorkerArn": {"Value": {"Fn::GetAtt": ["Worker", "Arn"]}}}
+}

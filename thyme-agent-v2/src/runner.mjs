@@ -110,12 +110,21 @@ export class Runner {
           req.version,
         );
       }
+      if (this.gateway.env?.HOUSEHOLD_BRAIN_V2 === '1' && !Object.hasOwn(req,'memoryFence')) {
+        // Persist the ORIGINAL input boundary before provider submission. A resumed
+        // request must not validate newly read memory against an older model answer.
+        req=await this.store.put(pk,'Q#'+rid,{...req,memoryFence:preferences.memory?.fence || null},req.version);
+      }
       const proposals = await this.store.list(pk, key(s.id, "P") + "#");
       const receipts = proposals
         .filter((x) => x.status === "applied")
         .slice(-12)
         .map((x) => ({ action: x.action, args: x.args, status: x.status }));
-      const agentVersion = hash([INSTRUCTIONS, this.definitions]);
+      const memoryBoundary=this.gateway.env?.HOUSEHOLD_BRAIN_V2 === '1'
+        ? [preferences.memory?.fence?.household,preferences.memory?.fence?.generation,
+           preferences.memory?.fence?.revision,{...preferences.memory,fence:undefined,
+             coverage:{...preferences.memory?.coverage,as_of:undefined,history_since:undefined}}] : null;
+      const agentVersion = hash(memoryBoundary ? [INSTRUCTIONS,this.definitions,memoryBoundary] : [INSTRUCTIONS,this.definitions]);
       let conversationHistory;
       // Instructions/tools are immutable at the provider. Upgrade only between
       // turns, preserving app history, recipes, approvals and explicit preferences.
@@ -313,6 +322,8 @@ export class Runner {
                 502,
               );
             const latest = await this.gateway.read(a, "preferences");
+            if (req.memoryFence && !await this.gateway.validateMemory(a,req.memoryFence))
+              throw new Fault('memory_changed','Your household information changed during this answer. Please try again.',409);
             if (hash(latest.dietary) !== req.preferencesHash)
               throw new Fault(
                 "preferences_changed",

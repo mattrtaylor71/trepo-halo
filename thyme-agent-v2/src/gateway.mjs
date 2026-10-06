@@ -130,6 +130,12 @@ export class TrepoGateway {
   }
   async memory(a) {
     const current = await this.check(a);
+    if (this.env.HOUSEHOLD_BRAIN_V2 === '1') {
+      const {householdBrain}=await import(pathToFileURL(this.root+'/playground12_voice_ack/trepo-quick-ack/lib/household-brain-client.mjs'));
+      const result=await householdBrain({operation:'context',actor:current.actor,household:current.household,audience:'personal',purpose:'thyme'},this.env,this.brainTransport);
+      return result ? {...result.context,fence:result.fence,enrolled:true,internallyManaged:true}
+        : {explicit_preferences:{},observations:{},enrolled:false,internallyManaged:true,available:false};
+    }
     return this.mysql.withDbConnection(
       async (c) => {
         const [states] = await c.execute(
@@ -189,6 +195,12 @@ export class TrepoGateway {
       },
       { env: this.env },
     );
+  }
+  async validateMemory(a,fence) {
+    const current=await this.check(a);
+    const {householdBrain}=await import(pathToFileURL(this.root+'/playground12_voice_ack/trepo-quick-ack/lib/household-brain-client.mjs'));
+    const result=await householdBrain({operation:'validate',actor:current.actor,household:current.household,fence},this.env,this.brainTransport);
+    return result?.current===true;
   }
   async read(a, resource, args = {}) {
     a = await this.check(a);
@@ -513,6 +525,8 @@ export class TrepoGateway {
     return {...result,requestedAt};
   }
   async controlMemory(a, args, operationId, expected) {
+    if (this.env.HOUSEHOLD_BRAIN_V2 === '1')
+      throw new Fault('internally_managed','Food memory is managed by the Trepo team.',403);
     if (!SOFT.includes(args.key))
       throw new Fault(
         "memory_key",
