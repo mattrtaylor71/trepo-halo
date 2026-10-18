@@ -128,6 +128,13 @@ export class TrepoGateway {
       );
     return current;
   }
+  async history(a,args,fence) {
+    const current=await this.check(a);
+    const {lookupNativeHistory}=await import(pathToFileURL(this.root+'/playground12_voice_ack/trepo-quick-ack/lib/history-client.mjs'));
+    if(!fence || !await this.validateMemory(a,fence)) return {ok:false,error:"history_changed"};
+    const result=await lookupNativeHistory({args,env:this.env,userContext:current.ctx,fence,transport:this.brainTransport});
+    return result.ok ? result.toolResult : {ok:false,error:'history_unavailable',message:'Historical records are unavailable. Do not guess.'};
+  }
   async memory(a) {
     const current = await this.check(a);
     if (this.env.HOUSEHOLD_BRAIN_V2 === '1') {
