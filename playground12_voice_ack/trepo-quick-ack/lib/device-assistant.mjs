@@ -666,7 +666,7 @@ async function buildShoppingGroundingMessage(userContext, env) {
   }
 }
 
-async function buildKitchenGroundingMessage(userContext, env) {
+export async function buildKitchenGroundingMessage(userContext, env) {
   if (env?.ACTION_MODE !== "real" || !userContext?.ownerId) {
     return null;
   }
@@ -678,8 +678,9 @@ async function buildKitchenGroundingMessage(userContext, env) {
     // made Thyme suggest pantry-only / repetitive meals and claim it could only
     // see part of the kitchen).
     const items = await getKitchenItemsFull(userContext, { env });
-    if (!Array.isArray(items) || items.length === 0) {
-      return null;
+    if (!Array.isArray(items)) throw new Error("Invalid kitchen inventory result");
+    if (items.length === 0) {
+      return "Current household kitchen inventory was successfully checked: 0 active items. Prior conversation and remembered purchases do not establish current stock.";
     }
 
     const totalCount = items.length;
@@ -690,7 +691,7 @@ async function buildKitchenGroundingMessage(userContext, env) {
     const compactLines = remainingItems.map((item) => `- ${formatCompactKitchenGroundingLine(item)}`);
 
     const lines = [
-      `Current kitchen inventory (${totalCount} item${totalCount === 1 ? "" : "s"} total) for grounding food references, follow-up updates, meal ideas, and product-detail questions. This is your COMPLETE kitchen; you can see every item.`,
+      `Current kitchen inventory (${totalCount} item${totalCount === 1 ? "" : "s"} total) for grounding food references, follow-up updates, meal ideas, and product-detail questions. This is the current recorded inventory for the whole household, including items added by other members.`,
       `Detailed items (${detailedItems.length} most-recent, with full enrichment):`,
       ...detailedLines
     ];
@@ -704,7 +705,7 @@ async function buildKitchenGroundingMessage(userContext, env) {
 
     lines.push(
       "The detailed kitchen data may include item_id, brand, variant, category, price, ingredients, nutrition_summary, harmful_ingredients, UPF, quantity, location, expiration, and storage_guidance (how long items typically keep, storage zone, and timing).",
-      "Treat both the detailed and compact lists as fully visible inventory. Never say you can only see part of the kitchen, and draw on fridge and pantry items across the whole list (not just the most-recent ones) when suggesting meals or answering what the user has.",
+      "Treat both detailed and compact lists as current recorded household inventory. This fresh inventory supersedes earlier conversation claims about what is in stock. Draw on the whole list when answering what the user has. For category questions such as condiments, identify actual matching foods by name and type; do not substitute unrelated prepared meals or foods containing that condiment.",
       "If the user refers to food vaguely such as 'that rice', 'it', 'those', or a broad food name after a recent kitchen action, prefer the strongest current kitchen match.",
       "If multiple similar kitchen items match a broad reference, ask one short clarifying question and name the likely candidates."
     );
@@ -712,7 +713,7 @@ async function buildKitchenGroundingMessage(userContext, env) {
     return lines.join("\n");
   } catch (error) {
     console.warn("[WARN] kitchen grounding preload failed:", error?.message || error);
-    return null;
+    return "Current household kitchen inventory is unavailable. Do not claim the kitchen is empty, that an item is absent, or that you can see the complete kitchen. Retry a kitchen read if needed; if it fails, explain that you could not check current stock. Past conversation, purchases, and memory are not proof of current inventory.";
   }
 }
 

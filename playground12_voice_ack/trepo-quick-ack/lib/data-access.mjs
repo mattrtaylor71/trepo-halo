@@ -5,6 +5,7 @@
 // (voice dishes/discards/shopping go invisible again — regressions 07-02 / 07-06).
 // The trepo-voice-dualwrite-canary + alarm VoiceDualWriteMiss will catch a revert.
 import crypto from "node:crypto";
+import { readSharedHouseholdKitchen } from "./household-kitchen.mjs";
 import { saveKitchenEdit, renameReference, pickRenameByCreation, createKitchenMutationContext, prepareKitchenEdit } from "./kitchen-edit-client.mjs";
 import { InvokeCommand, LambdaClient } from "@aws-sdk/client-lambda";
 import {
@@ -3719,9 +3720,17 @@ function scoreUseUp(item, now) {
   return score;
 }
 
+// Legacy per-member tables are already replicated; shared storage requires a
+// current household read. Do not widen mutation selectors through this helper.
+async function getKitchenReadRows(connection, context) {
+  return WRITE_SHARED_ONLY
+    ? readSharedHouseholdKitchen(connection, context)
+    : getKitchenRowsFull(connection, resolveTableOwnerId(context));
+}
+
 export async function getKitchenItems(context, options = {}) {
   return withDbConnection(async (connection) => {
-    const rows = await getKitchenRows(connection, resolveTableOwnerId(context), options.limit);
+    const rows = (await getKitchenReadRows(connection, context)).slice(0, clampLimit(options.limit, 25, 100));
     const items = rows.map(mapKitchenRow);
     console.log("[DEBUG] kitchen items loaded:", JSON.stringify({
       ownerId: context?.ownerId || null,
@@ -3737,7 +3746,7 @@ export async function getKitchenItems(context, options = {}) {
 // compact tail so nothing in a large kitchen is invisible to Thyme.
 export async function getKitchenItemsFull(context, options = {}) {
   return withDbConnection(async (connection) => {
-    const rows = await getKitchenRowsFull(connection, resolveTableOwnerId(context));
+    const rows = await getKitchenReadRows(connection, context);
     const items = rows.map(mapKitchenRow);
     console.log("[DEBUG] kitchen items loaded (full):", JSON.stringify({
       ownerId: context?.ownerId || null,
@@ -3773,7 +3782,7 @@ export async function getKitchenOverview(context, options = {}) {
   const householdSummary = await buildHouseholdSummary(context, options);
   const summary = {
     household_size: householdSummary.household_size || context?.householdSize || 0,
-    kitchen_count: householdSummary.kitchen_count || totalCount,
+    kitchen_count: totalCount,
     shopping_count: householdSummary.shopping_count || 0,
     discard_count: householdSummary.discard_count || 0,
     recent_dish_count: householdSummary.recent_dish_count || 0,
@@ -3807,20 +3816,50 @@ export async function getKitchenOverview(context, options = {}) {
 
 export async function getKitchenItemById(context, itemId, options = {}) {
   return withDbConnection(async (connection) => {
-    const row = await findKitchenRowById(connection, resolveTableOwnerId(context), itemId);
+    const row = (await getKitchenReadRows(connection, context)).find(row => String(row._id) === String(itemId));
     return row ? mapKitchenRow(row) : null;
   }, options);
 }
 
 export async function searchKitchenItem(context, itemReference, options = {}) {
   return withDbConnection(async (connection) => {
-    const row = await resolveKitchenRowByReference(connection, context, itemReference);
+    const allRows = await getKitchenReadRows(connection, context);
+    const reference = normalizeKitchenReference(itemReference);
+    let row = reference.item_id ? allRows.find(row => String(row._id) === reference.item_id) : null;
+    if (!row && reference.item_name) {
+      const name = normalizeName(reference.item_name);
+      let matches = allRows.filter(row => normalizeName(row.product_name) === name);
+      if (!matches.length) {
+        const parts = name.split(/\s+/).filter(Boolean);
+        matches = allRows.filter(row => {
+          const candidate = normalizeName(row.product_name);
+          let offset = 0;
+          return parts.every(part => {
+            const index = candidate.indexOf(part, offset);
+            offset = index + part.length;
+            return index >= 0;
+          });
+        });
+      }
+      if (!matches.length) {
+        const ranked = rankKitchenRowMatches(allRows, reference.item_name);
+        const best = ranked[0]?.score || 0;
+        matches = ranked.filter(match => match.score >= KITCHEN_FUZZY_THRESHOLD
+          && best - match.score < KITCHEN_FUZZY_AMBIGUITY_DELTA).map(match => match.row);
+      }
+      const selected = pickKitchenRowBySelectionHint(matches, reference.selection_hint);
+      if (matches.length > 1 && !selected && !isHaloSurface(context)) {
+        throw createKitchenAmbiguityError(reference.item_name, matches);
+      }
+      row = selected || matches[0] || null;
+    }
     const item = row ? mapKitchenRow(row) : null;
     const requestedName = normalizeKitchenReference(itemReference).item_name;
     // On a miss, offer the closest in-kitchen items so Thyme can say "did you mean X?"
     const candidates = item
       ? []
-      : await findKitchenCandidateSummaries(connection, resolveTableOwnerId(context), requestedName);
+      : rankKitchenRowMatches(allRows, requestedName).slice(0, 5)
+          .map(match => summarizeKitchenRowForDisambiguation(match.row));
     console.log("[DEBUG] kitchen item searched:", JSON.stringify({
       ownerId: context?.ownerId || null,
       userId: context?.userId || null,
@@ -5902,7 +5941,7 @@ export async function listStoreTabs(context, options = {}) {
 
 export async function buildHouseholdSummary(context, options = {}) {
   return withDbConnection(async (connection) => {
-    const kitchen = await getKitchenRows(connection, resolveTableOwnerId(context), 100);
+    const kitchen = await getKitchenReadRows(connection, context);
     const discards = await getRecentDiscards(context, { ...options, limit: 10 });
     const dishes = await getRecentDishes(context, { ...options, limit: 10 });
     const shopping = await getShoppingItems(context, { ...options, limit: 50 });

@@ -47,6 +47,9 @@ function makeConn(rows) {
       if (u.startsWith("CREATE") || u.startsWith("ALTER")) return [{}];
       if (u.startsWith("INSERT")) return [{ insertId: 900, affectedRows: 1 }];
       if (u.startsWith("UPDATE") || u.startsWith("DELETE")) return [{ affectedRows: 1 }];
+      if (/FROM new_users actor/.test(norm)) {
+        return [rows.map(row => ({...row, _kitchen_scope_actor: "ownerA", _kitchen_scope_household: "ownerA"}))];
+      }
       if (u.startsWith("SELECT")) {
         if (/COUNT\(/i.test(norm) || /SELECT\s+1\b/i.test(norm)) return [[{ count: 1 }]];
         // Only kitchen reads (against shared_kitchen here) return inventory.
