@@ -1,3 +1,6 @@
+from family_brain import store as brain_store
+from family_brain.recipe_safety import _recipe_violates, _format_preferences_block
+from contextlib import contextmanager
 # meal_plan_generator/app.py - Async Lambda: read kitchen, GPT plan + 12 recipes, generate images, write {owner}_meal_plan
 import os
 import re
@@ -349,39 +352,41 @@ def _format_kitchen_for_prompt(items):
     return ', '.join(parts) if parts else 'No specific ingredients (suggest pantry staples)'
 
 
-def _set_status(conn, owner, status, error_message=None):
-    table = _meal_plan_table(owner)
+def _set_status(conn, owner, status, error_message=None, *, commit=True):
+    # SHARED ONLY (2026-08-18 cutover). Upsert, not UPDATE: on shared we can no longer rely on
+    # ensure-table + INSERT having guaranteed a row exists first.
     with conn.cursor() as cur:
         cur.execute(
-            f"UPDATE `{table}` SET status = %s, error_message = %s, _updatedDate = NOW() WHERE _id = 'current'",
-            (status, error_message)
+            "INSERT INTO shared_meal_plan (owner_id, _id, _owner, status, error_message, _createdDate, _updatedDate) "
+            "VALUES (%s, 'current', %s, %s, %s, NOW(), NOW()) "
+            "ON DUPLICATE KEY UPDATE status=VALUES(status), error_message=VALUES(error_message), _updatedDate=NOW()",
+            (owner, owner, status, error_message)
         )
-        conn.commit()
-    _dual_write_meal_plan_to_shared(conn, owner)
+        if commit:
+            conn.commit()
 
 
-def _set_empty(conn, owner, focus):
-    table = _meal_plan_table(owner)
+def _set_empty(conn, owner, focus, *, commit=True):
+    # SHARED ONLY (2026-08-18 cutover).
     with conn.cursor() as cur:
         cur.execute(
-            f"""
-            UPDATE `{table}`
-            SET status = 'empty',
-                focus = %s,
-                explanation_title = NULL,
-                explanation_paragraph = NULL,
-                plan = %s,
-                error_message = NULL,
-                _updatedDate = NOW()
-            WHERE _id = 'current'
+            """
+            INSERT INTO shared_meal_plan
+                (owner_id, _id, _owner, status, focus, explanation_title, explanation_paragraph,
+                 plan, error_message, _createdDate, _updatedDate)
+            VALUES (%s, 'current', %s, 'empty', %s, NULL, NULL, %s, NULL, NOW(), NOW())
+            ON DUPLICATE KEY UPDATE
+                status='empty', focus=VALUES(focus), explanation_title=NULL,
+                explanation_paragraph=NULL, plan=VALUES(plan), error_message=NULL,
+                _updatedDate=NOW()
             """,
-            (focus, json.dumps([]))
+            (owner, owner, focus, json.dumps([]))
         )
-        conn.commit()
-    _dual_write_meal_plan_to_shared(conn, owner)
+        if commit:
+            conn.commit()
 
 
-def _generate_plan_with_gpt(ingredients_list, focus):
+def _generate_plan_with_gpt(ingredients_list, focus, brain_prompt="", dietary_prompt=""):
     from openai import OpenAI, RateLimitError
     client = OpenAI(
         api_key=os.getenv('OPENAI_API_KEY'),
@@ -407,6 +412,8 @@ Coherence rules:
 - Meal plan slots are FOOD dishes, not beverages. If a beverage item exists, it can be omitted.
 - If a slot cannot be filled coherently with the available items, choose a different combination of available items (still only from the list + pantry)."""
     user = f"Kitchen grocery products (use only these, reference by exact product name in recipe ingredients; descriptions in parentheses clarify what each item is): {ingredients_str}\n\nUser focus: {focus}\n\nGenerate a 12-slot meal plan. Slots order: {slot_desc}. Return the JSON object only."
+    if brain_prompt or dietary_prompt:
+        user += '\n' + brain_prompt + '\n' + dietary_prompt
     # Retry generate AND parse (mirrors recipes_generator): a malformed-JSON LLM
     # response regenerates instead of throwing, so the alarm means "twice-failed",
     # not "one bad sample". Rate-limit handling preserved.
@@ -588,15 +595,15 @@ def handler(event, context):
     target_owners = [owner]
     try:
         if focus is None:
-            table = _meal_plan_table(owner)
+            # SHARED ONLY (2026-08-18 cutover). This was the single highest-risk read in the whole
+            # migration: it took `focus` from the PER-USER table with an existence check, and this
+            # service never had a READ_SHARED_MEAL_PLAN flag at all. Left as-is, every
+            # kitchen-triggered regeneration after the write cutover would have silently reset the
+            # user's focus text to DEFAULT_FOCUS with no error anywhere.
             with conn.cursor() as cur:
-                cur.execute("SELECT COUNT(*) AS n FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = %s", [table])
-                if cur.fetchone()['n'] > 0:
-                    cur.execute(f"SELECT focus FROM `{table}` WHERE _id = 'current'")
-                    row = cur.fetchone()
-                    focus = (row.get('focus') if row else None) or DEFAULT_FOCUS
-                else:
-                    focus = DEFAULT_FOCUS
+                cur.execute("SELECT focus FROM shared_meal_plan WHERE owner_id = %s", [owner])
+                row = cur.fetchone()
+                focus = (row.get('focus') if row else None) or DEFAULT_FOCUS
         focus = (focus or DEFAULT_FOCUS).strip() or DEFAULT_FOCUS
     except Exception as e:
         print(f'[meal_plan_generator] DB read focus: {e}')
@@ -609,43 +616,50 @@ def handler(event, context):
         print('[meal_plan_generator] BUCKET_NAME not set')
         return
 
-    owner_lock_name = _owner_lock_name(owner)
-    owner_lock_conn = _acquire_named_lock(owner_lock_name, OWNER_LOCK_TIMEOUT_SECONDS)
-    if owner_lock_conn is None:
+    target_owners = _get_household_member_ids(conn, owner)
+    household_locks = _acquire_household_locks(target_owners)
+    if household_locks is None:
         print(f'[meal_plan_generator] Skipping duplicate run owner={owner}')
         return
 
     conn = None
     try:
         conn = _mysql_conn()
-        target_owners = _get_household_member_ids(conn, owner)
-        for target_owner in target_owners:
-            _ensure_meal_plan_table(conn, target_owner)
-            table = _meal_plan_table(target_owner)
-            with conn.cursor() as cur:
-                cur.execute(f"SELECT _id FROM `{table}` WHERE _id = 'current'")
-                row = cur.fetchone()
-                if not row:
+        with _household_write(conn):
+            for target_owner in target_owners:
+                # SHARED ONLY (2026-08-18 cutover). Insert-if-absent: ON DUPLICATE KEY does a no-op
+                # self-assignment so an existing row keeps its focus and status untouched, exactly
+                # like the old "only INSERT when there is no 'current' row" behaviour.
+                with conn.cursor() as cur:
                     cur.execute(
-                        f"INSERT INTO `{table}` (_id, _owner, status, focus) VALUES ('current', %s, 'regenerating', %s)",
-                        (target_owner, focus)
+                        "INSERT INTO shared_meal_plan (owner_id, _id, _owner, status, focus, _createdDate, _updatedDate) "
+                        "VALUES (%s, 'current', %s, 'regenerating', %s, NOW(), NOW()) "
+                        "ON DUPLICATE KEY UPDATE owner_id = owner_id",
+                        (target_owner, target_owner, focus)
                     )
-                    conn.commit()
-            _set_status(conn, target_owner, 'regenerating')
-
+                _set_status(conn, target_owner, 'regenerating', commit=False)
         ingredients = _get_kitchen_ingredients(conn, owner)
         if len(ingredients) < MIN_KITCHEN_ITEMS:
-            for target_owner in target_owners:
-                _set_empty(conn, target_owner, focus)
+            with _household_write(conn):
+                for target_owner in target_owners:
+                    _set_empty(conn, target_owner, focus, commit=False)
             print(f'[meal_plan_generator] Not enough kitchen items owner={owner} count={len(ingredients)} min={MIN_KITCHEN_ITEMS}')
             return
-        gpt_out = _generate_plan_with_gpt(ingredients, focus)
+        brain_owner = brain_store.generation_subject(target_owners)
+        memory = brain_store.generation_context(conn, owner, target_owners, 'meal_plan')
+        prefs = brain_store.dietary_preferences(conn, owner) if brain_owner else None
+        gpt_out = _generate_plan_with_gpt(ingredients, focus, (memory or {}).get('prompt', ''), _format_preferences_block(prefs))
+        if prefs is not None and any(_recipe_violates(recipe, prefs) for recipe in (gpt_out.get('recipes') or [])):
+            raise ValueError('Meal plan did not satisfy current dietary preferences')
+        if memory and not brain_store.is_current(conn, memory['fence']):
+            raise ValueError('Food preferences changed during generation')
         recipes = gpt_out.get('recipes') or []
         if len(recipes) < 12:
             _report_backend_error('generate', owner_id=owner, code='insufficient_recipes',
                                   error=f'GPT returned {len(recipes)} recipes (need 12)')
-            for target_owner in target_owners:
-                _set_status(conn, target_owner, 'failed', 'GPT returned fewer than 12 recipes')
+            with _household_write(conn):
+                for target_owner in target_owners:
+                    _set_status(conn, target_owner, 'failed', 'GPT returned fewer than 12 recipes', commit=False)
             return
         recipes = recipes[:12]
 
@@ -677,21 +691,35 @@ def handler(event, context):
                 },
             })
 
+        if memory and not brain_store.is_current(conn, memory['fence']):
+            raise ValueError('Food preferences changed during generation')
+        if prefs is not None and prefs != brain_store.dietary_preferences(conn, owner):
+            raise ValueError('Dietary preferences changed during generation')
+
         explanation_title = (gpt_out.get('explanation_title') or '').strip() or f'Meal plan: {focus[:50]}'
         explanation_paragraph = (gpt_out.get('explanation_paragraph') or '').strip()
 
-        with conn.cursor() as cur:
-            for target_owner in target_owners:
-                table = _meal_plan_table(target_owner)
-                cur.execute(f"""
-                    UPDATE `{table}`
-                    SET status = 'ready', focus = %s, explanation_title = %s, explanation_paragraph = %s,
-                        plan = %s, error_message = NULL, _updatedDate = NOW()
-                    WHERE _id = 'current'
-                """, (focus, explanation_title, explanation_paragraph, json.dumps(plan)))
-            conn.commit()
-        for target_owner in target_owners:
-            _dual_write_meal_plan_to_shared(conn, target_owner)
+        with _household_write(conn):
+            brain_store.require_publishable(conn, memory, owner, target_owners, prefs)
+            with conn.cursor() as cur:
+                for target_owner in target_owners:
+                    # SHARED ONLY (2026-08-18 cutover). This is the real payload write: the 12-slot
+                    # plan for every household member.
+                    cur.execute(
+                        """
+                        INSERT INTO shared_meal_plan
+                            (owner_id, _id, _owner, status, focus, explanation_title,
+                             explanation_paragraph, plan, error_message, _createdDate, _updatedDate)
+                        VALUES (%s, 'current', %s, 'ready', %s, %s, %s, %s, NULL, NOW(), NOW())
+                        ON DUPLICATE KEY UPDATE
+                            status='ready', focus=VALUES(focus),
+                            explanation_title=VALUES(explanation_title),
+                            explanation_paragraph=VALUES(explanation_paragraph),
+                            plan=VALUES(plan), error_message=NULL, _updatedDate=NOW()
+                        """,
+                        (target_owner, target_owner, focus, explanation_title,
+                         explanation_paragraph, json.dumps(plan))
+                    )
         print(f'[meal_plan_generator] Done owner={owner}')
     except Exception as e:
         print(f'[meal_plan_generator] Error: {e}')
@@ -699,9 +727,46 @@ def handler(event, context):
         traceback.print_exc()
         _report_backend_error('generate', owner_id=owner, code='handler_error', error=e)
         try:
-            for target_owner in target_owners:
-                _set_status(conn, target_owner, 'failed', str(e))
+            with _household_write(conn):
+                for target_owner in target_owners:
+                    _set_status(conn, target_owner, 'failed', str(e), commit=False)
         except Exception:
             pass
     finally:
-        _release_named_lock(owner_lock_conn, owner_lock_name)
+        _release_household_locks(household_locks)
+
+
+def _acquire_household_locks(owners):
+    """Use existing per-user locks so older in-flight generators also contend."""
+    acquired = []
+    try:
+        for owner in sorted(set(owners)):
+            name = _owner_lock_name(owner)
+            lock_conn = _acquire_named_lock(name, OWNER_LOCK_TIMEOUT_SECONDS)
+            if lock_conn is None:
+                _release_household_locks(acquired)
+                return None
+            acquired.append((lock_conn, name))
+        return acquired
+    except BaseException:
+        _release_household_locks(acquired)
+        raise
+
+
+
+@contextmanager
+def _household_write(conn):
+    """Commit a household transition together, including on autocommit connections."""
+    conn.begin()
+    try:
+        yield
+        conn.commit()
+    except BaseException:
+        conn.rollback()
+        raise
+
+
+
+def _release_household_locks(acquired):
+    for lock_conn, name in reversed(acquired):
+        _release_named_lock(lock_conn, name)
