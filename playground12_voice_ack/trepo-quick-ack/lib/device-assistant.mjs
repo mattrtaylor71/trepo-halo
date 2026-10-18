@@ -1,4 +1,13 @@
-import { buildChatTools, buildSystemPrompt } from "./realtime-config.mjs";
+import {leftoverFirstToolChoice} from "./leftover-check-in-intent.mjs";
+import {candidateOwner,loadBrain,validateBrain,foodMemoryTool,updateFoodMemory} from './family-brain.mjs';
+import {detectActionClaims as detectMemoryActionClaims} from './action-claims.mjs';
+import {haloAddDestination, haloAddToolDenial} from "./halo-add-intent.mjs";
+import {loadKitchenTask,prepareKitchenTask,kitchenTaskMessage,applyKitchenTask,rememberKitchenTaskResult,storeKitchenTask,explicitPantryEntry,validateTaskHistory,kitchenClarificationTool,retainKitchenProposal} from './kitchen-task-context.mjs';
+import {createKitchenMutationContext} from './kitchen-edit-client.mjs';
+import {kitchenLabelDenial} from './kitchen-label-intent.mjs';
+import {reconcileActionNarration} from './action-narration.mjs';
+import {assistantOutcome,outcomeMarkerStatus} from './assistant-outcome.mjs';
+import { buildChatTools as standardChatTools, buildSystemPrompt } from "./realtime-config.mjs";
 import { buildOuraGroundingMessage } from "./oura-context.mjs";
 import {
   getDietaryPreferences,
@@ -351,12 +360,61 @@ ACCOUNT (Profile): tap "Enable notifications" to turn on reminders. "Spread the 
 
 WHAT I (THYME) CAN DO: add or remove kitchen items, manage your shopping list, log dishes, and suggest recipes — by voice or text. For app settings or account actions, I'll tell you where to tap.`;
 
-const APP_GUIDES = { v1: APP_GUIDE_V1, v2: APP_GUIDE_V2 };
+// v3 (2026-07-24): closes the F-036 gaps (Halo, Clean, dietary preferences, TikTok
+// persistence) and brings the guide current with 1.11. AUDIENCE SPLIT: App Store users
+// are on 1.10, TestFlight on 1.11 builds 42-44 — so the stable core is stated plainly and
+// anything that only exists in the newer builds is marked "(on the newest update, …)".
+// v2's verified wording is kept verbatim wherever the feature didn't change.
+const APP_GUIDE_V3 = `TREPO APP GUIDE — use ONLY these facts to answer app how-to / "where do I…" questions.
+GUIDE RULES: (1) Answer app how-to questions ONLY from the facts below. If something isn't covered here, say you're not certain and encourage the user to reach out for help — they can email matt@trepo.ai or text Matt and Zach at +1 415 987 7809 — never invent a screen or button. (2) For the user's own live data (their Household ID, who's in their household, what's in their kitchen), use your tools/context — never make up an ID or names. (3) When the user ASKS how/where/whether to do something ("how do I…", "where is…", "can I…"), just EXPLAIN the steps — describe where to tap; do NOT call a tool or perform the action, and NEVER say you did something you didn't do. Only perform an action when the user clearly commands it ("add milk", "log my breakfast"). (4) The app updates often, so some screens differ by version — where a fact below is marked "on the newest update", say so plainly rather than insisting the user must be seeing it.
+
+NAVIGATION: four bottom tabs — "List" (shopping list), "Kitchen" (your inventory), "Cook" (recipes), "Dish Log" (nutrition) — plus a center "+" button that opens the "Check into your kitchen" menu (four choices: Leftovers, Fridge/Pantry, Receipt, Text). At the top of the home screen are round buttons: "Profile", "Help", and the recall button — a megaphone (a shield icon on the newest update) — that opens "Recall check"; plus an "Ask Thyme" button (that's me). The home screen also has a teal "CLEAN" button and an "ITEMS TO WATCH" list.
+
+TREPO HALO (optional device — never required): Halo is Trepo's optional countertop fridge camera. It lets you check groceries into your kitchen hands-free and talk to the fridge assistant by voice. The Trepo app is completely free and works fully on its own — you never have to buy a Halo to use it, and every feature in this guide is in the app itself. If you do have one, you pair it under Profile → "Halo Device" to connect it to your home Wi-Fi. For anything else about Halo setup or troubleshooting, say you're not certain and point them to matt@trepo.ai or a text to Matt and Zach at +1 415 987 7809.
+
+ADD ITEMS TO KITCHEN:
+- Photo scan: tap "+" → "Fridge/Pantry" → photograph your groceries/fridge → a review screen shows what was identified so you can confirm or fix it → tap "Add N items to kitchen".
+- Leftovers: "+" → "Leftovers" → photo (optional note). On the newest update there's a "SERVINGS" stepper on that screen to set how many servings the leftovers make before you save.
+- Receipt: "+" → "Receipt" → photograph the receipt, or tap "Upload" to pick from your photo library.
+- No photo: "+" → "Text" → type items separated by commas or new lines → "Add". The items show up in your kitchen shortly after you submit; if part of what you typed couldn't be understood, the app shows a banner naming what was skipped with a "Try again" button.
+- Fix a mis-identified item: on the review screen tap the pencil on that row; for an item already in the kitchen, open it and use "Fix this item".
+- There is no grocery-delivery-service import; to add a delivery order, photograph its receipt/confirmation via "Receipt" or type the items via "Text".
+- I (Thyme) can also add items by voice or text — just tell me what to add.
+
+CHECK-IN REVIEW SCREEN (after a photo or receipt scan): it shows the items we identified so you can confirm or fix them BEFORE anything is added to your kitchen — an "Identified Items" list plus a "Needs Review" section for uncertain ones; tap the pencil to fix a name or brand, dismiss anything that's wrong, then tap "Add N items to kitchen". On the newest update the same screen is redesigned as cards grouped under "Needs a look" (the ones we're unsure about) and "Looks good": tap a card to expand it, then edit the item's name, quantity, expiration date (tap it to open a wheel picker — past or already-expired dates are allowed), category, and storage (Fridge/Freezer/Pantry, and Sealed/Opened) before you commit.
+
+KITCHEN TAB: items are grouped into sections — Produce, Dairy & Eggs, Meat & Seafood, Pantry, Spices, Snacks & Sweets, Beverages, Prepared & Other, Leftovers — assigned automatically. To change an item's category, open the item and tap "Move to…", then pick the section you want. (In the check-in review category picker the spices section is listed as "Spices & Baking".) If a name or brand is wrong, open the item and use "Fix this item". Open an item to set "Stored in" (Fridge/Freezer/Pantry), set "Expires" (Set expiry date), add it to your shopping list, use it in a recipe, or tap "Discard Item" to remove it. "Kitchen IQ" is a score of how well-stocked/healthy your kitchen is, shown on the home screen.
+
+CLEAN / ITEMS TO WATCH: "ITEMS TO WATCH" on the home screen lists the items that are expired or expiring soon — worked out from the expiration date you set, or from storage guidance for that food when you haven't set one — with expired ones flagged in red and the rest in orange. The teal "CLEAN" button opens "CLEAN KITCHEN", a quick pass through the items most at risk: it shows them one at a time as cards, highest-risk first, and you tap "KEEP" or "DELETE" on each. There are category chips at the top to narrow it to one section and an undo arrow to reverse the last card. When nothing needs attention it says so rather than showing cards.
+
+SHOPPING LIST ("List" tab): type in "Add an item…" or hold the microphone to speak; tap an item's checkbox to check it off; tap the X to remove it. A "Suggested for you" row offers quick add ideas. Items group under store headings — use "Add New Group" to add a store. "Clear checked" clears checked items. In a household, everyone shares one list in real time.
+
+DISH LOG ("Dish Log" tab, page titled "Health"): this is where all your nutrition lives — your metrics, stats, macros, and daily totals are all on this one page. If someone asks where to SEE their nutrition, metrics, stats, calories, or macros, the answer is simply: open the "Dish Log" tab at the bottom (the page is titled "Health") — that's an explanation, never a reason to log anything. To ADD a meal, tap "Log a dish" to photograph it, or log by voice/text through me. Each dish shows Calories, Protein, Carbs, and Fat, with a "Your daily nutrition" summary. Your meal plan lives under the Cook tab; if it's empty, check more groceries in — the plan is built from what's in your kitchen, so a thin kitchen means an empty plan. "I made this": open a saved recipe and tap "I made this" to mark its ingredients as used — that removes those ingredients from your kitchen.
+
+RECIPES ("Cook" tab): cards for "Explore" (trending recipes from creators), "Use what I have" (recipes from your current kitchen — "Make with what you have" vs "Need a few more things"), "My Recipes" (your saved recipes), "Meal Plan" (plan your week), and "Save a Recipe" (add by Link, Text, or Photos). To import a recipe from Instagram, TikTok, or a website, tap Share in that app and choose "Trepo" — it saves automatically. Imported recipes are saved permanently in "My Recipes" — they stay there for good unless you remove them yourself; they do not expire or disappear. On a recipe, the bookmark saves it (it turns solid blue when saved); open a saved recipe to "Edit" it or "Remove from saved recipes" to delete it; "Add missing to list" puts missing ingredients on your shopping list. In "My Recipes" the sort button switches between "Recently added" and "A-Z (name)". In "Use what I have", each meal group ends with a "Get more <meal> recipes" button (for example "Get more dinner recipes") that fetches more for that meal. On the newest update, tapping the + next to an ingredient adds it to your shopping list and that ingredient stays checked for as long as it's on your list.
+
+DIETARY PREFERENCES / ALLERGIES: open Profile → "Dietary Preferences & Allergies". You pick from chip sections "ALLERGIES", "DIETS", "RELIGIOUS", and "HEALTH", and there's an "ANYTHING ELSE" box to add your own, separated by commas. Tap "SAVE PREFERENCES" to save. Your recipes respect these, and they regenerate after you change them. Trepo uses these to tailor recipes but can't guarantee a recipe is free of your allergens or right for a medical condition — always check the ingredients yourself, especially with allergies.
+
+SHARE A RECIPE: on a recipe, tap the share icon to create a link you can send to anyone. They open the recipe on the web and tap "Save in Trepo" — it opens the recipe in the app if they have it, or sends them to install it with the recipe waiting.
+
+RECIPE CATEGORIES / TAGS: in "My Recipes" you can create your own categories (like "Meal prep") — tap the "＋ New" chip to make one. Tap the tag icon on a recipe to assign it to categories, and tap a category chip at the top to filter your saved recipes to just that category.
+
+MEAL PLAN ("Meal Plan" card in the Cook tab): a weekly calendar. Pick a day, then under "Breakfast", "Lunch", "Dinner", or "Snack" tap "Add a … recipe" to add a saved, kitchen, or explore recipe to that slot; each entry shows "Ready to cook" or "+N to buy", and the X removes it. Each day also has a "Notes" section — tap "Add a note" for free-text notes.
+
+RECALL CHECK (the recall button at the top of the home screen — a megaphone, or a shield icon on the newest update): tap "Check my kitchen" and it scans your kitchen against current recalls and outbreak alerts from the FDA, USDA, and CDC. Results show closer matches and softer "might not be yours" ones; tap a match's status icon to learn what its certainty means, and "View recall" / "Search for this recall" to read the official notice. It flags by the type of food only (not brand, lot, or specific product), so always confirm with the official notice. "You're all clear" means nothing in your kitchen matched. On the newest update the shield turns red with an alert mark when something in your kitchen matches a recall.
+
+HOUSEHOLD & SHARING (open your Profile, then the Account/Household section): your "Household ID" is shown there and can be copied — share it so others can join you. Tap "Invite to Household" to text someone your ID. To join a household, enter its ID in the Household section and tap the arrow (this replaces your shopping list with the household's shared list). "Leave Household" leaves it. Everyone in a household shares the same kitchen, shopping list, and recipes in real time; in "My Recipes" a "MY OWN | HOUSEHOLD" slider switches between your recipes and the household's shared ones. If a partner can't see your items, make sure you are both in the SAME household (same Household ID) — there is no separate members list; the shared Household ID is what links you.
+
+ACCOUNT (Profile): tap "Enable notifications" to turn on reminders. "Spread the word" copies your App Store link so you can share Trepo. For feedback or help, email matt@trepo.ai. "Log Out" signs out; "Delete Account" permanently deletes your data.
+
+WHAT I (THYME) CAN DO: add or remove kitchen items, manage your shopping list, log dishes, and suggest recipes — by voice or text. For app settings or account actions, I'll tell you where to tap.`;
+
+const APP_GUIDES = { v1: APP_GUIDE_V1, v2: APP_GUIDE_V2, v3: APP_GUIDE_V3 };
 
 // Returns the app-guide system message(s), or [] when PROMPT_GUIDE_VERSION=off.
-// Default is v2 (current app); rollback = set PROMPT_GUIDE_VERSION=v1 (or off).
+// Default is v3 (current app); rollback = set PROMPT_GUIDE_VERSION=v2 (or v1, or off).
 function getAppGuideMessages() {
-  const version = String(process.env.PROMPT_GUIDE_VERSION || "v2").trim().toLowerCase();
+  const version = String(process.env.PROMPT_GUIDE_VERSION || "v3").trim().toLowerCase();
   if (version === "off" || version === "none" || version === "") return [];
   return [{ role: "system", content: APP_GUIDES[version] || APP_GUIDE_V1 }];
 }
@@ -853,7 +911,7 @@ async function createChatCompletion(messages, env, { deadline = null, toolChoice
       model: env.OPENAI_MODEL || "gpt-5.4-2026-03-05",
       temperature: 0.2,
       messages,
-      tools: buildChatTools(),
+      tools: buildChatTools(env),
       tool_choice: toolChoice
     }),
     deadline
@@ -892,7 +950,9 @@ const WRITE_INTENT_PATTERNS = [
 // "how do I add to my shopping list" is a QUESTION, not the command "add milk".
 // Without this, App-Guide how-to questions silently trigger a placeholder write.
 // A genuine command (no interrogative frame) still forces its tool below.
-const HOWTO_INTENT_REGEX = /\b(?:how\s+(?:do|can|would|should|to)|how\s+d(?:o|oes)\b[^.?!]*\bi\b|where\s+(?:do|can|is|are|'?s)|where'?s|what\s+(?:is|are|can|'?s)|what'?s|why\s+(?:is|are|does|do|can|no)|can\s+i|could\s+i|do\s+you|are\s+you|is\s+there|is\s+it\s+possible)\b/i;
+// NOTE: "why would/might …" ("why would a meal plan be empty") is as informational as
+// "why is …" — without them it escaped this guard and could be force-routed to a write.
+const HOWTO_INTENT_REGEX = /\b(?:how\s+(?:do|can|would|should|to)|how\s+d(?:o|oes)\b[^.?!]*\bi\b|where\s+(?:do|can|is|are|'?s)|where'?s|what\s+(?:is|are|can|happens|'?s)|what'?s|why\s+(?:is|are|does|do|can|would|might|no)|can\s+i|could\s+i|do\s+you|are\s+you|is\s+there|is\s+it\s+possible)\b/i;
 
 // Bare "<item> to/on the list" (no add verb): Halo voice shorthand. Without this
 // a verbless "Avocado to the list." fell through to auto and got logged as a DISH.
@@ -906,10 +966,17 @@ const BARE_TO_LIST_REGEX = /\bto\s+(?:the|my|your|our|a)\s+(?:shopping\s+|grocer
 const COMPOUND_DISCARD_AND_LIST_REGEX = /\b(throw\s+(?:away|out)|toss(?:\s+out)?|discard|get\s+rid\s+of|remove)\b[\s\S]{0,60}\band\b[\s\S]{0,20}\b(?:add|put|throw|place)?\b[\s\S]{0,20}\b(?:to|on)\s+(?:the|my|your|our|a)\s+(?:shopping\s+|grocery\s+)?list\b/i;
 
 export function detectWriteIntent(transcript) {
-  if (HOWTO_INTENT_REGEX.test(String(transcript || ""))) return "auto";
+  const leftover = leftoverFirstToolChoice(transcript);
+  if (leftover) return leftover;
+  // Routing and execution must agree: a read-only question containing words
+  // such as "do not log" must never force a write only for the guard to deny it.
+  if (toolIntentDenial(transcript, "__write__")) return "auto";
   // Compound "throw away X and add to the list" is TWO actions; don't force a single
   // tool (that dropped the list-add). Let the model issue both per the prompt rule.
   if (COMPOUND_DISCARD_AND_LIST_REGEX.test(String(transcript || ""))) return "auto";
+  // Require action, but let single- and multi-product requests select their
+  // appropriate tool. Forcing the single-item tool silently dropped list tails.
+  if (explicitPantryEntry(transcript)) return "required";
   // Bare "<item> to the list" (no verb) → shopping-list add, never a dish log.
   if (BARE_TO_LIST_REGEX.test(String(transcript || ""))) {
     return { type: "function", function: { name: "add_to_shopping_list" } };
@@ -1036,6 +1103,34 @@ const ACTION_CLAIM_RULES = [
 // succeeded this turn (recovery signal).
 const WRITE_TOOL_NAMES = new Set(ACTION_CLAIM_RULES.flatMap((r) => [...r.okTools]));
 
+// An assistant's unbacked claim is not permission to create a new user action.
+// Only retry a recognized, explicit original command in that same domain.
+export function correctiveToolForClaim(transcript, claim) {
+  const text = String(transcript || "");
+  if (/\b(?:not|never|don't|do not|didn't|without)\b/i.test(text) || /["“”]/.test(text)) return null;
+  const intent = detectWriteIntent(text.replace(/https?:\/\/\S+/gi, ""));
+  const tool = intent?.function?.name;
+  return tool && claim?.okTools?.has(tool) ? tool : null;
+}
+
+// Only these tools may run for an informational question or during a lookup
+// needed by a corrective action. Unrecognized tools fail closed in those modes.
+const READ_ONLY_TOOLS = new Set([
+  "get_shopping_list", "list_store_tabs", "get_kitchen_overview", "search_kitchen_item",
+  "get_recent_discards", "get_recent_dishes", "get_dish_detail", "get_health_metrics",
+  "get_recipe_suggestions", "get_recipe_detail", "get_saved_recipes", "get_saved_recipe_detail",
+  "search_web_recipes", "get_meal_plan", "recommend_items_to_buy", "recommend_items_to_use_up",
+  "list_recipe_categories", "get_meal_calendar",
+]);
+export function toolIntentDenial(transcript, toolName, correctiveAllowedTool = null) {
+  const text = String(transcript || "");
+  const informational = HOWTO_INTENT_REGEX.test(text) || /^\s*(?:how|what|why|when|where|which|who|explain|describe|tell me (?:about|how|why))\b/i.test(text);
+  const negated = /^\s*(?:please\s+)?(?:do not|don't|never)\b/i.test(text);
+  if ((informational || negated) && !READ_ONLY_TOOLS.has(toolName)) return "write_not_authorized_by_question";
+  if (correctiveAllowedTool && toolName !== correctiveAllowedTool && !READ_ONLY_TOOLS.has(toolName)) return "corrective_tool_outside_original_intent";
+  return null;
+}
+
 // ── Guard-leak scrub (F-106) ───────────────────────────────────────────
 // The dish-log suppression guard is silent-correct: it skips a phantom dish-log
 // but the PRIMARY action (kitchen add / list add / discard) still succeeds.
@@ -1121,8 +1216,13 @@ function buildPrimaryWriteConfirmation(toolTrace) {
   const kitchenNames = [];
   const listNames = [];
   const discardNames = [];
+  const recipeTitles = [];
   for (const entry of trace) {
     if (!entry || !entry.ok) continue;
+    if (RECIPE_SAVE_TOOLS.has(entry.toolName)) {
+      recipeTitles.push(String(entry.args?.title || "Recipe").trim() || "Recipe");
+      continue;
+    }
     const names = primaryWriteItemNames(entry);
     if (names.length === 0) continue;
     if (entry.toolName === "check_in_item" || entry.toolName === "check_in_many_items") kitchenNames.push(...names);
@@ -1131,6 +1231,7 @@ function buildPrimaryWriteConfirmation(toolTrace) {
   }
   const uniq = (arr) => [...new Set(arr)];
   const sections = [];
+  if (recipeTitles.length) sections.push(`Saved to your recipes:\n${recipeTitles.map((title) => `- ${title}`).join("\n")}`);
   if (kitchenNames.length) sections.push(`Added to your kitchen:\n${uniq(kitchenNames).map((n) => `- ${n}`).join("\n")}`);
   if (listNames.length) sections.push(`Added to your shopping list:\n${uniq(listNames).map((n) => `- ${n}`).join("\n")}`);
   if (discardNames.length) sections.push(`Removed from your kitchen:\n${uniq(discardNames).map((n) => `- ${n}`).join("\n")}`);
@@ -1223,7 +1324,7 @@ async function* createChatCompletionStream(messages, env, { deadline = null, too
       model: env.OPENAI_MODEL || "gpt-5.4-2026-03-05",
       temperature: 0.2,
       messages,
-      tools: buildChatTools(),
+      tools: buildChatTools(env),
       tool_choice: toolChoice,
       stream: true
     }),
@@ -1254,9 +1355,52 @@ async function* createChatCompletionStream(messages, env, { deadline = null, too
   }
 }
 
-export async function* runDeviceAssistantStreaming({ transcript, userContext, env, sessionMessages = [], responseSurface = "halo", lambdaDeadline = null }) {
+const buildChatTools=(env)=>[...standardChatTools(),kitchenClarificationTool,...(env?.HOUSEHOLD_BRAIN_V2 !== '1' && env?.FAMILY_BRAIN_REQUEST?.brain && env.FAMILY_BRAIN_REQUEST.credentials.authorization ? [foodMemoryTool] : [])];
+
+async function executeKitchenAwareTool(input, taskState) {
+  const memory=input.env?.FAMILY_BRAIN_REQUEST;
+  if(memory && !await validateBrain(memory.brain,memory.credentials,input.env))
+    return {ok:false,statusCode:409,error:'Food preferences changed. This action was not executed.',toolName:input.toolName};
+  if(input.toolName==='update_food_memory')return updateFoodMemory(input);
+  if(input.toolName==='clarify_kitchen_check_in')return retainKitchenProposal(taskState,input.args);
+  const labelDenial=kitchenLabelDenial(input.sourceTranscript,input.toolName,input.args);
+  if (labelDenial) return {ok:true,statusCode:200,needs_clarification:true,toolName:input.toolName,args:input.args,
+    toolResult:{confirmation_question:labelDenial,inventory_changed:false}};
+  const ordinal=input.mutationContext.actionOrdinal || 0;
+  input.mutationContext.actionOrdinal=ordinal+1;
+  const prepared=applyKitchenTask(taskState,input.sourceTranscript,input.toolName,input.args);
+  if (prepared.toolName) input={...input,toolName:prepared.toolName};
+  if (prepared.error) return {ok:false,statusCode:409,error:prepared.error,toolName:input.toolName,args:input.args};
+  if (prepared.claimConfirmation && !await storeKitchenTask(taskState,{...taskState.task,pending_claim:input.mutationContext.requestId}))
+    return {ok:false,statusCode:409,error:'That confirmation is already being handled. Check the kitchen before trying again.'};
+  if (prepared.operationId) {
+    if (!await storeKitchenTask(taskState,{...taskState.task,selected_id:prepared.args.item_id}))
+      return {ok:false,statusCode:409,error:'The pending correction changed. Please select the item again.'};
+    input={...input,mutationContext:createKitchenMutationContext({operationId:prepared.operationId,authorization:input.mutationContext.authorization})};
+  }
+  const result=await executeToolAction({...input,args:prepared.args,expectedRevision:prepared.expectedRevision});
+  const remembered=await rememberKitchenTaskResult(taskState,input.toolName,result,`${input.mutationContext.requestId}:clarification:${ordinal}`);
+  if (!remembered && result.ok) return {...result,task_context:'unavailable'};
+  if (!remembered) return {ok:false,statusCode:409,toolName:input.toolName,
+    error:'I could not retain this correction. Please repeat the full new name and exact item together.',details:{type:'clarification_unavailable'}};
+  if (result.details?.type==='ambiguous_kitchen_item' && taskState.task?.kind==='rename')
+    return {...result,ok:true,statusCode:200,needs_clarification:true,
+      toolResult:{confirmation_question:result.error,inventory_changed:false}};
+  return result;
+}
+
+async function initializeKitchenTask(userContext,kitchenRequest,env,transcript,sessionMessages,responseSurface) {
+  const state=await loadKitchenTask({household:userContext?.ownerId,actor:userContext?.userId || userContext?.tableOwnerId,session:kitchenRequest?.sessionId},env);
+  validateTaskHistory(state,sessionMessages,{responseSurface});
+  return prepareKitchenTask(state,transcript,{responseSurface});
+}
+
+async function* runDeviceAssistantStreamingImpl({ transcript, userContext, env, sessionMessages = [], responseSurface = "halo", lambdaDeadline = null, kitchenRequest = null }) {
+  const mutationContext=createKitchenMutationContext(kitchenRequest);
+  const kitchenTask=await initializeKitchenTask(userContext,kitchenRequest,env,transcript,sessionMessages,responseSurface);
   const deadline = lambdaDeadline || (Date.now() + 140000);
   const normalizedResponseSurface = String(responseSurface || "halo").trim().toLowerCase() === "app" ? "app" : "halo";
+  const haloAddIntent=haloAddDestination(transcript,normalizedResponseSurface);
   const normalizedSessionMessages = normalizeSessionMessages(sessionMessages);
 
   const [
@@ -1276,10 +1420,12 @@ export async function* runDeviceAssistantStreaming({ transcript, userContext, en
   // Household dietary prefs (safety-critical: allergies) injected into the system prompt so
   // Thyme honors them in suggestions and can state them when asked. Best-effort; a fetch
   // failure / no prefs yields an empty block = unchanged behavior.
-  const dietaryBlock = formatDietaryPreferencesBlock(await getDietaryPreferences(userContext, { env }));
+  const dietaryBlock = formatDietaryPreferencesBlock(await getDietaryPreferences(userContext, { env, strict:Boolean(env.FAMILY_BRAIN_REQUIRE_DIETARY) }));
   const messages = [
     { role: "system", content: buildSystemPrompt(userContext, { responseSurface: normalizedResponseSurface, dietaryBlock }) },
     ...getAppGuideMessages(),
+    ...(env?.FAMILY_BRAIN_REQUEST?.brain?.prompt ? [{role:'system',content:env.FAMILY_BRAIN_REQUEST.brain.prompt}] : []),
+    ...(kitchenTaskMessage(kitchenTask) ? [kitchenTaskMessage(kitchenTask)] : []),
     ...(shoppingGroundingMessage ? [{ role: "system", content: shoppingGroundingMessage }] : []),
     ...(kitchenGroundingMessage ? [{ role: "system", content: kitchenGroundingMessage }] : []),
     ...(foodGroundingMessage ? [{ role: "system", content: foodGroundingMessage }] : []),
@@ -1306,6 +1452,7 @@ export async function* runDeviceAssistantStreaming({ transcript, userContext, en
   const aiOp = normalizedResponseSurface === "app" ? "chat_app" : "chat_halo";
   const aiModel = env.OPENAI_MODEL || "gpt-5.4-2026-03-05";
   let falseConfirmCorrections = 0;
+  let correctiveAllowedTool = null;
   let falseConfirmRecovered = false;
   // Set once a recipe-save tool is seen in the request; suppresses dish-log
   // writes for the rest of the request (mutual-exclusion guard).
@@ -1317,7 +1464,9 @@ export async function* runDeviceAssistantStreaming({ transcript, userContext, en
 
   try {
   for (let turn = 0; turn < 6; turn += 1) {
-    const turnToolChoice = forceToolChoiceNext || "auto";
+    const turnToolChoice = forceToolChoiceNext
+      || (turn === 0 && normalizedResponseSurface === "app" ? leftoverFirstToolChoice(transcript) : null)
+      || (turn === 0 && haloAddIntent === "shopping" ? {type:"function",function:{name:"add_many_to_shopping_list"}} : "auto");
     forceToolChoiceNext = null;
     const stream = createChatCompletionStream(messages, env, { deadline, toolChoice: turnToolChoice });
     let assembledContent = "";
@@ -1364,19 +1513,21 @@ export async function* runDeviceAssistantStreaming({ transcript, userContext, en
       // for that claim did not succeed this turn. Correct once; if it still
       // won't call the tool, replace the confirmation with an honest failure —
       // NEVER let an unbacked confirmation reach the user.
-      const claim = detectActionClaim(fullText);
+      const claim = env.FAMILY_BRAIN_REQUEST ? detectMemoryActionClaims(fullText,{memoryContext:true})[0] : detectActionClaim(fullText);
       const backed = claim && toolTrace.some((t) => t.ok && claim.okTools.has(t.toolName));
       if (claim && !backed) {
-        if (falseConfirmCorrections < 1) {
+        const correctionTool = haloAddIntent === "shopping" ? null : correctiveToolForClaim(transcript, claim);
+        if (correctionTool && falseConfirmCorrections < 1) {
           falseConfirmCorrections += 1;
           console.log(JSON.stringify({ evt: "assistant_false_confirm", tool: claim.expectedTool, domain: claim.domain, userId: userContext?.userId || null, recovered: null, phase: "retrying", reason: "claim_without_tool" }));
           messages.push({ role: "assistant", content: fullText });
           messages.push({
             role: "user",
-            content: `You stated the action was completed but you did not call ${claim.expectedTool}. Call it now with the details from the user's message, then confirm. If you genuinely cannot do it, say so honestly instead of claiming success.`
+            content: `Only carry out the original user's requested ${correctionTool} action. Do not infer new actions from your previous reply. Call that tool with the details from the user's message, then confirm only its verified result. If you cannot do it, explain the failure.`
           });
           // Force a tool call on the retry so the model can't just re-claim in text.
-          forceToolChoiceNext = "required";
+          correctiveAllowedTool = correctionTool;
+          forceToolChoiceNext = { type: "function", function: { name: correctionTool } };
           fullText = "";
           yield { type: "text_delta", delta: "\n" };
           continue;
@@ -1385,10 +1536,10 @@ export async function* runDeviceAssistantStreaming({ transcript, userContext, en
         // so we're not guessing next time: did the domain tool run and fail, or was
         // it never called at all?
         const domainToolAttempted = toolTrace.some((t) => claim.okTools.has(t.toolName));
-        const reason = domainToolAttempted ? "retry_tool_call_failed" : "retry_no_tool_call";
+        const reason = !correctionTool ? "original_intent_not_authorized" : (domainToolAttempted ? "retry_tool_call_failed" : "retry_no_tool_call");
         console.log(JSON.stringify({ evt: "assistant_false_confirm", tool: claim.expectedTool, domain: claim.domain, userId: userContext?.userId || null, recovered: false, reason }));
-        fullText = claim.failText;
-        yield { type: "text_delta", delta: `\n${claim.failText}` };
+        fullText = correctionTool ? claim.failText : (buildPrimaryWriteConfirmation(toolTrace) || "I haven't made that change. Please tell me what you'd like me to do.");
+        yield { type: "text_delta", delta: `\n${fullText}` };
       }
 
       // F-106 guard-leak scrub: if the narration leaked the dish-log guard's
@@ -1403,18 +1554,22 @@ export async function* runDeviceAssistantStreaming({ transcript, userContext, en
         yield { type: "text_delta", delta: `\n${scrubbed}` };
       }
 
+      const completion=await reconcileActionNarration({text:fullText,toolEvents,memoryContext:Boolean(env.FAMILY_BRAIN_REQUEST)});
+      fullText=completion.text;
+      const outcome=assistantOutcome({text:fullText,toolEvents,actionOutcome:completion.outcome});
       const uiResponse = buildVoiceUiResponse({
         text: fullText || "Okay.",
         quickItems,
         toolEvents,
         responseSurface: normalizedResponseSurface
       });
-      emitAiOp({ op: aiOp, owner_id: ownerIdForMarker(userContext), model: aiModel, latency_ms: Date.now() - aiOpStart, status: "success", input: truncateForMarker(transcript, 400), output: summarizeAiOutput(fullText || "Okay.", toolTrace), error: "" });
+      emitAiOp({ op: aiOp, owner_id: ownerIdForMarker(userContext), model: aiModel, latency_ms: Date.now() - aiOpStart, status: outcomeMarkerStatus(outcome), outcome, request_id:mutationContext.requestId, input: truncateForMarker(transcript, 400), output: summarizeAiOutput(fullText || "Okay.", toolTrace), error: "" });
       return {
         text: fullText || "Okay.",
         quickItems,
         toolTrace,
         toolEvents,
+        outcome,
         version: uiResponse.version,
         type: uiResponse.type,
         ui: uiResponse.ui
@@ -1433,9 +1588,19 @@ export async function* runDeviceAssistantStreaming({ transcript, userContext, en
     const batchHasRecipeSave = batchHasRecipeSaveTool(assembledToolCalls.map((tc) => tc.function.name));
 
     for (const toolCall of assembledToolCalls) {
-      const toolName = toolCall.function.name;
-      const args = parseToolArgs(toolCall.function.arguments);
+      let toolName = toolCall.function.name;
+      let args = parseToolArgs(toolCall.function.arguments);
       yield { type: "tool_start", tool_name: toolName, args };
+
+      const intentDenial = haloAddToolDenial(transcript, toolName, normalizedResponseSurface) || toolIntentDenial(transcript, toolName, correctiveAllowedTool);
+      if (intentDenial) {
+        const denied = { ok: false, suppressed: true, statusCode: 409, error: intentDenial };
+        console.log(JSON.stringify({ evt: "assistant_tool_intent_blocked", reason: intentDenial, tool: toolName, allowed_tool: correctiveAllowedTool, userId: userContext?.userId || null }));
+        toolTrace.push({ toolName, args, ...denied });
+        yield { type: "tool_end", tool_name: toolName, ok: false, summary: null };
+        messages.push({ role: "tool", tool_call_id: toolCall.id, content: JSON.stringify(denied) });
+        continue;
+      }
 
       // Suppress a phantom dish-log write when the same request saves a recipe.
       if (shouldSuppressDishLog(toolName, { batchHasRecipeSave, recipeSaveIssued })) {
@@ -1447,7 +1612,8 @@ export async function* runDeviceAssistantStreaming({ transcript, userContext, en
         continue;
       }
 
-      const result = await executeToolAction({ toolName, args, env, userContext, responseSurface: normalizedResponseSurface });
+      const result = await executeKitchenAwareTool({ toolName, args, env, userContext, responseSurface: normalizedResponseSurface, sourceTranscript:transcript, mutationContext },kitchenTask);
+      toolName=result.toolName || toolName; args=result.args || args;
 
       if (toolName === "add_to_shopping_list" && result?.ok && result?.args?.item_name) {
         quickItems.push(result.args.item_name);
@@ -1500,17 +1666,21 @@ export async function* runDeviceAssistantStreaming({ transcript, userContext, en
 
   // Exhausted turns
   fullText = scrubGuardLeakFromNarration(fullText, toolTrace);
+  const completion=await reconcileActionNarration({text:fullText,toolEvents,memoryContext:Boolean(env.FAMILY_BRAIN_REQUEST)});
+  fullText=completion.text;
+  const outcome=assistantOutcome({text:fullText,toolEvents,actionOutcome:completion.outcome});
   const uiResponse = buildVoiceUiResponse({
     text: fullText || "I heard you, but I couldn't finish that request.",
     quickItems,
     toolEvents
   });
-  emitAiOp({ op: aiOp, owner_id: ownerIdForMarker(userContext), model: aiModel, latency_ms: Date.now() - aiOpStart, status: "success", input: truncateForMarker(transcript, 400), output: summarizeAiOutput(fullText || "I heard you, but I couldn't finish that request.", toolTrace), error: "" });
+  emitAiOp({ op: aiOp, owner_id: ownerIdForMarker(userContext), model: aiModel, latency_ms: Date.now() - aiOpStart, status: outcomeMarkerStatus(outcome), outcome, request_id:mutationContext.requestId, input: truncateForMarker(transcript, 400), output: summarizeAiOutput(fullText || "I heard you, but I couldn't finish that request.", toolTrace), error: "" });
   return {
     text: fullText || "I heard you, but I couldn't finish that request.",
     quickItems,
     toolTrace,
     toolEvents,
+    outcome,
     version: uiResponse.version,
     type: uiResponse.type,
     ui: uiResponse.ui
@@ -1614,9 +1784,12 @@ export async function transcribeAudio(audioBuffer, env, options = {}) {
   return transcript;
 }
 
-export async function runDeviceAssistant({ transcript, userContext, env, sessionMessages = [], responseSurface = "halo", lambdaDeadline = null }) {
+async function runDeviceAssistantImpl({ transcript, userContext, env, sessionMessages = [], responseSurface = "halo", lambdaDeadline = null, kitchenRequest = null }) {
+  const mutationContext=createKitchenMutationContext(kitchenRequest);
+  const kitchenTask=await initializeKitchenTask(userContext,kitchenRequest,env,transcript,sessionMessages,responseSurface);
   const deadline = lambdaDeadline || (Date.now() + 140000);
   const normalizedResponseSurface = String(responseSurface || "halo").trim().toLowerCase() === "app" ? "app" : "halo";
+  const haloAddIntent=haloAddDestination(transcript,normalizedResponseSurface);
   const normalizedSessionMessages = normalizeSessionMessages(sessionMessages);
   console.log("[DEBUG] assistant turn start:", JSON.stringify({
     transcript,
@@ -1645,10 +1818,12 @@ export async function runDeviceAssistant({ transcript, userContext, env, session
   // Household dietary prefs (safety-critical: allergies) injected into the system prompt so
   // Thyme honors them in suggestions and can state them when asked. Best-effort; a fetch
   // failure / no prefs yields an empty block = unchanged behavior.
-  const dietaryBlock = formatDietaryPreferencesBlock(await getDietaryPreferences(userContext, { env }));
+  const dietaryBlock = formatDietaryPreferencesBlock(await getDietaryPreferences(userContext, { env, strict:Boolean(env.FAMILY_BRAIN_REQUIRE_DIETARY) }));
   const messages = [
     { role: "system", content: buildSystemPrompt(userContext, { responseSurface: normalizedResponseSurface, dietaryBlock }) },
     ...getAppGuideMessages(),
+    ...(env?.FAMILY_BRAIN_REQUEST?.brain?.prompt ? [{role:'system',content:env.FAMILY_BRAIN_REQUEST.brain.prompt}] : []),
+    ...(kitchenTaskMessage(kitchenTask) ? [kitchenTaskMessage(kitchenTask)] : []),
     ...(shoppingGroundingMessage ? [{ role: "system", content: shoppingGroundingMessage }] : []),
     ...(kitchenGroundingMessage ? [{ role: "system", content: kitchenGroundingMessage }] : []),
     ...(foodGroundingMessage ? [{ role: "system", content: foodGroundingMessage }] : []),
@@ -1675,6 +1850,7 @@ export async function runDeviceAssistant({ transcript, userContext, env, session
   const aiOp = normalizedResponseSurface === "app" ? "chat_app" : "chat_halo";
   const aiModel = env.OPENAI_MODEL || "gpt-5.4-2026-03-05";
   let falseConfirmCorrections = 0;
+  let correctiveAllowedTool = null;
   let falseConfirmRecovered = false;
   // Set once a recipe-save tool is seen in the request; suppresses dish-log
   // writes for the rest of the request (mutual-exclusion guard).
@@ -1683,7 +1859,7 @@ export async function runDeviceAssistant({ transcript, userContext, env, session
   let forceToolChoiceNext = null;
 
   // On the first turn, detect write intent and force tool_choice if appropriate
-  const initialToolChoice = detectWriteIntent(transcript);
+  const initialToolChoice = haloAddIntent === "shopping" ? {type: "function", function: {name: "add_many_to_shopping_list"}} : detectWriteIntent(transcript);
   if (initialToolChoice !== "auto") {
     console.log("[DEBUG] forcing tool_choice on first turn:", JSON.stringify(initialToolChoice));
   }
@@ -1706,24 +1882,26 @@ export async function runDeviceAssistant({ transcript, userContext, env, session
       // FALSE-CONFIRMATION GUARD (see runDeviceAssistantStreaming for the full
       // rationale): claim of a write action whose tool did not succeed this turn.
       // Correct once, then honest failure — never surface an unbacked confirmation.
-      const claim = detectActionClaim(lastAssistantText);
+      const claim = env.FAMILY_BRAIN_REQUEST ? detectMemoryActionClaims(lastAssistantText,{memoryContext:true})[0] : detectActionClaim(lastAssistantText);
       const backed = claim && toolTrace.some((t) => t.ok && claim.okTools.has(t.toolName));
       if (claim && !backed) {
-        if (falseConfirmCorrections < 1) {
+        const correctionTool = haloAddIntent === "shopping" ? null : correctiveToolForClaim(transcript, claim);
+        if (correctionTool && falseConfirmCorrections < 1) {
           falseConfirmCorrections += 1;
           console.log(JSON.stringify({ evt: "assistant_false_confirm", tool: claim.expectedTool, domain: claim.domain, userId: userContext?.userId || null, recovered: null, phase: "retrying", reason: "claim_without_tool" }));
           messages.push({ role: "assistant", content: lastAssistantText });
           messages.push({
             role: "user",
-            content: `You stated the action was completed but you did not call ${claim.expectedTool}. Call it now with the details from the user's message, then confirm. If you genuinely cannot do it, say so honestly instead of claiming success.`
+            content: `Only carry out the original user's requested ${correctionTool} action. Do not infer new actions from your previous reply. Call that tool with the details from the user's message, then confirm only its verified result. If you cannot do it, explain the failure.`
           });
-          forceToolChoiceNext = "required"; // make the retry actually call the tool
+          correctiveAllowedTool = correctionTool;
+          forceToolChoiceNext = { type: "function", function: { name: correctionTool } };
           continue; // retry this turn
         }
         const domainToolAttempted = toolTrace.some((t) => claim.okTools.has(t.toolName));
-        const reason = domainToolAttempted ? "retry_tool_call_failed" : "retry_no_tool_call";
+        const reason = !correctionTool ? "original_intent_not_authorized" : (domainToolAttempted ? "retry_tool_call_failed" : "retry_no_tool_call");
         console.log(JSON.stringify({ evt: "assistant_false_confirm", tool: claim.expectedTool, domain: claim.domain, userId: userContext?.userId || null, recovered: false, reason }));
-        lastAssistantText = claim.failText;
+        lastAssistantText = correctionTool ? claim.failText : (buildPrimaryWriteConfirmation(toolTrace) || "I haven't made that change. Please tell me what you'd like me to do.");
       }
 
       // F-106 guard-leak scrub: replace any narration that leaked the dish-log
@@ -1735,6 +1913,9 @@ export async function runDeviceAssistant({ transcript, userContext, env, session
         lastAssistantText = scrubbed;
       }
 
+      const completion=await reconcileActionNarration({text:lastAssistantText,toolEvents,memoryContext:Boolean(env.FAMILY_BRAIN_REQUEST)});
+      lastAssistantText=completion.text;
+      const outcome=assistantOutcome({text:lastAssistantText,toolEvents,actionOutcome:completion.outcome});
       const uiResponse = buildVoiceUiResponse({
         text: lastAssistantText || "Okay.",
         quickItems,
@@ -1749,12 +1930,13 @@ export async function runDeviceAssistant({ transcript, userContext, env, session
         toolCount: toolTrace.length
       }));
 
-      emitAiOp({ op: aiOp, owner_id: ownerIdForMarker(userContext), model: aiModel, latency_ms: Date.now() - aiOpStart, status: "success", input: truncateForMarker(transcript, 400), output: summarizeAiOutput(lastAssistantText || "Okay.", toolTrace), error: "" });
+      emitAiOp({ op: aiOp, owner_id: ownerIdForMarker(userContext), model: aiModel, latency_ms: Date.now() - aiOpStart, status: outcomeMarkerStatus(outcome), outcome, request_id:mutationContext.requestId, input: truncateForMarker(transcript, 400), output: summarizeAiOutput(lastAssistantText || "Okay.", toolTrace), error: "" });
       return {
         text: lastAssistantText || "Okay.",
         quickItems,
         toolTrace,
         toolEvents,
+        outcome,
         version: uiResponse.version,
         type: uiResponse.type,
         ui: uiResponse.ui
@@ -1771,26 +1953,30 @@ export async function runDeviceAssistant({ transcript, userContext, env, session
     // in this request) issues a recipe-save, dish-log writes are suppressed.
     const batchHasRecipeSave = batchHasRecipeSaveTool(message.tool_calls.map((tc) => tc?.function?.name));
 
-    const toolResults = await Promise.all(
-      message.tool_calls.map(async (toolCall) => {
-        const toolName = toolCall?.function?.name;
-        const args = parseToolArgs(toolCall?.function?.arguments);
+    const toolResults = [];
+    for (const toolCall of message.tool_calls) {
+      toolResults.push(await (async () => {
+        let toolName = toolCall?.function?.name;
+        let args = parseToolArgs(toolCall?.function?.arguments);
         console.log("[DEBUG] assistant requested tool:", JSON.stringify({ toolName, args }));
+        const intentDenial = haloAddToolDenial(transcript, toolName, normalizedResponseSurface) || toolIntentDenial(transcript, toolName, correctiveAllowedTool);
+        if (intentDenial) {
+          console.log(JSON.stringify({ evt: "assistant_tool_intent_blocked", reason: intentDenial, tool: toolName, allowed_tool: correctiveAllowedTool, userId: userContext?.userId || null }));
+          return { toolCall, toolName, args, result: { ok: false, suppressed: true, statusCode: 409, error: intentDenial } };
+        }
         // Suppress a phantom dish-log write when the same request saves a recipe.
         if (shouldSuppressDishLog(toolName, { batchHasRecipeSave, recipeSaveIssued })) {
           console.log(JSON.stringify({ evt: "assistant_dishlog_suppressed_on_save", tool: toolName, userId: userContext?.userId || null, reason: batchHasRecipeSave ? "same_turn_save" : "prior_turn_save" }));
           return { toolCall, toolName, args, result: suppressedDishLogResult() };
         }
-        const result = await executeToolAction({
-          toolName,
-          args,
-          env,
-          userContext,
-          responseSurface: normalizedResponseSurface
-        });
+        const result = await executeKitchenAwareTool({
+          toolName, args, env, userContext,
+          responseSurface: normalizedResponseSurface, sourceTranscript:transcript, mutationContext
+        },kitchenTask);
+        toolName=result.toolName || toolName; args=result.args || args;
         return { toolCall, toolName, args, result };
-      })
-    );
+      })());
+    }
     if (batchHasRecipeSave) recipeSaveIssued = true;
 
     for (const { toolCall, toolName, args, result } of toolResults) {
@@ -1832,6 +2018,9 @@ export async function runDeviceAssistant({ transcript, userContext, env, session
   }
 
   lastAssistantText = scrubGuardLeakFromNarration(lastAssistantText, toolTrace);
+  const completion=await reconcileActionNarration({text:lastAssistantText,toolEvents,memoryContext:Boolean(env.FAMILY_BRAIN_REQUEST)});
+  lastAssistantText=completion.text;
+  const outcome=assistantOutcome({text:lastAssistantText,toolEvents,actionOutcome:completion.outcome});
   const uiResponse = buildVoiceUiResponse({
     text: lastAssistantText || "I heard you, but I couldn't finish that request.",
     quickItems,
@@ -1845,12 +2034,13 @@ export async function runDeviceAssistant({ transcript, userContext, env, session
     toolCount: toolTrace.length
   }));
 
-  emitAiOp({ op: aiOp, owner_id: ownerIdForMarker(userContext), model: aiModel, latency_ms: Date.now() - aiOpStart, status: "success", input: truncateForMarker(transcript, 400), output: summarizeAiOutput(lastAssistantText || "I heard you, but I couldn't finish that request.", toolTrace), error: "" });
+  emitAiOp({ op: aiOp, owner_id: ownerIdForMarker(userContext), model: aiModel, latency_ms: Date.now() - aiOpStart, status: outcomeMarkerStatus(outcome), outcome, request_id:mutationContext.requestId, input: truncateForMarker(transcript, 400), output: summarizeAiOutput(lastAssistantText || "I heard you, but I couldn't finish that request.", toolTrace), error: "" });
   return {
     text: lastAssistantText || "I heard you, but I couldn't finish that request.",
     quickItems,
     toolTrace,
     toolEvents,
+    outcome,
     version: uiResponse.version,
     type: uiResponse.type,
     ui: uiResponse.ui
@@ -1859,4 +2049,48 @@ export async function runDeviceAssistant({ transcript, userContext, env, session
     emitAiOp({ op: aiOp, owner_id: ownerIdForMarker(userContext), model: aiModel, latency_ms: Date.now() - aiOpStart, status: "error", input: truncateForMarker(transcript, 400), output: summarizeAiOutput(lastAssistantText, toolTrace), error: truncateForMarker(aiOpErr?.message || String(aiOpErr), 500) });
     throw aiOpErr;
   }
+}
+
+
+// Request-local pilot wrapper. Non-pilot requests retain the original streaming path.
+async function brainRequest(input) {
+  if(input.kitchenRequest && Object.hasOwn(input.kitchenRequest,'preparedBrain'))return input.kitchenRequest.preparedBrain;
+  const credentials={authorization:input.kitchenRequest?.authorization,ticket:input.kitchenRequest?.brainTicket,
+    owner:input.kitchenRequest?.brainOwner || input.userContext?.userId};
+  const brain=await loadBrain({...credentials,surface:input.responseSurface},input.env);
+  return brain?{credentials,brain}:null;
+}
+function changedBrainResponse(result) {
+  // A later memory outage cannot undo an already committed action or invite a blind
+  // retry. Keep the request receipt, but discard all text/arguments based on old memory.
+  if(!result?.toolTrace?.some(t=>t.ok && (WRITE_TOOL_NAMES.has(t.toolName) || t.toolName==='update_food_memory')))
+    throw new Error('Your food preferences changed while I was answering. Please ask again.');
+  return {text:'Your food preferences changed while I was answering. An update completed; please check your recent changes before repeating it.',
+    quickItems:[],toolTrace:[],toolEvents:[],version:'2',type:'clarification_needed',ui:null,
+    outcome:{version:'1',answer:'incomplete',actions:'confirmed',reason:'preferences_changed',delivery:'unknown',client_render:'unknown'}};
+}
+export async function runDeviceAssistant(input) {
+  const memory=await brainRequest(input);
+  if(!memory)return runDeviceAssistantImpl({...input,env:{...input.env,FAMILY_BRAIN_REQUIRE_DIETARY:Boolean(input.kitchenRequest?.brainTicket || candidateOwner(input.kitchenRequest?.authorization,input.env))}});
+  const env={...input.env,FAMILY_BRAIN_REQUEST:memory,FAMILY_BRAIN_REQUIRE_DIETARY:true};
+  const result=await runDeviceAssistantImpl({...input,env});
+  if(!await validateBrain(memory.brain,memory.credentials,env))
+    return changedBrainResponse(result);
+  return result;
+}
+export async function* runDeviceAssistantStreaming(input) {
+  const memory=await brainRequest(input);
+  if(!memory)return yield* runDeviceAssistantStreamingImpl({...input,env:{...input.env,FAMILY_BRAIN_REQUIRE_DIETARY:Boolean(input.kitchenRequest?.brainTicket || candidateOwner(input.kitchenRequest?.authorization,input.env))}});
+  const env={...input.env,FAMILY_BRAIN_REQUEST:memory,FAMILY_BRAIN_REQUIRE_DIETARY:true};
+  // Pilot text is buffered until the publication fence passes; never publish revoked context.
+  const events=[];
+  const iterator=runDeviceAssistantStreamingImpl({...input,env});
+  let step;
+  do {step=await iterator.next();if(!step.done)events.push(step.value);}while(!step.done);
+  if(!await validateBrain(memory.brain,memory.credentials,env)) {
+    const safe=changedBrainResponse(step.value);
+    yield {type:'text_delta',delta:safe.text};return safe;
+  }
+  for(const event of events)yield event;
+  return step.value;
 }

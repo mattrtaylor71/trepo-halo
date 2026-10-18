@@ -5,6 +5,7 @@
 // (voice dishes/discards/shopping go invisible again — regressions 07-02 / 07-06).
 // The trepo-voice-dualwrite-canary + alarm VoiceDualWriteMiss will catch a revert.
 import crypto from "node:crypto";
+import { saveKitchenEdit, renameReference, pickRenameByCreation, createKitchenMutationContext, prepareKitchenEdit } from "./kitchen-edit-client.mjs";
 import { InvokeCommand, LambdaClient } from "@aws-sdk/client-lambda";
 import {
   ensureColumn,
@@ -797,8 +798,16 @@ export async function getDietaryPreferences(context, options = {}) {
   if (!owner) return empty;
   try {
     return await withDbConnection(async (connection) => {
-      if (!(await tableExists(connection, _DIETARY_PREFS_TABLE))) return empty;
-      const household = await _resolveHouseholdOwnerId(connection, owner);
+      if (!(await tableExists(connection, _DIETARY_PREFS_TABLE))) {
+        if(options.strict)throw new Error('Dietary preferences unavailable');
+        return empty;
+      }
+      let household;
+      if(options.strict){
+        const [members]=await connection.execute('SELECT owner_id,user_id FROM new_users WHERE user_id=? LIMIT 1',[context.userId]);
+        if(!members?.[0])throw new Error('Membership unavailable');
+        household=members[0].owner_id || members[0].user_id;
+      }else household=await _resolveHouseholdOwnerId(connection, owner);
       const [rows] = await connection.execute(
         `SELECT allergies, diets, religious, health, custom
          FROM \`${_DIETARY_PREFS_TABLE}\` WHERE owner_id = ? LIMIT 1`,
@@ -808,7 +817,12 @@ export async function getDietaryPreferences(context, options = {}) {
       if (!row) return empty;
       const out = {};
       for (const key of _DIETARY_PREF_KEYS) {
-        const parsed = parseJsonColumn(row[key], []);
+        const raw=row[key];
+        if(options.strict && raw!=null){
+          const value=typeof raw==='string'?JSON.parse(raw):raw;
+          if(!Array.isArray(value) || value.some(x=>typeof x!=='string'))throw new Error('Invalid dietary preferences');
+        }
+        const parsed = parseJsonColumn(raw, []);
         out[key] = (Array.isArray(parsed) ? parsed : [])
           .map((x) => String(x == null ? "" : x).trim())
           .filter(Boolean);
@@ -816,6 +830,7 @@ export async function getDietaryPreferences(context, options = {}) {
       return out;
     }, options);
   } catch (err) {
+    if(options.strict)throw new Error('Dietary preferences are unavailable. Please try again.');
     console.warn("[dietary] getDietaryPreferences failed (non-fatal):", err?.message || err);
     return empty;
   }
@@ -1279,6 +1294,7 @@ function normalizeUnit(value) {
 }
 
 function roundQuantity(value) {
+  if ((typeof value !== "number" && typeof value !== "string") || (typeof value === "string" && !value.trim())) return null;
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) {
     return null;
@@ -1288,12 +1304,56 @@ function roundQuantity(value) {
 }
 
 function clampPercent(value) {
+  if ((typeof value !== "number" && typeof value !== "string") || (typeof value === "string" && !value.trim())) return null;
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) {
     return null;
   }
 
   return Math.max(0, Math.min(100, Math.round(numeric)));
+}
+
+function measuredQuantity(text) {
+  // A count of explicitly sized portions is a total measured amount. Preserve
+  // the original description separately, but make "two one-cup portions" usable
+  // by the quantity editor instead of leaving only an unstructured label.
+  const pack = text.match(/^(-?\d+|zero|one|two|three|four|five|six|seven|eight|nine|ten)\s+(-?\d+\s*\/\s*\d+|-?(?:\d+(?:\.\d+)?|\.\d+)|one|two|three|four|half|quarter)[-\s]+([a-z]+)\s+(?:portions?|servings?|bottles?|cans?|cartons?|containers?|bags?|packs?)$/i);
+  if (pack) {
+    const count = NUMBER_WORDS.has(pack[1]) ? NUMBER_WORDS.get(pack[1]) : Number(pack[1]);
+    const each = measuredQuantity(`${pack[2]} ${pack[3]}`);
+    if (count < 0 || !Number.isFinite(count) || !each) {
+      throw Object.assign(new Error("Please give one clear amount with its unit."), { statusCode: 400 });
+    }
+    return {value: roundQuantity(count * each.value), unit: each.unit};
+  }
+  // A stated fraction of a stated amount is arithmetic, not a new unit and
+  // not a container fullness estimate. This does not infer an unstated base.
+  let factor = 1;
+  const portion = text.match(/^(?:(?:a|one)\s+)?(half|quarter|-?\d+\s*\/\s*\d+)\s+of\s+(?:the\s+)?(.+)$/i);
+  if (portion) {
+    const ratio = portion[1].match(/^(-?\d+)\s*\/\s*(\d+)$/);
+    factor = ratio ? Number(ratio[1]) / Number(ratio[2]) : portion[1] === "half" ? 0.5 : 0.25;
+    if (!Number.isFinite(factor) || factor < 0 || /\bof\b/.test(portion[2])) {
+      throw Object.assign(new Error("Please give one clear remaining amount."), { statusCode: 400 });
+    }
+    text = portion[2];
+  }
+  const units = "servings?|pieces?|items?|bottles?|cans?|cartons?|boxes?|bags?|packs?|packets?|pouches?|containers?|jars?|tubs?|loaves?|rolls?|slices?|cups?|ounces?|oz|pounds?|lbs?|grams?|g|kilograms?|kg|millilit(?:er|re)s?|ml|lit(?:er|re)s?|l|tablespoons?|tbsp|teaspoons?|tsp|bushels?|pints?|quarts?|gallons?";
+  const match = text.match(new RegExp("(?:^|[\\s(])(-?\\d+\\s+\\d+\\s*/\\s*\\d+|-?\\d+\\s*/\\s*\\d+|-?(?:\\d+(?:\\.\\d+)?|\\.\\d+)|zero|one|two|three|four|five|six|seven|eight|nine|ten|half|quarter)\\s*(?:a\\s+|an\\s+)?(" + units + ")\\b", "i"));
+  if (!match) {
+    if (portion) throw Object.assign(new Error("What exact amount is left, including its unit?"), { statusCode: 400 });
+    return null;
+  }
+  const expression = match[1].trim();
+  const mixed = expression.match(/^(-?\d+)\s+(\d+)\s*\/\s*(\d+)$/);
+  const fraction = expression.match(/^(-?\d+)\s*\/\s*(\d+)$/);
+  const value = mixed ? Number(mixed[1]) + Number(mixed[2]) / Number(mixed[3])
+    : fraction ? Number(fraction[1]) / Number(fraction[2])
+    : NUMBER_WORDS.has(expression) ? NUMBER_WORDS.get(expression) : Number(expression);
+  if (!Number.isFinite(value * factor) || value < 0 || expression.startsWith("-")) {
+    throw Object.assign(new Error("Use a non-negative amount with a valid fraction."), { statusCode: 400 });
+  }
+  return { value: roundQuantity(value * factor), unit: normalizeUnit(match[2]) };
 }
 
 function parseStructuredState(input = {}) {
@@ -1314,11 +1374,23 @@ function parseStructuredState(input = {}) {
   if (!rawText) {
     return state;
   }
+  // Structured amounts are the authoritative contract used by app/older tool
+  // callers. Descriptive text must not erase or reinterpret a complete amount.
+  if (state.quantity_value != null && state.quantity_unit != null) return state;
 
-  const normalized = normalizeName(rawText);
+  // Food-name normalization removes dots and slashes: it turned 12.5 oz into
+  // 5 oz and 1/2 cup into 2 cups. Keep numeric punctuation in amount text.
+  const fractions = { "½": "1/2", "¼": "1/4", "¾": "3/4", "⅓": "1/3", "⅔": "2/3", "⅛": "1/8", "⅜": "3/8", "⅝": "5/8", "⅞": "7/8" };
+  const normalized = rawText.toLowerCase().replace(/[½¼¾⅓⅔⅛⅜⅝⅞]/g, value => " " + fractions[value]).normalize("NFKC").replace(/⁄/g, "/").trim();
+  const measured = measuredQuantity(normalized);
+  if (measured) {
+    if (state.quantity_value == null) state.quantity_value = measured.value;
+    state.quantity_unit ||= measured.unit;
+    return state; // A half cup is an amount, not a half-full container.
+  }
 
   if (state.fill_percent == null) {
-    const percentMatch = normalized.match(/(\d{1,3})\s*percent|\b(\d{1,3})\s*%\b/);
+    const percentMatch = normalized.match(/\b(\d{1,3}(?:\.\d+)?)\s*(?:percent|%)/);
     if (percentMatch) {
       state.fill_percent = clampPercent(percentMatch[1] || percentMatch[2]);
     } else if (/\babout half\b|\baround half\b|\bhalfway\b/.test(normalized)) {
@@ -2841,6 +2913,8 @@ const KITCHEN_CATEGORY_KEYWORDS = [
   [["spice", "spices", "seasoning", "seasonings", "spice blend", "seasoning blend", "spice rub",
     "rub", "cinnamon", "cumin", "paprika", "oregano", "turmeric", "nutmeg", "cardamom", "cayenne",
     "peppercorn", "chili powder", "garlic powder", "onion powder", "curry powder", "bay leaf"], "spices"],
+  // A named snack wins over its base ingredient; explicit categories still win.
+  [["tortilla chips"], "snacks_sweets"],
   [["pantry", "condiment", "broth", "stock", "bouillon",
     "sauce", "marinara", "salsa", "ketchup", "mustard", "mayo", "dressing", "oil", "vinegar",
     "syrup", "honey", "jam", "jelly", "peanut butter", "baking", "flour", "sugar", "rice",
@@ -2946,7 +3020,7 @@ async function insertKitchenRowAcrossHousehold(connection, context, payload) {
       [
         rowId,
         tableOwnerId,
-        "voice-assistant",
+        (context.assistantDeviceId || "voice-assistant"),
         itemName,
         payload.brand || null,
         normalizedCategory,
@@ -3008,7 +3082,7 @@ async function insertKitchenRowAcrossHousehold(connection, context, payload) {
       [
         rowId,
         memberId,
-        "voice-assistant",
+        (context.assistantDeviceId || "voice-assistant"),
         itemName,
         payload.brand || null,
         normalizedCategory,
@@ -3047,7 +3121,7 @@ async function insertDiscardRowAcrossHousehold(connection, context, kitchenRow, 
       [
         discardId,
         tableOwnerId,
-        "voice-assistant",
+        (context.assistantDeviceId || "voice-assistant"),
         kitchenRow.product_name || null,
         kitchenRow.brand || null,
         kitchenRow.category || null,
@@ -3074,7 +3148,7 @@ async function insertDiscardRowAcrossHousehold(connection, context, kitchenRow, 
       buildStatement: async (tableName, memberId) => {
         const columns = await getTableColumns(connection, tableName);
         const fieldNames = ["_id", "_owner", "_device", "_createdDate", "product_name", "brand", "category", "images", "action", "product_expiration", "job_id", "user_id"];
-        const values = [discardId, memberId, "voice-assistant", kitchenRow.product_name || null, kitchenRow.brand || null, kitchenRow.category || null, kitchenRow.images || null, "IN", kitchenRow.product_expiration || null, kitchenRow.job_id || `voice-discard-${discardId}`, context.userId];
+        const values = [discardId, memberId, (context.assistantDeviceId || "voice-assistant"), kitchenRow.product_name || null, kitchenRow.brand || null, kitchenRow.category || null, kitchenRow.images || null, "IN", kitchenRow.product_expiration || null, kitchenRow.job_id || `voice-discard-${discardId}`, context.userId];
         if (columns.has("_updatedDate")) fieldNames.push("_updatedDate");
         if (columns.has("source_kitchen_id")) { fieldNames.push("source_kitchen_id"); values.push(kitchenRow._id); }
         if (columns.has("discard_reason")) { fieldNames.push("discard_reason"); values.push(reason || null); }
@@ -3115,7 +3189,7 @@ async function insertDiscardRowAcrossHousehold(connection, context, kitchenRow, 
     const values = [
       discardId,
       memberId,
-      "voice-assistant",
+      (context.assistantDeviceId || "voice-assistant"),
       kitchenRow.product_name || null,
       kitchenRow.brand || null,
       kitchenRow.category || null,
@@ -3812,7 +3886,7 @@ export async function checkInKitchenItem(context, payload, options = {}) {
     const insertedRow = await findKitchenRowById(connection, resolveTableOwnerId(context), rowId);
     const result = {
       id: rowId,
-      item: insertedRow ? mapKitchenRow(insertedRow) : null
+      item: insertedRow ? {...mapKitchenRow(insertedRow),amount_revision:0} : null
     };
     console.log("[DEBUG] kitchen item checked in:", JSON.stringify({
       ownerId: context?.ownerId || null,
@@ -3858,32 +3932,7 @@ export async function checkInManyKitchenItems(context, items, options = {}) {
 }
 
 export async function markKitchenItemOpened(context, itemReference, options = {}) {
-  const result = await withDbConnection(async (connection) => {
-    const resolvedReference = normalizeKitchenReference(itemReference);
-    const row = await resolveKitchenRowByReference(connection, context, resolvedReference);
-    if (!row) {
-      throw await buildKitchenNotFoundError(connection, context, resolvedReference.item_name || "that kitchen item");
-    }
-
-    await updateKitchenRowAcrossHousehold(connection, context, row._id, { is_opened: 1 });
-    const item = mapKitchenRow({
-      ...row,
-      is_opened: 1
-    });
-    console.log("[DEBUG] kitchen item opened:", JSON.stringify({
-      ownerId: context?.ownerId || null,
-      userId: context?.userId || null,
-      item_name: item.item_name,
-      row_id: row._id
-    }));
-    return item;
-  }, options);
-
-  if (!options?.skipKitchenDependentGeneration) {
-    await triggerKitchenDependentGeneration(context, options);
-  }
-
-  return result;
+  return updateKitchenItemDetails(context, itemReference, {is_opened:true}, options);
 }
 
 export async function updateKitchenItemQuantity(context, itemReference, quantityInput, options = {}) {
@@ -3943,154 +3992,90 @@ export async function updateKitchenItemQuantity(context, itemReference, quantity
 }
 
 export async function updateKitchenItemExpiration(context, itemReference, expirationInput, options = {}) {
-  const result = await withDbConnection(async (connection) => {
-    const resolvedReference = normalizeKitchenReference(itemReference);
-    const row = await resolveKitchenRowByReference(connection, context, resolvedReference);
-    if (!row) {
-      throw await buildKitchenNotFoundError(connection, context, resolvedReference.item_name || "that kitchen item");
-    }
-
-    const expirationDate = parseKitchenExpirationDate(expirationInput);
-    if (!expirationDate) {
-      const error = new Error("I couldn't understand that expiration date. What date should I use?");
-      error.statusCode = 400;
-      throw error;
-    }
-
-    await updateKitchenRowAcrossHousehold(connection, context, row._id, {
-      product_expiration: expirationDate
-    });
-
-    const item = mapKitchenRow({
-      ...row,
-      product_expiration: expirationDate
-    });
-    console.log("[DEBUG] kitchen item expiration updated:", JSON.stringify({
-      ownerId: context?.ownerId || null,
-      userId: context?.userId || null,
-      item_name: item.item_name,
-      row_id: row._id,
-      expiration_date: expirationDate
-    }));
-    return item;
-  }, options);
-
-  if (!options?.skipKitchenDependentGeneration) {
-    await triggerKitchenDependentGeneration(context, options);
-  }
-
-  return result;
+  return updateKitchenItemDetails(context, itemReference, {expiration_date:expirationInput}, options);
 }
 
 export async function updateKitchenItemLocation(context, itemReference, location, options = {}) {
-  const result = await withDbConnection(async (connection) => {
-    const resolvedReference = normalizeKitchenReference(itemReference);
-    const row = await resolveKitchenRowByReference(connection, context, resolvedReference);
-    if (!row) {
-      throw await buildKitchenNotFoundError(connection, context, resolvedReference.item_name || "that kitchen item");
-    }
-
-    await updateKitchenRowAcrossHousehold(connection, context, row._id, {
-      storage_location: location
-    });
-
-    const item = mapKitchenRow({
-      ...row,
-      storage_location: location
-    });
-    console.log("[DEBUG] kitchen item location updated:", JSON.stringify({
-      ownerId: context?.ownerId || null,
-      userId: context?.userId || null,
-      item_name: item.item_name,
-      row_id: row._id,
-      storage_location: location
-    }));
-    return item;
-  }, options);
-
-  if (!options?.skipKitchenDependentGeneration) {
-    await triggerKitchenDependentGeneration(context, options);
-  }
-
-  return result;
+  return updateKitchenItemDetails(context, itemReference, {location}, options);
 }
 
 export async function updateKitchenItemDetails(context, itemReference, updates, options = {}) {
-  const result = await withDbConnection(async (connection) => {
-    const resolvedReference = normalizeKitchenReference(itemReference);
-    const row = await resolveKitchenRowByReference(connection, context, resolvedReference);
-    if (!row) {
-      throw await buildKitchenNotFoundError(connection, context, resolvedReference.item_name || "that kitchen item");
+  options = {...options, mutationContext:options.mutationContext || createKitchenMutationContext()};
+  const prepared = await prepareKitchenEdit(context, normalizeKitchenReference(itemReference), updates, options,
+    () => withDbConnection(async (connection) => {
+    let reference = normalizeKitchenReference(itemReference);
+    let resolved;
+    try {
+      if (updates?.new_name && options.sourceTranscript && options.expectedRevision == null) {
+        const namedRow=reference.item_id ? await findKitchenRowById(connection,resolveTableOwnerId(context),reference.item_id) : null;
+        reference=renameReference(reference,updates,options,namedRow);
+        if (reference.item_id) resolved=await resolveKitchenRowByReference(connection,context,reference);
+        else {
+          const matches=await findKitchenRowsByName(connection,resolveTableOwnerId(context),reference.item_name,101);
+          if (matches.length>100) throw Object.assign(new Error('Please use a more specific item name for this correction.'),{statusCode:409});
+          resolved=matches.length===1?matches[0]:pickRenameByCreation(matches,reference.selection_hint);
+          if (!resolved && matches.length>1) {
+            // Include both creation-time extremes in the bounded clarification.
+            const ordered=[...matches].sort((a,b)=>new Date(b._createdDate)-new Date(a._createdDate));
+            const candidates=ordered.length>5?[...ordered.slice(0,4),ordered.at(-1)]:ordered;
+            throw createKitchenAmbiguityError(reference.item_name,candidates);
+          }
+        }
+      } else resolved = await resolveKitchenRowByReference(connection, context, reference);
     }
-
-    const kitchenFields = {};
-    const nextRow = { ...row };
-
-    if (
-      updates?.remaining_quantity
-      || updates?.quantity
-      || updates?.quantity_value != null
-      || updates?.quantity_unit
-      || updates?.fill_percent != null
-    ) {
-      const structuredState = parseStructuredState(updates);
-      kitchenFields.remaining_quantity = structuredState.remaining_quantity;
-      kitchenFields.quantity_value = structuredState.quantity_value;
-      kitchenFields.quantity_unit = structuredState.quantity_unit;
-      kitchenFields.fill_percent = structuredState.fill_percent;
-      nextRow.remaining_quantity = structuredState.remaining_quantity;
-      nextRow.quantity_value = structuredState.quantity_value;
-      nextRow.quantity_unit = structuredState.quantity_unit;
-      nextRow.fill_percent = structuredState.fill_percent;
-    }
-
-    if (updates?.location) {
-      kitchenFields.storage_location = updates.location;
-      nextRow.storage_location = updates.location;
-    }
-    if (updates?.expiration_date) {
-      const expirationDate = parseKitchenExpirationDate(updates.expiration_date);
-      if (!expirationDate) {
-        const error = new Error("I couldn't understand that expiration date. What date should I use?");
-        error.statusCode = 400;
-        throw error;
+    catch (error) {
+      if (error.details?.type === 'ambiguous_kitchen_item') {
+        // Snapshot revision and scope for the clarification, not a later guessed target.
+        const ids = error.details.candidates.map(c => c.item_id);
+        const [candidates] = await connection.execute(`SELECT k.*, COALESCE(e.revision,0) AS amount_revision
+          FROM shared_kitchen k LEFT JOIN kitchen_item_edits e ON e.item_id=CONVERT(k._id USING utf8mb4) COLLATE utf8mb4_unicode_ci
+          WHERE k._id IN (${ids.map(()=>'?').join(',')}) AND k.action='IN'`, ids);
+        error.details.candidates = candidates.filter(r=>getTableHouseholdMemberIds(context).includes(String(r.owner_id)))
+          .map(r=>({...summarizeKitchenRowForDisambiguation(r),revision:Number(r.amount_revision)}));
       }
-      kitchenFields.product_expiration = expirationDate;
-      nextRow.product_expiration = expirationDate;
+      throw error;
     }
-    if (typeof updates?.is_opened === "boolean") {
-      kitchenFields.is_opened = updates.is_opened ? 1 : 0;
-      nextRow.is_opened = updates.is_opened ? 1 : 0;
+    if (!resolved) throw await buildKitchenNotFoundError(connection, context, reference.item_name || "that kitchen item");
+    // Read content and its edit revision in one snapshot. The canonical API will
+    // lock and revalidate both membership and revision before writing anything.
+    const [rows] = await connection.execute(`SELECT k.*, COALESCE(e.revision,0) AS amount_revision,
+      e.reference_amount FROM shared_kitchen k LEFT JOIN kitchen_item_edits e
+      ON e.item_id=CONVERT(k._id USING utf8mb4) COLLATE utf8mb4_unicode_ci
+      WHERE k._id=? AND k.action='IN'`, [resolved._id]);
+    const row = rows[0];
+    if (!row || !getTableHouseholdMemberIds(context).includes(String(row.owner_id)))
+      throw Object.assign(new Error('This item is no longer in your household kitchen.'), {statusCode:404});
+    // Preserve the clarification's revision in the request. Canonical receipts
+    // replay an already committed operation before checking for a stale edit.
+    if (options.expectedRevision != null) row.amount_revision = options.expectedRevision;
+    const fields = {};
+    if (updates?.new_name != null) fields.product_name = updates.new_name;
+    if (updates?.location) fields.storage_location = updates.location;
+    if (updates?.expiration_date) {
+      fields.product_expiration = parseKitchenExpirationDate(updates.expiration_date);
+      if (!fields.product_expiration) throw Object.assign(new Error('What expiration date should I use?'), {statusCode:400});
     }
-    if (updates?.brand) {
-      kitchenFields.brand = updates.brand;
-      nextRow.brand = updates.brand;
+    if (typeof updates?.is_opened === 'boolean') fields.is_opened = updates.is_opened;
+    if (updates?.brand) fields.brand = updates.brand;
+    if (updates?.category) fields.category = normalizeKitchenCategory(updates.category, fields.storage_location || row.storage_location, fields.product_name || row.product_name);
+    if (updates?.remaining_quantity || updates?.quantity || updates?.quantity_value != null || updates?.quantity_unit || updates?.fill_percent != null) {
+      const state = parseStructuredState(updates);
+      let value = state.quantity_value;
+      if (value == null && state.fill_percent != null && row.reference_amount != null)
+        value = Math.round(Number(row.reference_amount) * state.fill_percent) / 100;
+      if (value == null || value <= 0)
+        throw Object.assign(new Error('Tell me the amount remaining and its unit before I change it.'), {statusCode:400});
+      fields.quantity_value = value;
+      fields.quantity_unit = updates.quantity_unit || ({piece:'count',item:'count'}[state.quantity_unit] || state.quantity_unit) || row.quantity_unit;
+      if (!fields.quantity_unit) throw Object.assign(new Error('What unit should I use for that amount?'), {statusCode:400});
     }
-    if (updates?.category) {
-      // Clamp the category-UPDATE path through the same normalizer as the INSERT
-      // path — the update tool otherwise wrote raw free-text (e.g. 'Seasoning').
-      const normalizedCategory = normalizeKitchenCategory(updates.category, nextRow.storage_location, nextRow.product_name);
-      kitchenFields.category = normalizedCategory;
-      nextRow.category = normalizedCategory;
-    }
-
-    await updateKitchenRowAcrossHousehold(connection, context, row._id, kitchenFields);
-    const item = mapKitchenRow(nextRow);
-    console.log("[DEBUG] kitchen item details updated:", JSON.stringify({
-      ownerId: context?.ownerId || null,
-      userId: context?.userId || null,
-      item_name: item.item_name,
-      row_id: row._id,
-      updated_fields: Object.keys(kitchenFields)
-    }));
-    return item;
-  }, options);
-
-  if (!options?.skipKitchenDependentGeneration) {
-    await triggerKitchenDependentGeneration(context, options);
-  }
-
-  return result;
+    return {row, fields};
+  }, options));
+  const confirmed = await saveKitchenEdit(context, prepared.row, prepared.fields, options);
+  // Canonical Kitchen owns protected fields, shelf-life and recipe invalidation.
+  // Never synthesize the returned item by spreading proposed values over a row.
+  return {...mapKitchenRow(confirmed), amount_revision:confirmed.amount_revision,
+    operation_id:confirmed.operation_id, mutation_outcome:confirmed.mutation_outcome};
 }
 
 export async function discardKitchenItem(context, itemReference, reason, options = {}) {
@@ -4869,7 +4854,7 @@ async function insertDishRowAcrossHousehold(connection, context, payload) {
       [
         rowId,
         tableOwnerId,
-        "voice-assistant",
+        (context.assistantDeviceId || "voice-assistant"),
         dishName,
         payload.confidence ?? null,
         payload.explanation || "Logged from voice assistant",
@@ -4911,7 +4896,7 @@ async function insertDishRowAcrossHousehold(connection, context, payload) {
       [
         rowId,
         perUserOwner,
-        "voice-assistant",
+        (context.assistantDeviceId || "voice-assistant"),
         dishName,
         payload.confidence ?? null,
         payload.explanation || "Logged from voice assistant",
@@ -4957,7 +4942,7 @@ async function insertDishRowAcrossHousehold(connection, context, payload) {
       [
         rowId,
         memberId,
-        "voice-assistant",
+        (context.assistantDeviceId || "voice-assistant"),
         dishName,
         payload.confidence ?? null,
         payload.explanation || "Logged from voice assistant",
@@ -5432,7 +5417,7 @@ export async function addShoppingItem(context, itemName, requestedStore = null, 
           images, product_barcode, store, action,
           _createdDate, created_at, updated_at, household_item_uuid, owner_id
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW(), NOW(), ?, ?)`,
-        [shoppingOwnerId, "voice-assistant", displayItemName, quantity || null, null, null, null, store, "ADDED", householdItemUuid, shoppingOwnerId]
+        [shoppingOwnerId, (context.assistantDeviceId || "voice-assistant"), displayItemName, quantity || null, null, null, null, store, "ADDED", householdItemUuid, shoppingOwnerId]
       );
       const primaryInsertId = result?.insertId != null ? String(result.insertId) : null;
       const shoppingResult = {
@@ -5487,7 +5472,7 @@ export async function addShoppingItem(context, itemName, requestedStore = null, 
           updated_at,
           household_item_uuid
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW(), NOW(), ?)`,
-        values: [memberId, "voice-assistant", displayItemName, quantity || null, null, null, null, store, "ADDED", householdItemUuid],
+        values: [memberId, (context.assistantDeviceId || "voice-assistant"), displayItemName, quantity || null, null, null, null, store, "ADDED", householdItemUuid],
       }),
       onResult: (memberId, result) => {
         if (memberId === shoppingOwnerId) {
@@ -5544,7 +5529,7 @@ export async function addManyShoppingItems(context, batchItems, options = {}) {
             images, product_barcode, store, action,
             _createdDate, created_at, updated_at, household_item_uuid, owner_id
           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW(), NOW(), ?, ?)`,
-          [shoppingOwnerId, "voice-assistant", displayItemName, quantity, null, null, null, store, "ADDED", householdItemUuid, shoppingOwnerId]
+          [shoppingOwnerId, (context.assistantDeviceId || "voice-assistant"), displayItemName, quantity, null, null, null, store, "ADDED", householdItemUuid, shoppingOwnerId]
         );
       }
 
@@ -5560,7 +5545,7 @@ export async function addManyShoppingItems(context, batchItems, options = {}) {
             images, product_barcode, store, action,
             _createdDate, created_at, updated_at, household_item_uuid
           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW(), NOW(), ?)`,
-          values: [memberId, "voice-assistant", displayItemName, quantity, null, null, null, store, "ADDED", householdItemUuid],
+          values: [memberId, (context.assistantDeviceId || "voice-assistant"), displayItemName, quantity, null, null, null, store, "ADDED", householdItemUuid],
         }),
         onResult: (memberId, result) => {
           if (memberId === shoppingOwnerId) {
