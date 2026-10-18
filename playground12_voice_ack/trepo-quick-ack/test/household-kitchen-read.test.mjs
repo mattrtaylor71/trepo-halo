@@ -14,6 +14,7 @@ const connection={async execute(sql,params=[]){
  if(failed) throw new Error('database unavailable');
  if(/FROM new_users actor/.test(sql)){
   const actor=members.find(m=>m.user_id===params[0]);if(!actor)return [[]];
+  if(sql.includes('shared_shopping_list'))return [[{_id:null,_scope_actor:actor.user_id,_scope_household:actor.owner_id||actor.user_id}]];
   const allowed=members.filter(m=>m.user_id===actor.user_id || (actor.owner_id && m.owner_id===actor.owner_id)).map(m=>m.user_id);
   const found=rows.filter(r=>allowed.includes(r.owner_id)&&r.action==='IN');
   return [(found.length?found:[{_id:null}]).map(r=>({...r,_kitchen_scope_actor:actor.user_id,_kitchen_scope_household:actor.owner_id||actor.user_id}))];

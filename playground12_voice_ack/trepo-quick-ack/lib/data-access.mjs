@@ -5,6 +5,7 @@
 // (voice dishes/discards/shopping go invisible again — regressions 07-02 / 07-06).
 // The trepo-voice-dualwrite-canary + alarm VoiceDualWriteMiss will catch a revert.
 import crypto from "node:crypto";
+import { readHouseholdFoodRows, householdSavedRecipes, householdShoppingRows, householdMealPlans } from "./household-food-data.mjs";
 import { readSharedHouseholdKitchen } from "./household-kitchen.mjs";
 import { saveKitchenEdit, renameReference, pickRenameByCreation, createKitchenMutationContext, prepareKitchenEdit } from "./kitchen-edit-client.mjs";
 import { InvokeCommand, LambdaClient } from "@aws-sdk/client-lambda";
@@ -1137,6 +1138,9 @@ function normalizeSavedRecipeItem(recipe) {
     extraction_source: recipe.extraction_source || null,
     caption_field: recipe.caption_field || null,
     status: recipe.status || "ready",
+    saved_by: recipe.saved_by || recipe.source_owner_id || recipe._owner || null,
+    saved_by_name: recipe.saved_by_name || recipe.source_owner_name || null,
+    can_edit: recipe.can_edit ?? null,
     _createdDate: recipe._createdDate || null,
     _updatedDate: recipe._updatedDate || null
   };
@@ -1149,8 +1153,12 @@ function normalizeSavedRecipesPayload(payload, limit = null) {
   const safeLimit = clampLimit(limit, 10, 50);
   return {
     owner: payload?.owner || null,
+    scope: payload?.scope || "own",
     recipes: limit != null ? recipes.slice(0, safeLimit) : recipes,
-    count: Number(payload?.count || recipes.length || 0)
+    count: Number(payload?.count ?? recipes.length),
+    has_more: limit != null && recipes.length > safeLimit,
+    // Complete compact catalog keeps older/partner recipes discoverable when details are limited.
+    catalog: recipes.map(({id,title,saved_by,saved_by_name,status}) => ({id,title,saved_by,saved_by_name,status}))
   };
 }
 
@@ -5310,9 +5318,11 @@ export async function addDishIngredientsToShoppingList(context, reference = {}, 
 
 export async function getShoppingItems(context, options = {}) {
   return withDbConnection(async (connection) => {
-    const shoppingRows = await getShoppingRows(connection, context);
+    const shoppingRows = WRITE_SHARED_ONLY
+      ? householdShoppingRows(await readHouseholdFoodRows(connection, context, "shopping"), resolveShoppingOwnerId(context))
+      : (await getShoppingRows(connection, context)).filter(row => ["ADDED","CHECKED","0","1"].includes(row.action));
     const items = await hydrateShoppingRows(connection, context, shoppingRows);
-    const limitedItems = items.slice(0, clampLimit(options.limit, 25, 100));
+    const limitedItems = options.limit == null || options.all ? items : items.slice(0, clampLimit(options.limit, 25, 100));
     console.log("[DEBUG] shopping list loaded:", JSON.stringify({
       ownerId: context?.ownerId || null,
       userId: context?.userId || null,
@@ -6054,21 +6064,29 @@ export async function addRecipeIngredientsToShoppingList(context, reference = {}
   };
 }
 
-export async function getSavedRecipes(context, options = {}) {
+async function readSavedRecipeCollection(context, options) {
   const ownerId = resolveShoppingOwnerId(context);
-  const payload = await fetchHouseholdApiJson(`/saved-recipes/${encodeURIComponent(ownerId)}`, options);
-  return normalizeSavedRecipesPayload(payload, options.limit ?? null);
+  if (!WRITE_SHARED_ONLY) {
+    return fetchHouseholdApiJson(`/saved-recipes/${encodeURIComponent(ownerId)}?scope=household&limit=100`, options);
+  }
+  const recipes = await withDbConnection(async connection => householdSavedRecipes(
+    await readHouseholdFoodRows(connection, context, "saved_recipes"), ownerId), options);
+  return {owner:ownerId, scope:"household", recipes, count:recipes.length};
+}
+
+export async function getSavedRecipes(context, options = {}, executionOptions = {}) {
+  options = {...executionOptions, ...options};
+  const payload = await readSavedRecipeCollection(context, options);
+  return normalizeSavedRecipesPayload(payload, options.all ? null : options.limit ?? 25);
 }
 
 export async function getSavedRecipeDetail(context, reference = {}, options = {}) {
-  const ownerId = resolveShoppingOwnerId(context);
-  const payload = await fetchHouseholdApiJson(`/saved-recipes/${encodeURIComponent(ownerId)}`, options);
-  const normalized = normalizeSavedRecipesPayload(payload);
-  const recipe = resolveSavedRecipeReference(normalized, reference);
-  return {
-    owner: normalized.owner || ownerId,
-    recipe
-  };
+  const normalized = normalizeSavedRecipesPayload(await readSavedRecipeCollection(context, options));
+  const recipe = reference.recipe_id
+    ? normalized.recipes.find(recipe => recipe.id === String(reference.recipe_id))
+    : resolveSavedRecipeReference(normalized, reference);
+  if (!recipe) { const error = new Error("That saved recipe could not be found."); error.statusCode = 404; throw error; }
+  return {owner:normalized.owner, scope:normalized.scope, recipe};
 }
 
 export async function saveRecipeFromTikTok(context, args = {}, options = {}) {
@@ -6122,6 +6140,9 @@ export async function saveGeneratedRecipe(context, args = {}, options = {}) {
 export async function removeSavedRecipe(context, reference = {}, options = {}) {
   const ownerId = resolveShoppingOwnerId(context);
   const detail = await getSavedRecipeDetail(context, reference, options);
+  if (detail?.recipe?.saved_by && detail.recipe.saved_by !== ownerId) {
+    throw new Error("This recipe belongs to another household member. You can use it for cooking, but only its owner can delete it.");
+  }
   if (!detail?.recipe?.id) {
     const error = new Error("That saved recipe could not be found.");
     error.statusCode = 404;
@@ -6280,7 +6301,7 @@ export async function moveRecipeToCategory(context, args = {}, options = {}) {
   const explicitId = String(args?.recipe_id || "").trim();
   if (explicitId) {
     try {
-      const list = await getSavedRecipes(context, options);
+      const list = await getSavedRecipes(context, {...options, all:true});
       recipe = (list.recipes || []).find((entry) => String(entry.id) === explicitId) || null;
     } catch {
       recipe = null;
@@ -6455,7 +6476,10 @@ function normalizeMealCalendarEntry(row) {
     notes: arr(row.notes),
     meal_category: row.meal_category || null,
     need_grocery: Boolean(row.need_grocery),
-    missing_ingredients: arr(row.missing_ingredients)
+    missing_ingredients: arr(row.missing_ingredients),
+    added_by: row._owner || row.owner_id || null,
+    added_by_me: row.added_by_me ?? null,
+    added_by_name: row.added_by_name || null
   };
 }
 
@@ -6490,7 +6514,7 @@ async function resolveSavedRecipeForCalendar(context, { recipe_id, recipe_name }
   const explicitId = String(recipe_id || "").trim();
   if (explicitId) {
     try {
-      const list = await getSavedRecipes(context, options);
+      const list = await getSavedRecipes(context, {...options, all:true});
       const found = (list.recipes || []).find((entry) => String(entry.id) === explicitId);
       if (found) {
         return { ok: true, recipe: found };
@@ -6844,11 +6868,15 @@ export async function addSavedRecipeIngredientsToShoppingList(context, reference
   };
 }
 
-export async function getMealPlan(context, options = {}) {
+export async function getMealPlan(context, options = {}, executionOptions = {}) {
+  options = {...executionOptions, ...options};
   const ownerId = resolveTableOwnerId(context);
-  const payload = await fetchHouseholdApiJson(`/meal-plan/${encodeURIComponent(ownerId)}`, options);
-  return {
-    owner: payload.owner || ownerId,
+  const plans = WRITE_SHARED_ONLY
+    ? await withDbConnection(async connection => householdMealPlans(await readHouseholdFoodRows(connection, context, "meal_plan")), options)
+    : [await fetchHouseholdApiJson(`/meal-plan/${encodeURIComponent(ownerId)}`, options)];
+  const normalize = payload => ({
+    owner: payload.owner || payload.source_owner_id || ownerId,
+    source_owner_name: payload.source_owner_name || null,
     status: payload.status || "empty",
     focus: payload.focus || null,
     explanation_title: payload.explanation_title || null,
@@ -6857,7 +6885,9 @@ export async function getMealPlan(context, options = {}) {
     error_message: payload.error_message || null,
     _createdDate: payload._createdDate || null,
     _updatedDate: payload._updatedDate || null
-  };
+  });
+  return {...normalize(plans[0] || {}), scope:WRITE_SHARED_ONLY ? "household" : "own",
+    household_plans:plans.map(normalize)};
 }
 
 export async function refreshMealPlan(context, args = {}, options = {}) {

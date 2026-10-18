@@ -1,4 +1,5 @@
 from family_brain import store as brain_store
+import recipe_generation_guard
 from family_brain.recipe_safety import _recipe_violates, _format_preferences_block
 from contextlib import contextmanager
 # meal_plan_generator/app.py - Async Lambda: read kitchen, GPT plan + 12 recipes, generate images, write {owner}_meal_plan
@@ -638,26 +639,30 @@ def handler(event, context):
                         (target_owner, target_owner, focus)
                     )
                 _set_status(conn, target_owner, 'regenerating', commit=False)
+        memory = brain_store.generation_context(conn, owner, target_owners, 'meal_plan')
+        prefs = brain_store.dietary_preferences(conn, owner)
+        inventory_table, _, _ = _resolve_table(owner, '_prod_kitchen', conn)
+        snapshot = recipe_generation_guard.capture(conn, owner=owner, recipients=target_owners,
+            dietary=prefs, memory=memory, inventory_table=inventory_table)
         ingredients = _get_kitchen_ingredients(conn, owner)
         if len(ingredients) < MIN_KITCHEN_ITEMS:
-            with _household_write(conn):
+            with recipe_generation_guard.publication(conn, snapshot=snapshot):
                 for target_owner in target_owners:
                     _set_empty(conn, target_owner, focus, commit=False)
             print(f'[meal_plan_generator] Not enough kitchen items owner={owner} count={len(ingredients)} min={MIN_KITCHEN_ITEMS}')
             return
-        brain_owner = brain_store.generation_subject(target_owners)
-        memory = brain_store.generation_context(conn, owner, target_owners, 'meal_plan')
-        prefs = brain_store.dietary_preferences(conn, owner) if brain_owner else None
         gpt_out = _generate_plan_with_gpt(ingredients, focus, (memory or {}).get('prompt', ''), _format_preferences_block(prefs))
         if prefs is not None and any(_recipe_violates(recipe, prefs) for recipe in (gpt_out.get('recipes') or [])):
             raise ValueError('Meal plan did not satisfy current dietary preferences')
-        if memory and not brain_store.is_current(conn, memory['fence']):
-            raise ValueError('Food preferences changed during generation')
+        # Hold current membership, food preferences, stock and explicit memory controls
+        # stable; unrelated activity and the brain cache TTL are not recipe inputs.
+        with recipe_generation_guard.publication(conn, snapshot=snapshot):
+            pass
         recipes = gpt_out.get('recipes') or []
         if len(recipes) < 12:
             _report_backend_error('generate', owner_id=owner, code='insufficient_recipes',
                                   error=f'GPT returned {len(recipes)} recipes (need 12)')
-            with _household_write(conn):
+            with recipe_generation_guard.publication(conn, snapshot=snapshot):
                 for target_owner in target_owners:
                     _set_status(conn, target_owner, 'failed', 'GPT returned fewer than 12 recipes', commit=False)
             return
@@ -691,16 +696,11 @@ def handler(event, context):
                 },
             })
 
-        if memory and not brain_store.is_current(conn, memory['fence']):
-            raise ValueError('Food preferences changed during generation')
-        if prefs is not None and prefs != brain_store.dietary_preferences(conn, owner):
-            raise ValueError('Dietary preferences changed during generation')
 
         explanation_title = (gpt_out.get('explanation_title') or '').strip() or f'Meal plan: {focus[:50]}'
         explanation_paragraph = (gpt_out.get('explanation_paragraph') or '').strip()
 
-        with _household_write(conn):
-            brain_store.require_publishable(conn, memory, owner, target_owners, prefs)
+        with recipe_generation_guard.publication(conn, snapshot=snapshot):
             with conn.cursor() as cur:
                 for target_owner in target_owners:
                     # SHARED ONLY (2026-08-18 cutover). This is the real payload write: the 12-slot

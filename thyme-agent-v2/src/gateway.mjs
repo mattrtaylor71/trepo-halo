@@ -218,15 +218,7 @@ export class TrepoGateway {
         result = (await this.kitchenRows(a)).map((row) => ({...this.data.mapKitchenRow(row), amount_revision:Number(row.amount_revision), reference_amount:row.reference_amount==null?null:Number(row.reference_amount)}));
         break;
       case "shopping":
-        result = await this.mysql.withDbConnection(async (c) => {
-          // The app's list is mirrored per member. Read this actor's current
-          // rows once, not every member's copies or the removed history.
-          const [rows] = await c.execute(
-            "SELECT * FROM shared_shopping_list WHERE owner_id=? AND action IN ('ADDED','CHECKED') ORDER BY COALESCE(updated_at,created_at,_createdDate) DESC,_id",
-            [a.actor],
-          );
-          return rows.map((row) => this.data.mapShoppingRow(row));
-        }, o);
+        result = await this.data.getShoppingItems(a.ctx, o);
         break;
       case "saved_recipes":
         result = await this.savedRecipes(a);
@@ -346,28 +338,8 @@ export class TrepoGateway {
     });
   }
   async savedRecipes(a) {
-    await this.check(a);
-    return this.mysql.withDbConnection(
-      async (c) => {
-        const [rows] = await c.execute(
-          "SELECT _id AS id,title,ingredients,instructions,notes,source_type,source_url,image_url,status,_createdDate,_updatedDate FROM shared_saved_recipes WHERE owner_id=? ORDER BY COALESCE(_updatedDate,_createdDate) DESC,_id",
-          [a.actor],
-        );
-        const decode = (x) => (typeof x === "string" ? JSON.parse(x) : x || []);
-        return {
-          recipes: rows.map((r) => ({
-            ...r,
-            ingredients: decode(r.ingredients),
-            instructions: decode(r.instructions),
-            steps: decode(r.instructions),
-            notes: decode(r.notes),
-          })),
-          count: rows.length,
-          scope: "own",
-        };
-      },
-      { env: this.env },
-    );
+    const current = await this.check(a);
+    return this.data.getSavedRecipes(current.ctx, {env:this.env, all:true});
   }
   async normalizeProposal(name, args, a) {
     if (name.includes("shopping") && !["remove_shopping_list","rename_shopping_list"].includes(name)) {
@@ -443,7 +415,14 @@ export class TrepoGateway {
     if(args.limit && Array.isArray(data)) return data.slice(0,Math.min(100,args.limit));
     return data;
   }
-  async prepare(a,name,args,before) { return prepareAction(this,a,name,args,before); }
+  async prepare(a,name,args,before) {
+    if (["edit_saved_recipe","remove_saved_recipe"].includes(name)) {
+      const selected=exact(collection(before),args.recipe_id,args.recipe_title);
+      if(selected.saved_by && selected.saved_by!==a.actor)
+        throw new Fault("recipe_not_owned","This recipe belongs to another household member. You can cook it or save your own copy; only its owner can edit or delete it.",403);
+    }
+    return prepareAction(this,a,name,args,before);
+  }
   async kitchenEdit(a,name,args,operationId,expected) {
     const old=exact(collection(expected),args.item_id);
     const fields={};

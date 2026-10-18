@@ -645,17 +645,16 @@ async function buildShoppingGroundingMessage(userContext, env) {
   }
 
   try {
-    const items = await getShoppingItems(userContext, { env, limit: 50 });
+    const items = await getShoppingItems(userContext, { env, all:true });
     if (!Array.isArray(items) || items.length === 0) {
       return null;
     }
 
     const itemLines = items
-      .slice(0, 50)
-      .map((item) => `- ${item.item_name}${item.store ? ` @ ${item.store}` : ""}`);
+      .map((item) => `- ${item.item_name}${item.store ? ` @ ${item.store}` : ""}${item.action === "1" ? " (checked off / bought)" : ""}`);
 
     return [
-      "Current shopping list for grounding spoken item names:",
+      "Current shared household shopping list (removed items excluded; checked-off items are already bought):",
       ...itemLines,
       "If the transcript is slightly off, prefer the closest existing shopping-list item name.",
       "Do not split one spoken shopping phrase into multiple items unless the current list strongly supports that interpretation."
@@ -805,12 +804,12 @@ async function buildRecipeGroundingMessage(userContext, env, transcript, session
 
   try {
     const [savedRecipes, mealPlan, recipeSuggestions] = await Promise.all([
-      getSavedRecipes(userContext, { env, limit: 8 }),
+      getSavedRecipes(userContext, { env, all:true }),
       getMealPlan(userContext, { env }),
       getRecipeSuggestions(userContext, { env, limit: 8 })
     ]);
 
-    const mealPlanRecipes = (Array.isArray(mealPlan?.plan) ? mealPlan.plan : [])
+    const mealPlanRecipes = (mealPlan?.status === "ready" && Array.isArray(mealPlan?.plan) ? mealPlan.plan : [])
       .filter((slot) => slot?.recipe?.title)
       .map((slot, index) => buildGroundingCandidate({
         label: slot.recipe.title,
@@ -841,11 +840,11 @@ async function buildRecipeGroundingMessage(userContext, env, transcript, session
     ];
 
     const candidates = [
-      ...(Array.isArray(savedRecipes?.recipes) ? savedRecipes.recipes : []).map((recipe, index) => buildGroundingCandidate({
+      ...(Array.isArray(savedRecipes?.recipes) ? savedRecipes.recipes : []).filter(recipe => recipe.status === "ready" && recipe.ingredients?.length && recipe.instructions?.length).map((recipe, index) => buildGroundingCandidate({
         label: recipe.title,
         searchParts: [recipe.title, ...(Array.isArray(recipe.ingredients) ? recipe.ingredients : [])],
         source: "saved recipe",
-        note: recipe.platform || recipe.author_name || null,
+        note: [recipe.saved_by_name ? `saved by ${recipe.saved_by_name}` : null, recipe.platform || recipe.author_name].filter(Boolean).join("; "),
         sourcePriority: 1,
         recency: index
       })),
@@ -867,7 +866,7 @@ async function buildRecipeGroundingMessage(userContext, env, transcript, session
     return [
       strongestByMargin ? "Possibly related recipe in user data:" : "Possibly related recipes in user data:",
       ...shortlist.map(formatGroundingCandidate),
-      "This shortlist is for context only — it shows what the user has saved or suggested. Do NOT recommend these unless the user is specifically asking about their saved recipes or suggestions. If the user is asking for a general recipe (e.g. 'give me a lemon ninja creami recipe'), answer from your own knowledge instead of redirecting to a partial match from this list."
+      "This shortlist is not the complete collection. The saved-recipes tools search recipes saved by every current household member and include who saved each one. Use those tools for recommendations from our saved recipes or questions about a partner’s recipes. This shortlist is for context only — it shows what the user has saved or suggested. Do NOT recommend these unless the user is specifically asking about their saved recipes or suggestions. If the user is asking for a general recipe (e.g. 'give me a lemon ninja creami recipe'), answer from your own knowledge instead of redirecting to a partial match from this list."
     ].join("\n");
   } catch (error) {
     console.warn("[WARN] recipe grounding preload failed:", error?.message || error);

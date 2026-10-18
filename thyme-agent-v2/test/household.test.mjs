@@ -9,7 +9,7 @@ function setup() {
   const gateway = new TrepoGateway({env:{}});
   const state = {members:['matt','member'], calls:[], rows:[{_id:'a', owner_id:'matt', product_name:'Milk'}, {_id:'b',owner_id:'member',product_name:'Eggs'}]};
   gateway.check = async () => structuredClone(actor);
-  gateway.data = {mapKitchenRow: r => ({id:r._id,item_name:r.product_name}), mapShoppingRow:r=>({...r}), getKitchenItemsFull:async()=>[{id:'a'}],getShoppingItems:async()=>[{action:'REMOVED'}]};
+  gateway.data = {mapKitchenRow: r => ({id:r._id,item_name:r.product_name}), mapShoppingRow:r=>({...r}), getKitchenItemsFull:async()=>[{id:'a'}],getShoppingItems:async(ctx,o)=>{assert.equal(o.all,true);return [{action:'0',item_name:'Bread'},{action:'1',item_name:'Carrots'}]}};
   gateway.mysql = {withDbConnection: async fn => fn({execute:async (sql,params)=> {
     if (sql.includes('FROM new_users')) return [state.members.map(user_id=>({user_id}))];
     if (sql.includes('FROM shared_kitchen')) {
@@ -27,7 +27,7 @@ function setup() {
 test('kitchen includes every current household member; shopping excludes removed history without duplicating mirrors',async()=>{
   const {gateway}=setup();
   assert.deepEqual((await gateway.read(actor,'kitchen')).map(x=>x.id),['a','b']);
-  assert.deepEqual((await gateway.read(actor,'shopping')).map(x=>x.action),['ADDED','CHECKED']);
+  assert.deepEqual((await gateway.read(actor,'shopping')).map(x=>x.action),['0','1']);
 });
 test('membership loss between checks fails closed',async()=>{
   const {gateway,state}=setup();state.members=['member'];

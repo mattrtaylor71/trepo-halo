@@ -65,7 +65,25 @@ def hints(record, kind):
         return [(keys.get('owner_id'),None,None)]
     if kind=='chat_native':
         match=re.fullmatch(r'A#([^#]+)#H#([^#]+)',keys.get('pk',''))
-        if not match or not keys.get('sk','').startswith('S#'):return []
+        parts=keys.get('sk','').split('#')
+        if not match or parts[0]!='S':return []
+        old,new=images
+        if len(parts)==2:
+            # Only session identity/retention affects the collected user messages.
+            # Progress, leases, provider IDs and request bookkeeping are not food evidence.
+            fields=('type','id','actor','household','expires')
+            if record.get('eventName')=='MODIFY' and old and new and all(old.get(k)==new.get(k) for k in fields):
+                return []
+        elif len(parts)==4 and parts[2]=='M':
+            # The external collector retains user messages only. Do not invalidate
+            # the memory fence when Thyme writes its own answer or a tool result.
+            if (old or new) and all(not row or row.get('role')!='user' for row in images):
+                return []
+            fields=('type','id','role','text','order','expires')
+            if record.get('eventName')=='MODIFY' and old and new and all(old.get(k)==new.get(k) for k in fields):
+                return []
+        else:
+            return []
         return [(match[1],match[2],None)]
     if kind=='chat_legacy':
         partition=keys.get('owner_id');entry=keys.get('session_entry_id','')
