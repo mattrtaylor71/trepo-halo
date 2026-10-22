@@ -518,6 +518,18 @@ function buildFallbackCard(text, responseType, error) {
 
 function buildCards(text, responseType, toolEvents = [], error = null) {
   const okEvents = [...toolEvents].filter((event) => event?.result?.ok);
+  const dishSaveNames = new Set(["log_dish_ingredients", "log_dish_from_voice"]);
+  // Keep each committed dish visible in a multi-dish acknowledgement. A later
+  // lookup must not replace the cards for the writes that just completed.
+  if (okEvents.every(event => dishSaveNames.has(event.toolName) || READ_TOOL_NAMES.has(event.toolName))) {
+    const dishCards = new Map();
+    for (const event of okEvents.filter(event => dishSaveNames.has(event.toolName))) {
+      if (Number(event.result.statusCode) >= 400 || event.result.toolResult?.ok === false) continue;
+      const card = buildActionResultCard(event, event.result.actionSummary || text);
+      if (card.entity?.id) dishCards.set(card.entity.id, card);
+    }
+    if (dishCards.size > 1) return [...dishCards.values()];
+  }
   if (okEvents.length > 1 && okEvents.every((event) => READ_TOOL_NAMES.has(event.toolName))) {
     // For plain conversational replies, message.text is the canonical app bubble.
     // Avoid duplicating the exact same content in a fallback card.

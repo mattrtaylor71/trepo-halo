@@ -5,6 +5,9 @@ import { DynamoDBDocumentClient, GetCommand, PutCommand, UpdateCommand } from '@
 
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const now = () => Math.floor(Date.now()/1000);
+// Replaced with the guarded release cutover before deployment. Earlier operation
+// IDs cannot be admitted again under a new namespace.
+export const STABLE_ADMISSION_SINCE = 1792666725;
 const fail = (code, statusCode = 409) => Object.assign(new Error(code), {code, statusCode});
 export const header = (headers, name) => Object.entries(headers || {}).find(([k]) => k.toLowerCase() === name)?.[1];
 let client;
@@ -79,13 +82,15 @@ export function operationScope(identity, proof, context, sessionOwner, env) {
   if (context.isFallbackContext || context.userId !== proof.actor ||
       (proof.owner !== proof.actor && proof.owner !== context.ownerId)) throw fail('owner_mismatch',403);
   return {...identity,actor:proof.actor,owner:proof.owner,table:env.SESSION_TABLE_NAME,
-    key:{owner_id:sessionOwner,session_entry_id:`android-operation#v1#${proof.actor}#${identity.id}`}};
+    authorizationScope:sessionOwner,
+    key:{owner_id:`thyme-operations:v2:${proof.actor}`,session_entry_id:`android-operation#v1#${proof.actor}#${identity.id}`}};
 }
 
 export async function readOperation(scope, db) {
   const result = await send(new GetCommand({TableName:scope.table,Key:scope.key,ConsistentRead:true}),db);
   const row = result.Item;
   if (!row || row.actor !== scope.actor || row.session_id !== scope.sessionId) return {status:'not_found'};
+  if (row.authorization_scope !== scope.authorizationScope) return {status:'scope_changed'};
   if (row.operation_expires_at <= now()) return {status:'expired'};
   if (scope.fingerprint && row.fingerprint !== scope.fingerprint) return {status:'input_conflict'};
   if (row.request_status === 'completed' && row.response_body) return {status:'completed',body:row.response_body};
@@ -93,10 +98,14 @@ export async function readOperation(scope, db) {
 }
 
 export async function claimOperation(scope, db) {
+  if (scope.expires-86400 < STABLE_ADMISSION_SINCE) {
+    const prior=await readOperation(scope,db);
+    return {claimed:false,...(prior.status==='not_found' ? {status:'pre_upgrade_request'} : prior)};
+  }
   const token = crypto.randomUUID();
   try {
     await send(new PutCommand({TableName:scope.table,Item:{...scope.key,actor:scope.actor,
-      session_id:scope.sessionId,operation_id:scope.id,fingerprint:scope.fingerprint,
+      session_id:scope.sessionId,operation_id:scope.id,fingerprint:scope.fingerprint,authorization_scope:scope.authorizationScope,
       request_status:'processing',claim_token:token,lease_expires_at:now()+180,
       operation_expires_at:scope.expires,ttl:scope.expires+7*86400},
       ConditionExpression:'attribute_not_exists(owner_id) AND attribute_not_exists(session_entry_id)'}),db);
@@ -132,8 +141,8 @@ export async function acknowledgeOperation(scope, db) {
   try {
     await send(new UpdateCommand({TableName:scope.table,Key:scope.key,
       UpdateExpression:'SET client_rendered_at = if_not_exists(client_rendered_at, :date)',
-      ConditionExpression:'request_status = :completed AND actor = :actor AND session_id = :session AND operation_expires_at > :now',
-      ExpressionAttributeValues:{':date':new Date().toISOString(),':completed':'completed',':actor':scope.actor,':session':scope.sessionId,':now':now()}}),db);
+      ConditionExpression:'request_status = :completed AND actor = :actor AND session_id = :session AND operation_expires_at > :now AND authorization_scope = :authorizationScope',
+      ExpressionAttributeValues:{':date':new Date().toISOString(),':completed':'completed',':actor':scope.actor,':session':scope.sessionId,':now':now(),':authorizationScope':scope.authorizationScope}}),db);
     return {acknowledged:true};
   } catch(e) { if(e.name==='ConditionalCheckFailedException')return {acknowledged:false};throw fail('recovery_unavailable',503); }
 }

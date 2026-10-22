@@ -70,7 +70,7 @@ export async function prepareBrainSession(credentials, env, transport=null) {
   ])).digest('hex').slice(0,32) : version;
   return {brain,credentials:{authorization:credentials.authorization,ticket:credentials.ticket,owner:credentials.owner},
     sessionOwner:`family-brain:${credentials.owner}:${historyVersion}`,
-    requestOwner:`family-brain:${credentials.owner}:${version}`};
+    requestOwner:`family-brain:${credentials.owner}:${shared ? historyVersion : version}`};
 }
 
 export async function validateBrain(brain, credentials, env, transport=null) {

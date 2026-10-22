@@ -7,7 +7,7 @@ export function resolvedOperationScope(identity, proof, context, brainSession, e
   if (candidateOwner(header(event.headers,'authorization'),env) && !brainSession) {
     throw Object.assign(new Error('recovery_unavailable'),{statusCode:503});
   }
-  return operationScope(identity,proof,context,brainSession?.requestOwner || brainSession?.sessionOwner || context.ownerId,env);
+  return operationScope(identity,proof,context,brainSession?.sessionOwner || context.ownerId,env);
 }
 
 export async function recoverRequest(event, env) {
