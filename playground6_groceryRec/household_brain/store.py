@@ -155,6 +155,7 @@ def read_context(conn, owner, purpose='thyme', *, actor=None, now=None):
             states = [[s['actor_id'],s['generation'],s['revision']] for s in cur.fetchall() if s['actor_id'] in member_ids]
         fence = {'schema':'household-brain-v2','actor':owner,'household':household,'audience':actor,
                  'revision':state['input_revision'],'generation':state['generation'],'states':states,
+                 'turn_expires':(now+timedelta(minutes=10)).timestamp(),
                  'dietary_hash':digest(hard),'members_hash':digest(member_ids),'expires':stamp(cached['expires_at']).timestamp()}
         if not is_current(conn,fence):
             continue
@@ -178,6 +179,34 @@ def is_current(conn, fence):
             and state['generation']==fence.get('generation')
             and digest(sources.members(cur,fence['household']))==fence.get('members_hash')
             and digest(dietary(cur,fence['household'],lock=True))==fence.get('dietary_hash'))
+
+
+def is_action_scope_current(conn, fence):
+    """Authorize a receipt or a fresh replan, NEVER publication of old model text.
+
+    Ordinary activity changes input_revision. Membership, dietary restrictions,
+    learning controls and the original bounded turn lifetime remain mandatory.
+    Full is_current is still required before each tool and general publication.
+    """
+    now = datetime.now(timezone.utc).timestamp()
+    if not isinstance(fence, dict) or fence.get('schema') != 'household-brain-v2':
+        return False
+    expiry = fence.get('turn_expires', fence.get('expires', 0))
+    if not isinstance(expiry, (int, float)) or not now < expiry <= now + 601:
+        return False
+    with conn.cursor() as cur:
+        if not active(cur) or sources.membership(cur, fence.get('actor'), lock=True) != fence.get('household'):
+            return False
+        if fence.get('audience') not in {None, fence.get('actor')}:
+            return False
+        state = state_for(cur, fence['household'], lock=True)
+        members = sources.members(cur, fence['household'])
+        cur.execute('SELECT actor_id,generation,revision FROM family_brain_subjects WHERE household_id=%s AND enabled=1 ORDER BY actor_id LOCK IN SHARE MODE', [fence['household']])
+        states = [[s['actor_id'], s['generation'], s['revision']] for s in cur.fetchall() if s['actor_id'] in members]
+        return bool(state and state['enabled'] and state['generation'] == fence.get('generation')
+                    and states == fence.get('states')
+                    and digest(members) == fence.get('members_hash')
+                    and digest(dietary(cur, fence['household'], lock=True)) == fence.get('dietary_hash'))
 
 
 def run_worker(conn, limit=50, budget_seconds=45):

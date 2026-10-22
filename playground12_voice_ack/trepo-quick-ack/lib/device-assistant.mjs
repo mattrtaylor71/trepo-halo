@@ -1,3 +1,4 @@
+import {refreshBrainTurn, completedActionMessage, toolAttemptKey, publishBrainResult} from './brain-turn.mjs';
 import {leftoverFirstToolChoice} from "./leftover-check-in-intent.mjs";
 import {candidateOwner,loadBrain,validateBrain,foodMemoryTool,updateFoodMemory} from './family-brain.mjs';
 import {detectActionClaims as detectMemoryActionClaims} from './action-claims.mjs';
@@ -1359,8 +1360,14 @@ const buildChatTools=(env)=>[...standardChatTools(),kitchenClarificationTool,...
 
 async function executeKitchenAwareTool(input, taskState) {
   const memory=input.env?.FAMILY_BRAIN_REQUEST;
-  if(memory && !await validateBrain(memory.brain,memory.credentials,input.env))
-    return {ok:false,statusCode:409,error:'Food preferences changed. This action was not executed.',toolName:input.toolName};
+  if(memory && !await validateBrain(memory.brain,memory.credentials,input.env)) {
+    memory.refreshNeeded=true;
+    return {ok:false,statusCode:409,brainContextChanged:true,toolName:input.toolName};
+  }
+  // Replanning must never replay a previously attempted write, including an
+  // uncertain timeout whose server-side transaction might already have committed.
+  const attemptKey=toolAttemptKey(input.toolName,input.args);
+  if (memory?.attempts?.has(attemptKey)) return {...memory.attempts.get(attemptKey),reusedReceipt:true};
   if(input.toolName==='update_food_memory')return updateFoodMemory(input);
   if(input.toolName==='clarify_kitchen_check_in')return retainKitchenProposal(taskState,input.args);
   const labelDenial=kitchenLabelDenial(input.sourceTranscript,input.toolName,input.args);
@@ -1379,6 +1386,7 @@ async function executeKitchenAwareTool(input, taskState) {
     input={...input,mutationContext:createKitchenMutationContext({operationId:prepared.operationId,authorization:input.mutationContext.authorization})};
   }
   const result=await executeToolAction({...input,args:prepared.args,expectedRevision:prepared.expectedRevision});
+  if (memory && WRITE_TOOL_NAMES.has(input.toolName)) memory.attempts.set(attemptKey,result);
   const remembered=await rememberKitchenTaskResult(taskState,input.toolName,result,`${input.mutationContext.requestId}:clarification:${ordinal}`);
   if (!remembered && result.ok) return {...result,task_context:'unavailable'};
   if (!remembered) return {ok:false,statusCode:409,toolName:input.toolName,
@@ -1393,6 +1401,49 @@ async function initializeKitchenTask(userContext,kitchenRequest,env,transcript,s
   const state=await loadKitchenTask({household:userContext?.ownerId,actor:userContext?.userId || userContext?.tableOwnerId,session:kitchenRequest?.sessionId},env);
   validateTaskHistory(state,sessionMessages,{responseSurface});
   return prepareKitchenTask(state,transcript,{responseSurface});
+}
+
+async function freshTurnMessages({transcript,userContext,env,kitchenTask,normalizedResponseSurface}) {
+  const normalizedSessionMessages=[];
+  const [
+    shoppingGroundingMessage,
+    kitchenGroundingMessage,
+    foodGroundingMessage,
+    recipeGroundingMessage,
+    ouraGroundingMessage
+  ] = await Promise.all([
+    buildShoppingGroundingMessage(userContext, env),
+    buildKitchenGroundingMessage(userContext, env),
+    buildFoodGroundingMessage(userContext, env, transcript),
+    buildRecipeGroundingMessage(userContext, env, transcript, normalizedSessionMessages),
+    buildOuraGroundingMessage(userContext, env)
+  ]);
+  const readOnlyIntentMessage = buildReadOnlyIntentMessage(transcript, normalizedSessionMessages);
+  // Household dietary prefs (safety-critical: allergies) injected into the system prompt so
+  // Thyme honors them in suggestions and can state them when asked. Best-effort; a fetch
+  // failure / no prefs yields an empty block = unchanged behavior.
+  const dietaryBlock = formatDietaryPreferencesBlock(await getDietaryPreferences(userContext, { env, strict:Boolean(env.FAMILY_BRAIN_REQUIRE_DIETARY) }));
+  const messages = [
+    { role: "system", content: buildSystemPrompt(userContext, { responseSurface: normalizedResponseSurface, dietaryBlock }) },
+    ...getAppGuideMessages(),
+    ...(env?.FAMILY_BRAIN_REQUEST?.brain?.prompt ? [{role:'system',content:env.FAMILY_BRAIN_REQUEST.brain.prompt}] : []),
+    ...(kitchenTaskMessage(kitchenTask) ? [kitchenTaskMessage(kitchenTask)] : []),
+    ...(shoppingGroundingMessage ? [{ role: "system", content: shoppingGroundingMessage }] : []),
+    ...(kitchenGroundingMessage ? [{ role: "system", content: kitchenGroundingMessage }] : []),
+    ...(foodGroundingMessage ? [{ role: "system", content: foodGroundingMessage }] : []),
+    ...(recipeGroundingMessage ? [{ role: "system", content: recipeGroundingMessage }] : []),
+    ...(ouraGroundingMessage ? [{ role: "system", content: ouraGroundingMessage }] : []),
+    ...(readOnlyIntentMessage ? [{ role: "system", content: readOnlyIntentMessage }] : []),
+    ...(normalizedSessionMessages.length > 0
+      ? [{
+        role: "system",
+        content: "Use the recent conversation for follow-up context like clarifications, pronouns, and references such as 'that', 'it', or broad food names. Always use tools and current household data as the source of truth."
+      }]
+      : []),
+    ...normalizedSessionMessages,
+    { role: "user", content: transcript }
+  ];
+  return messages;
 }
 
 async function* runDeviceAssistantStreamingImpl({ transcript, userContext, env, sessionMessages = [], responseSurface = "halo", lambdaDeadline = null, kitchenRequest = null }) {
@@ -1464,6 +1515,12 @@ async function* runDeviceAssistantStreamingImpl({ transcript, userContext, env, 
 
   try {
   for (let turn = 0; turn < 6; turn += 1) {
+    if (env.FAMILY_BRAIN_REQUEST?.refreshNeeded) {
+      if (!await refreshBrainTurn(env.FAMILY_BRAIN_REQUEST,env)) break;
+      const fresh=await freshTurnMessages({transcript,userContext,env,kitchenTask,normalizedResponseSurface});
+      messages.splice(0,messages.length,...fresh,completedActionMessage(toolEvents));
+    }
+
     const turnToolChoice = forceToolChoiceNext
       || (turn === 0 && normalizedResponseSurface === "app" ? leftoverFirstToolChoice(transcript) : null)
       || (turn === 0 && haloAddIntent === "shopping" ? {type:"function",function:{name:"add_many_to_shopping_list"}} : "auto");
@@ -1563,7 +1620,7 @@ async function* runDeviceAssistantStreamingImpl({ transcript, userContext, env, 
         toolEvents,
         responseSurface: normalizedResponseSurface
       });
-      emitAiOp({ op: aiOp, owner_id: ownerIdForMarker(userContext), model: aiModel, latency_ms: Date.now() - aiOpStart, status: outcomeMarkerStatus(outcome), outcome, request_id:mutationContext.requestId, input: truncateForMarker(transcript, 400), output: summarizeAiOutput(fullText || "Okay.", toolTrace), error: "" });
+      (env.FAMILY_BRAIN_REQUEST?.recordAiOp || emitAiOp)({ op: aiOp, owner_id: ownerIdForMarker(userContext), model: aiModel, latency_ms: Date.now() - aiOpStart, status: outcomeMarkerStatus(outcome), outcome, request_id:mutationContext.requestId, input: truncateForMarker(transcript, 400), output: summarizeAiOutput(fullText || "Okay.", toolTrace), error: "" });
       return {
         text: fullText || "Okay.",
         quickItems,
@@ -1613,6 +1670,11 @@ async function* runDeviceAssistantStreamingImpl({ transcript, userContext, env, 
       }
 
       const result = await executeKitchenAwareTool({ toolName, args, env, userContext, responseSurface: normalizedResponseSurface, sourceTranscript:transcript, mutationContext },kitchenTask);
+      if (result.brainContextChanged) break; // discard remaining stale model calls; replan next turn
+      if (result.reusedReceipt) {
+        messages.push({role:'tool',tool_call_id:toolCall.id,content:JSON.stringify(result)});
+        continue;
+      }
       toolName=result.toolName || toolName; args=result.args || args;
 
       if (toolName === "add_to_shopping_list" && result?.ok && result?.args?.item_name) {
@@ -1674,7 +1736,7 @@ async function* runDeviceAssistantStreamingImpl({ transcript, userContext, env, 
     quickItems,
     toolEvents
   });
-  emitAiOp({ op: aiOp, owner_id: ownerIdForMarker(userContext), model: aiModel, latency_ms: Date.now() - aiOpStart, status: outcomeMarkerStatus(outcome), outcome, request_id:mutationContext.requestId, input: truncateForMarker(transcript, 400), output: summarizeAiOutput(fullText || "I heard you, but I couldn't finish that request.", toolTrace), error: "" });
+  (env.FAMILY_BRAIN_REQUEST?.recordAiOp || emitAiOp)({ op: aiOp, owner_id: ownerIdForMarker(userContext), model: aiModel, latency_ms: Date.now() - aiOpStart, status: outcomeMarkerStatus(outcome), outcome, request_id:mutationContext.requestId, input: truncateForMarker(transcript, 400), output: summarizeAiOutput(fullText || "I heard you, but I couldn't finish that request.", toolTrace), error: "" });
   return {
     text: fullText || "I heard you, but I couldn't finish that request.",
     quickItems,
@@ -1686,7 +1748,7 @@ async function* runDeviceAssistantStreamingImpl({ transcript, userContext, env, 
     ui: uiResponse.ui
   };
   } catch (aiOpErr) {
-    emitAiOp({ op: aiOp, owner_id: ownerIdForMarker(userContext), model: aiModel, latency_ms: Date.now() - aiOpStart, status: "error", input: truncateForMarker(transcript, 400), output: summarizeAiOutput(fullText, toolTrace), error: truncateForMarker(aiOpErr?.message || String(aiOpErr), 500) });
+    (env.FAMILY_BRAIN_REQUEST?.recordAiOp || emitAiOp)({ op: aiOp, owner_id: ownerIdForMarker(userContext), model: aiModel, latency_ms: Date.now() - aiOpStart, status: "error", input: truncateForMarker(transcript, 400), output: summarizeAiOutput(fullText, toolTrace), error: truncateForMarker(aiOpErr?.message || String(aiOpErr), 500) });
     throw aiOpErr;
   }
 }
@@ -1866,6 +1928,12 @@ async function runDeviceAssistantImpl({ transcript, userContext, env, sessionMes
 
   try {
   for (let turn = 0; turn < 6; turn += 1) {
+    if (env.FAMILY_BRAIN_REQUEST?.refreshNeeded) {
+      if (!await refreshBrainTurn(env.FAMILY_BRAIN_REQUEST,env)) break;
+      const fresh=await freshTurnMessages({transcript,userContext,env,kitchenTask,normalizedResponseSurface});
+      messages.splice(0,messages.length,...fresh,completedActionMessage(toolEvents));
+    }
+
     // Force a tool on a corrective retry; else force on the first turn if write-intent; else auto.
     const turnToolChoice = forceToolChoiceNext || (turn === 0 ? initialToolChoice : "auto");
     forceToolChoiceNext = null;
@@ -1930,7 +1998,7 @@ async function runDeviceAssistantImpl({ transcript, userContext, env, sessionMes
         toolCount: toolTrace.length
       }));
 
-      emitAiOp({ op: aiOp, owner_id: ownerIdForMarker(userContext), model: aiModel, latency_ms: Date.now() - aiOpStart, status: outcomeMarkerStatus(outcome), outcome, request_id:mutationContext.requestId, input: truncateForMarker(transcript, 400), output: summarizeAiOutput(lastAssistantText || "Okay.", toolTrace), error: "" });
+      (env.FAMILY_BRAIN_REQUEST?.recordAiOp || emitAiOp)({ op: aiOp, owner_id: ownerIdForMarker(userContext), model: aiModel, latency_ms: Date.now() - aiOpStart, status: outcomeMarkerStatus(outcome), outcome, request_id:mutationContext.requestId, input: truncateForMarker(transcript, 400), output: summarizeAiOutput(lastAssistantText || "Okay.", toolTrace), error: "" });
       return {
         text: lastAssistantText || "Okay.",
         quickItems,
@@ -1976,10 +2044,15 @@ async function runDeviceAssistantImpl({ transcript, userContext, env, sessionMes
         toolName=result.toolName || toolName; args=result.args || args;
         return { toolCall, toolName, args, result };
       })());
+      if (toolResults.at(-1).result.brainContextChanged) {toolResults.pop();break;}
     }
     if (batchHasRecipeSave) recipeSaveIssued = true;
 
     for (const { toolCall, toolName, args, result } of toolResults) {
+      if (result.reusedReceipt) {
+        messages.push({role:'tool',tool_call_id:toolCall.id,content:JSON.stringify(result)});
+        continue;
+      }
       if (toolName === "add_to_shopping_list" && result?.ok && result?.args?.item_name) {
         quickItems.push(result.args.item_name);
       }
@@ -2034,7 +2107,7 @@ async function runDeviceAssistantImpl({ transcript, userContext, env, sessionMes
     toolCount: toolTrace.length
   }));
 
-  emitAiOp({ op: aiOp, owner_id: ownerIdForMarker(userContext), model: aiModel, latency_ms: Date.now() - aiOpStart, status: outcomeMarkerStatus(outcome), outcome, request_id:mutationContext.requestId, input: truncateForMarker(transcript, 400), output: summarizeAiOutput(lastAssistantText || "I heard you, but I couldn't finish that request.", toolTrace), error: "" });
+  (env.FAMILY_BRAIN_REQUEST?.recordAiOp || emitAiOp)({ op: aiOp, owner_id: ownerIdForMarker(userContext), model: aiModel, latency_ms: Date.now() - aiOpStart, status: outcomeMarkerStatus(outcome), outcome, request_id:mutationContext.requestId, input: truncateForMarker(transcript, 400), output: summarizeAiOutput(lastAssistantText || "I heard you, but I couldn't finish that request.", toolTrace), error: "" });
   return {
     text: lastAssistantText || "I heard you, but I couldn't finish that request.",
     quickItems,
@@ -2046,7 +2119,7 @@ async function runDeviceAssistantImpl({ transcript, userContext, env, sessionMes
     ui: uiResponse.ui
   };
   } catch (aiOpErr) {
-    emitAiOp({ op: aiOp, owner_id: ownerIdForMarker(userContext), model: aiModel, latency_ms: Date.now() - aiOpStart, status: "error", input: truncateForMarker(transcript, 400), output: summarizeAiOutput(lastAssistantText, toolTrace), error: truncateForMarker(aiOpErr?.message || String(aiOpErr), 500) });
+    (env.FAMILY_BRAIN_REQUEST?.recordAiOp || emitAiOp)({ op: aiOp, owner_id: ownerIdForMarker(userContext), model: aiModel, latency_ms: Date.now() - aiOpStart, status: "error", input: truncateForMarker(transcript, 400), output: summarizeAiOutput(lastAssistantText, toolTrace), error: truncateForMarker(aiOpErr?.message || String(aiOpErr), 500) });
     throw aiOpErr;
   }
 }
@@ -2060,37 +2133,42 @@ async function brainRequest(input) {
   const brain=await loadBrain({...credentials,surface:input.responseSurface},input.env);
   return brain?{credentials,brain}:null;
 }
-function changedBrainResponse(result) {
-  // A later memory outage cannot undo an already committed action or invite a blind
-  // retry. Keep the request receipt, but discard all text/arguments based on old memory.
-  if(!result?.toolTrace?.some(t=>t.ok && (WRITE_TOOL_NAMES.has(t.toolName) || t.toolName==='update_food_memory')))
-    throw new Error('Your food preferences changed while I was answering. Please ask again.');
-  return {text:'Your food preferences changed while I was answering. An update completed; please check your recent changes before repeating it.',
-    quickItems:[],toolTrace:[],toolEvents:[],version:'2',type:'clarification_needed',ui:null,
-    outcome:{version:'1',answer:'incomplete',actions:'confirmed',reason:'preferences_changed',delivery:'unknown',client_render:'unknown'}};
+function startBrainTurn(memory) {
+  const turn={...memory,originalBrain:memory.brain,attempts:new Map()};
+  turn.recordAiOp=marker=>{turn.marker=marker;};
+  return turn;
+}
+function recordPublishedResult(memory,result) {
+  if (memory.marker) emitAiOp({...memory.marker,status:outcomeMarkerStatus(result.outcome),outcome:result.outcome,
+    output:summarizeAiOutput(result.text,result.toolTrace),error:''});
+  console.log(JSON.stringify({evt:'assistant_publication',status:outcomeMarkerStatus(result.outcome),
+    reason:result.outcome?.reason || null,actions:result.outcome?.actions || null}));
 }
 export async function runDeviceAssistant(input) {
-  const memory=await brainRequest(input);
-  if(!memory)return runDeviceAssistantImpl({...input,env:{...input.env,FAMILY_BRAIN_REQUIRE_DIETARY:Boolean(input.kitchenRequest?.brainTicket || candidateOwner(input.kitchenRequest?.authorization,input.env))}});
+  const prepared=await brainRequest(input);
+  if(!prepared)return runDeviceAssistantImpl({...input,env:{...input.env,FAMILY_BRAIN_REQUIRE_DIETARY:Boolean(input.kitchenRequest?.brainTicket || candidateOwner(input.kitchenRequest?.authorization,input.env))}});
+  const memory=startBrainTurn(prepared);
   const env={...input.env,FAMILY_BRAIN_REQUEST:memory,FAMILY_BRAIN_REQUIRE_DIETARY:true};
-  const result=await runDeviceAssistantImpl({...input,env});
-  if(!await validateBrain(memory.brain,memory.credentials,env))
-    return changedBrainResponse(result);
-  return result;
+  try {
+    const raw=await runDeviceAssistantImpl({...input,env});
+    const result=await publishBrainResult(raw,memory,env,input.responseSurface);
+    recordPublishedResult(memory,result);
+    return result;
+  } catch(error) { if(memory.marker)emitAiOp(memory.marker);throw error; }
 }
 export async function* runDeviceAssistantStreaming(input) {
-  const memory=await brainRequest(input);
-  if(!memory)return yield* runDeviceAssistantStreamingImpl({...input,env:{...input.env,FAMILY_BRAIN_REQUIRE_DIETARY:Boolean(input.kitchenRequest?.brainTicket || candidateOwner(input.kitchenRequest?.authorization,input.env))}});
+  const prepared=await brainRequest(input);
+  if(!prepared)return yield* runDeviceAssistantStreamingImpl({...input,env:{...input.env,FAMILY_BRAIN_REQUIRE_DIETARY:Boolean(input.kitchenRequest?.brainTicket || candidateOwner(input.kitchenRequest?.authorization,input.env))}});
+  const memory=startBrainTurn(prepared);
   const env={...input.env,FAMILY_BRAIN_REQUEST:memory,FAMILY_BRAIN_REQUIRE_DIETARY:true};
-  // Pilot text is buffered until the publication fence passes; never publish revoked context.
-  const events=[];
-  const iterator=runDeviceAssistantStreamingImpl({...input,env});
-  let step;
-  do {step=await iterator.next();if(!step.done)events.push(step.value);}while(!step.done);
-  if(!await validateBrain(memory.brain,memory.credentials,env)) {
-    const safe=changedBrainResponse(step.value);
-    yield {type:'text_delta',delta:safe.text};return safe;
-  }
-  for(const event of events)yield event;
-  return step.value;
+  // Keep every draft private. Publish exactly the validated final text, including
+  // receipt reconciliation; old deltas may contain stale context or false claims.
+  try {
+    const iterator=runDeviceAssistantStreamingImpl({...input,env});
+    let step; do {step=await iterator.next();}while(!step.done);
+    const result=await publishBrainResult(step.value,memory,env,input.responseSurface);
+    recordPublishedResult(memory,result);
+    yield {type:'text_delta',delta:result.text};
+    return result;
+  } catch(error) { if(memory.marker)emitAiOp(memory.marker);throw error; }
 }
