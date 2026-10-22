@@ -1,6 +1,6 @@
 # Thyme saved-action confirmations — October 22, 2026
 
-Author: Codex. Requested by Matt Taylor. Status: implemented and tested; rollout receipt follows after verification.
+Author: Codex. Requested by Matt Taylor. Status: deployed and verified at 03:38 Pacific on October 22 (10:38 UTC).
 
 A successful dish insert advanced the household brain activity revision. Thyme's final full-context validation then rejected its own successful save, replaced the confirmation with a misleading food-preferences warning, and removed the result UI. The same guard could block a second action. Internal `ai_op` success was emitted before that replacement.
 
@@ -21,8 +21,10 @@ The screenshot's dish was already present and complete in the actual serving API
 - Twelve full assistant-loop regressions pass on the candidate: sync/stream single and multiple dishes, stale-context replan, duplicate-attempt suppression, real scope revocation, validation outage, uncertain tool timeout, strict general-answer fence, and shopping receipts.
 - Twenty-four Python scope/API regressions pass, including actor binding, controls, expiry, no context rebuild for validation, async tickets, and refresh lifetime.
 - Eight real MySQL 8.4 fixture tests pass using isolated localhost databases and the actual dish invalidation trigger. Own inserts preserve receipt scope while invalidating old context; deletes remain deleted. Allergy, membership, pause/reset and preference changes revoke the scope.
-- Broader serving-runtime suite: 131 passed and three preexisting fixture failures before the final additional shopping regression. The same three failures reproduced against the untouched live package (multi-recipe mock lacks durable IDs; two kitchen-edit fixtures lack request-journal setup). No new baseline-suite failures.
-- No phone UI was visually checked. Live app-serving validation and deployment results are recorded below when completed.
+- Final broader serving-runtime suite: 132 passed and three preexisting fixture failures. The same three failures reproduced against the untouched live package (multi-recipe mock lacks durable IDs; two kitchen-edit fixtures lack request-journal setup). No new baseline-suite failures.
+- The twelve assistant-loop regressions also passed on the exact prepared sync and async worker packages, preserving their existing routing differences. Saved-dish tests exercise the real app-output builder and verify the confirmation and action card.
+- Thirteen authenticated live contract checks passed: full freshness, stale-activity receipt scope, true dietary/member/control/actor/expiry rejection, bounded refresh, and async receipt/refresh behavior. Test fences were changed in memory; no household data was changed.
+- A real signed founder app request completed in 5.81 seconds with `answer=complete`, `actions=none`, one `get_recent_dishes` action, a result card, and the final publication marker. The returned card ID/time matched the actual dishes API; its null-name fallback was verified against serving code. The `ai_op` marker described the actual returned answer. This was a read-only production smoke test, not a production meal-insert test or a visual phone check.
 
 ## Release
 
@@ -31,3 +33,14 @@ The screenshot's dish was already present and complete in the actual serving API
 Private source ZIPs, configs, test outputs and operational receipts: `/Users/MattTaylor/Documents/Codex/2026-10-22/thyme-log-investigation`. Never commit these private captures. The previous source baseline is recorded separately in commit `2e27ea6`; the HomeSuggestions October 22 changes were preserved.
 
 Shared context consulted: `apps/trepo`, `apps/trepo/screens/cook-and-dish-log`; customer copy checked against `brand/trepo-brand-guidelines` with no approved exception required. Operational findings come from actual deployed code, live trigger metadata and app API reads, not historical shared-memory summaries. No company-memory save. The Antonio monitor remains paused.
+
+## Verified deployed packages
+
+| Function | SHA-256 (base64) |
+| --- | --- |
+| `trepo-grocery-backend-dev-HomeSuggestionsFunction-eq77AzDop23s` | `I7cuANBzOOtRCkrTeQKuez9mVVIAoRTAVbL9Ogxj01s=` |
+| `trepo-quick-ack-stream-dev` | `1++a9Y4OyiTpQ1bgXiQsB99LtPYpS4V64yzwWnejsc4=` |
+| `trepo-quick-ack-sam-dev` | `dasN10wK39mssa38GVmgOSyRlWdyP1Hh8m0+ZUm21rw=` |
+| `trepo-quick-ack-async-worker-dev` | `dFK+O5GYGr3YtQM/mZOfn6aIkcDITCiZ0F2Jx0SV++0=` |
+
+Implementation commit: `c4c56d0`, branch `codex/thyme-write-confirmation-20261022`, pushed to origin. This is a scoped live ZIP overlay, not a merge or wholesale deploy of the repository. Rollback must compare the current live revision/hash first so it cannot overwrite a later release.

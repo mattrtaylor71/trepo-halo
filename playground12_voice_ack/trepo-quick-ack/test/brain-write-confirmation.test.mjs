@@ -1,3 +1,4 @@
+import {buildAppOutput} from '../lib/app-response.mjs';
 import {test,before,mock} from 'node:test';
 import assert from 'node:assert/strict';
 let da,queue,executed,revision,scope,outage,requests,markers,failTool,fullOnly,receiptReads;
@@ -42,6 +43,9 @@ for(const streaming of [false,true]){
    reset();queue=[msg([dish('Oatmeal')]),msg([],'Logged oatmeal. Also OLD_PRIVATE_CONTEXT')];
    const r=await run(streaming);assert.match(r.text,/Oatmeal/);assert.doesNotMatch(r.text,/preferences changed|OLD_PRIVATE_CONTEXT/);
    assert.equal(r.outcome.actions,'confirmed');assert.equal(r.outcome.answer,'complete');assert.equal(r.toolEvents.length,1);assert.ok(r.ui);assert.equal(executed.length,1);
+   const app=buildAppOutput({...r,responseSurface:'app'});
+   assert.equal(app.actions.length,1);assert.equal(app.actions[0].ok,true);assert.equal(app.cards.length,1);
+   assert.match(app.message.text,/Oatmeal/);assert.doesNotMatch(JSON.stringify(app),/OLD_PRIVATE_CONTEXT/);
    assert.equal(markers.filter(m=>m.op==='chat_app').length,1);assert.equal(markers.at(-1).status,'success');assert.match(markers.at(-1).output,/Oatmeal/);
  });
  test(`${streaming?'stream':'sync'} second dish replans with fresh context without replaying first`,async()=>{
