@@ -1,3 +1,4 @@
+import {lookupHistory} from './history-client.mjs';
 import {
   addShoppingItem,
   addManyShoppingItems,
@@ -374,9 +375,10 @@ async function executeLocalTool({ toolName, args, env, userContext }) {
   }
 }
 
-export async function executeToolAction({ toolName, args, env, userContext, responseSurface }) {
+export async function executeToolAction({ toolName, args, env, userContext, responseSurface, sourceTranscript, mutationContext, expectedRevision }) {
+  if (toolName === "lookup_household_history") return lookupHistory({args,env,userContext});
   if (LOCAL_TOOLS.has(toolName)) {
     return executeLocalTool({ toolName, args, env, userContext, responseSurface });
   }
-  return executeSharedToolAction({ toolName, args, env, userContext, responseSurface });
+  return executeSharedToolAction({ toolName, args, env, userContext, responseSurface, sourceTranscript, mutationContext, expectedRevision });
 }

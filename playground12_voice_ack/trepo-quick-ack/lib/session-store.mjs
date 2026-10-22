@@ -106,7 +106,7 @@ function normalizeOwnerWriteContext(ownerContext) {
   };
 }
 
-export async function loadRecentSessionMessages(ownerId, sessionId, limit, env) {
+export async function loadRecentSessionMessages(ownerId, sessionId, limit, env, options = {}) {
   const tableName = getSessionTableName(env);
   const normalizedOwnerId = String(ownerId || "").trim();
   const normalizedSessionId = String(sessionId || "").trim();
@@ -134,6 +134,9 @@ export async function loadRecentSessionMessages(ownerId, sessionId, limit, env) 
   }));
 
   return (response.Items || [])
+    .filter(item => !options.actorId || (item.request_owner_id || item.user_id) === options.actorId)
+    // Keep the prompt window bounded without deleting the captured conversation.
+    .filter(item => !Number.isFinite(Number(item.context_expires_at ?? item.ttl)) || Number(item.context_expires_at ?? item.ttl) > Math.floor(Date.now() / 1000))
     .map((item) => normalizeSessionMessage(item))
     .filter(Boolean)
     .reverse();
@@ -175,7 +178,8 @@ export async function appendSessionMessages(ownerId, sessionId, messages, env) {
         content: message.content,
         message_kind: message.kind || "conversation",
         created_at: createdAt,
-        ttl
+        // Retain captured messages; ttl is reserved for temporary request locks.
+        context_expires_at: ttl
       }
     }));
   }
@@ -195,6 +199,7 @@ export async function claimRecentSessionRequest(ownerId, sessionId, transcript, 
 
   const entryId = buildRequestEntryId(normalizedSessionId, normalizedTranscript);
   const createdAt = new Date().toISOString();
+  const claimToken = crypto.randomUUID();
   const ttl = Math.floor(Date.now() / 1000) + 180;
 
   try {
@@ -209,6 +214,7 @@ export async function claimRecentSessionRequest(ownerId, sessionId, transcript, 
         session_entry_id: entryId,
         session_id: normalizedSessionId,
         request_status: "processing",
+        claim_token: claimToken,
         transcript: normalizedTranscript,
         created_at: createdAt,
         ttl
@@ -217,7 +223,8 @@ export async function claimRecentSessionRequest(ownerId, sessionId, transcript, 
     }));
     return {
       claimed: true,
-      entryId
+      entryId,
+      claimToken
     };
   } catch (error) {
     if (error?.name !== "ConditionalCheckFailedException") {
@@ -278,4 +285,48 @@ export async function clearRecentSessionRequest(ownerId, entryId, env) {
       session_entry_id: normalizedEntryId
     }
   }));
+}
+
+
+// Keep canonical edit requests as long as Kitchen's durable operation receipts.
+// These records deliberately have no TTL. They contain no credentials or transcript.
+function kitchenEditJournalKey(scope, env) {
+  const table = getSessionTableName(env);
+  if (!table || !scope?.household || !scope?.actor || !scope?.operationId || !scope?.intentHash)
+    throw Object.assign(new Error('Kitchen retry storage is unavailable. No change was sent.'), {statusCode:503});
+  return {TableName:table, Key:{owner_id:scope.household,
+    session_entry_id:`kitchen-edit#v1#${scope.actor}#${scope.operationId}`}};
+}
+
+function kitchenEditJournalBody(item, scope) {
+  if (!item) return null;
+  if (item.protocol !== 'kitchen_edit_v1' || item.actor_id !== scope.actor ||
+      item.owner_id !== scope.household || item.intent_hash !== scope.intentHash ||
+      item.request_body?.operation_id !== scope.operationId)
+    throw Object.assign(new Error('This correction request changed. Review it and send a new request.'), {statusCode:409});
+  return item.request_body;
+}
+
+export async function readKitchenEditRequest(scope, env, options = {}) {
+  const result = await (options.client || getDynamoDocumentClient()).send(new GetCommand({
+    ...kitchenEditJournalKey(scope, env), ConsistentRead:true
+  }), {abortSignal:AbortSignal.timeout(1500)});
+  return kitchenEditJournalBody(result.Item, scope);
+}
+
+export async function retainKitchenEditRequest(scope, body, env, options = {}) {
+  const {TableName, Key} = kitchenEditJournalKey(scope, env);
+  try {
+    await (options.client || getDynamoDocumentClient()).send(new PutCommand({
+      TableName, Item:{...Key, protocol:'kitchen_edit_v1', actor_id:scope.actor,
+        intent_hash:scope.intentHash, request_body:body, created_at:new Date().toISOString()},
+      ConditionExpression:'attribute_not_exists(owner_id)'
+    }), {abortSignal:AbortSignal.timeout(1500)});
+    return body;
+  } catch (error) {
+    if (error?.name !== 'ConditionalCheckFailedException') throw error;
+    const saved = await readKitchenEditRequest(scope, env, options);
+    if (!saved) throw Object.assign(new Error('Could not confirm the correction request. Retry it.'), {statusCode:503});
+    return saved;
+  }
 }

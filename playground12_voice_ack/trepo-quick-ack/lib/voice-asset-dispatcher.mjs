@@ -5,7 +5,9 @@ let lambdaClient = null;
 function getLambdaClient(env = process.env) {
   if (!lambdaClient) {
     lambdaClient = new LambdaClient({
-      region: env.AWS_REGION || env.AWS_DEFAULT_REGION || "us-east-1"
+      region: env.AWS_REGION || env.AWS_DEFAULT_REGION || "us-east-1",
+      maxAttempts: 2,
+      requestHandler: { connectionTimeout: 2000, requestTimeout: 4000 }
     });
   }
   return lambdaClient;
@@ -79,7 +81,7 @@ export function collectVoiceAssetJobs(toolEvents = []) {
   return jobs;
 }
 
-export async function dispatchVoiceAssetJobs({ toolEvents = [], userContext, env = process.env }) {
+export async function dispatchVoiceAssetJobs({ toolEvents = [], userContext, env = process.env, client }) {
   const functionName = String(env.VOICE_IMAGE_POSTPROCESS_FUNCTION_NAME || "").trim();
   if (!functionName) {
     return {
@@ -112,27 +114,41 @@ export async function dispatchVoiceAssetJobs({ toolEvents = [], userContext, env
     };
   }
 
-  await Promise.all(jobs.map((job) => getLambdaClient(env).send(new InvokeCommand({
-    FunctionName: functionName,
-    InvocationType: "Event",
-    Payload: Buffer.from(JSON.stringify({
-      ownerId,
-      assetType: job.assetType,
-      rowId: job.rowId,
-      sourceTool: job.sourceTool
-    }))
-  }))));
+  const results = new Array(jobs.length);
+  let next = 0;
+  await Promise.all(Array.from({ length: Math.min(3, jobs.length) }, async () => {
+    while (next < jobs.length) {
+      const index = next++;
+      const job = jobs[index];
+      try {
+        const response = await (client || getLambdaClient(env)).send(new InvokeCommand({
+          FunctionName: functionName, InvocationType: "Event",
+          Payload: Buffer.from(JSON.stringify({ ownerId, ...job }))
+        }));
+        if (response.StatusCode !== 202) throw Object.assign(new Error("Image dispatch was not accepted"), { code: "NOT_ACCEPTED" });
+        results[index] = { job, accepted: true };
+      } catch (error) {
+        results[index] = { job, accepted: false, code: error?.name || error?.code || "dispatch_failed" };
+      }
+    }
+  }));
+  const accepted = results.filter(result => result.accepted).map(result => result.job);
+  const failed = results.filter(result => !result.accepted).map(result => ({ ...result.job, code: result.code }));
 
   console.log("[DEBUG] voice asset jobs dispatched:", JSON.stringify({
     ownerId,
     functionName,
-    jobs
+    requested: jobs.length,
+    accepted: accepted.length,
+    failed: failed.length,
+    outcome: failed.length ? (accepted.length ? "partial" : "failed") : "accepted"
   }));
 
   return {
-    queued: true,
-    count: jobs.length,
-    jobs,
+    queued: failed.length === 0,
+    count: accepted.length,
+    jobs: accepted,
+    failedJobs: failed,
     functionName
   };
 }

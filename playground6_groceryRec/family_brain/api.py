@@ -44,19 +44,31 @@ def handle(conn, request, verify_jwt):
         return {"statusCode": 403, "error": "not_enrolled_or_authenticated"}
     purpose = request.get("purpose", "thyme")
     operation = request.get("operation", "context")
-    if os.getenv('HOUSEHOLD_BRAIN_V2') == '1' and operation not in {'context','validate','authorize'}:
+    if os.getenv('HOUSEHOLD_BRAIN_V2') == '1' and operation not in {'context','validate','authorize','history'}:
         return {'statusCode':403,'error':'internally_managed'}
     # Async jobs may read and validate only. A ticket must not mint its own
     # replacement and turn a ten-minute delegation into indefinite access.
-    if ticket and operation not in {"context", "validate"}:
+    if ticket and operation not in {"context", "validate", "history"}:
         return {"statusCode": 403, "error": "read_only_ticket"}
     data = store.read_context(conn, owner, purpose, actor=actor if operation in {"context", "inspect"} else None)
     if not data or (ticket and not store.is_current(conn, ticket.get("fence"))):
         return {"statusCode": 403, "error": "membership_or_controls_changed"}
+    fence = request.get("fence")
+    fence_bound = (isinstance(fence, dict) and fence.get("actor") == actor
+                   and fence.get("household") == data["fence"]["household"])
+    if operation == "history":
+        if not fence_bound or not store.is_current(conn,fence):
+            return {"statusCode":409,"error":"history_context_changed"}
+        from household_brain.history import lookup
+        from household_brain.receipt_lookup import configured_resolver
+        history=lookup(conn,actor,data["fence"]["household"],request.get("query"),receipt_resolver=configured_resolver())
+        if not store.is_current(conn,fence):
+            return {"statusCode":409,"error":"history_context_changed"}
+        return {"statusCode":200,"history":history}
     if operation == "context":
         return {"statusCode": 200, **data}
     if operation == "validate":
-        return {"statusCode": 200, "current": store.is_current(conn, request.get("fence"))}
+        return {"statusCode": 200, "current": fence_bound and store.is_current(conn, fence)}
     if operation == "authorize":
         return {"statusCode": 200, "ticket": _sign({"aud": "trepo-family-brain", "actor": actor,
             "fence": data["fence"], "exp": int(time.time()) + 600})}

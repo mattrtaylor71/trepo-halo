@@ -128,6 +128,8 @@ export function buildVoiceTriageRecord(job, overrides = {}) {
     completed_at: overrides.completed_at || (normalizedStatus === "completed" ? (job.completed_at || updatedAt) : null),
     failed_at: overrides.failed_at || (normalizedStatus === "failed" ? (job.failed_at || updatedAt) : null),
     metadata: {
+      assistant_actions: Array.isArray(job.assistant_actions) ? job.assistant_actions.slice(0, 50) : [],
+      outcome: job.outcome || null,
       response_surface: job.response_surface || null,
       content_type: job.content_type || null,
       audio_format: job.audio_format || null,

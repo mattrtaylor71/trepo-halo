@@ -98,6 +98,9 @@ function toNumber(value) {
  * EXACT normalized-name match only — never fuzzy.
  * Returns prior nutrition object or null.
  */
+const missingComponentsUntil = new Map();
+const SCHEMA_COMPAT_TTL_MS = 60000;
+
 export async function lookupRecentDishNutrition(connection, tableName, dishName, opts = {}) {
   const target = normalizeDishName(dishName);
   if (!target || !connection || !tableName) return null;
@@ -107,19 +110,29 @@ export async function lookupRecentDishNutrition(connection, tableName, dishName,
   const scanLimit = Math.max(1, Math.floor(Number(opts.scanLimit) || 250));
   const excludeId = opts.excludeId || null;
 
-  let rows;
-  try {
-    const [result] = await connection.execute(
+  const componentsUnavailable = (missingComponentsUntil.get(tableName) || 0) > Date.now();
+  const query = (legacy = false) =>
       `SELECT _id, dish_name, serving_size, calories, protein, total_fat,
-              total_carbohydrates, confidence, ingredients, components, allergens, explanation
+              total_carbohydrates, confidence, ingredients, ${legacy ? "NULL AS components" : "components"}, allergens, explanation
          FROM \`${tableName}\`
         WHERE calories IS NOT NULL
           AND dish_name IS NOT NULL
           AND _createdDate >= DATE_SUB(NOW(), INTERVAL ${windowDays} DAY)
         ORDER BY _createdDate DESC
-        LIMIT ${scanLimit}`
-    );
-    rows = result;
+        LIMIT ${scanLimit}`;
+  let rows;
+  try {
+    try {
+      [rows] = await connection.execute(query(componentsUnavailable));
+    } catch (error) {
+      // Old per-user tables can predate optional meal components. Retry only
+      // this known read/schema mismatch, never an arbitrary DB error or write.
+      if (componentsUnavailable || error?.code !== "ER_BAD_FIELD_ERROR" || !/['`]components['`]/i.test(String(error.message || ""))) throw error;
+      [rows] = await connection.execute(query(true));
+      if (missingComponentsUntil.size >= 128) missingComponentsUntil.delete(missingComponentsUntil.keys().next().value);
+      missingComponentsUntil.set(tableName, Date.now() + SCHEMA_COMPAT_TTL_MS);
+      console.log(JSON.stringify({evt:"dish_nutrition_schema_compatibility", field:"components", outcome:"read_recovered"}));
+    }
   } catch (error) {
     console.warn("[dishNutritionMemory] lookup failed (non-fatal):", error && error.message ? error.message : error);
     return null;

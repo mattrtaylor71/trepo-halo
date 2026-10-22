@@ -1,3 +1,4 @@
+import {HISTORY_TOOL} from './history-client.mjs';
 import {
   TOOL_CATEGORIES,
   buildChatTools as buildSharedChatTools,
@@ -286,6 +287,7 @@ const LOCAL_MEAL_CALENDAR_CHAT_TOOLS = [
 
 export function buildChatTools() {
   return [
+    ...(process.env.HOUSEHOLD_BRAIN_V2==='1'?[HISTORY_TOOL]:[]),
     ...buildSharedChatTools(),
     ...LOCAL_RECIPE_CATEGORY_CHAT_TOOLS,
     ...LOCAL_MEAL_CALENDAR_CHAT_TOOLS

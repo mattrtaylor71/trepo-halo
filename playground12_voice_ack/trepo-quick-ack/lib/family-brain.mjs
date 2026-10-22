@@ -51,11 +51,26 @@ export async function loadBrain({authorization, ticket, owner, surface='app'}, e
 export async function prepareBrainSession(credentials, env, transport=null) {
   const brain=await loadBrain(credentials,env,transport);
   if(!brain)return null;
+  const shared=brain.context?.schema==='household-brain-v2';
+  // Cache refresh timestamps do not change the evidence. Response caches still
+  // track the original revision; conversation history survives ordinary learning.
+  let context=brain.context;
+  if(shared) {
+    const {as_of,history_since,external_sources,...coverage}=context.coverage || {};
+    context={...context,coverage:{...coverage,...(external_sources===undefined?{}:{
+      external_sources:external_sources.map(({checked_at,...source})=>source)})}};
+  }
   const version=createHash('sha256').update(JSON.stringify([brain.fence.actor,brain.fence.household,
     brain.fence.states,brain.fence.dietary_hash,
-    brain.context])).digest('hex').slice(0,32);
+    context,...(shared?[brain.fence.generation,brain.fence.revision,brain.fence.members_hash]:[])])).digest('hex').slice(0,32);
+  const historyVersion=shared ? createHash('sha256').update(JSON.stringify([
+    'household-brain-history-v2',brain.fence.actor,brain.fence.household,
+    brain.fence.generation,brain.fence.members_hash,brain.fence.states,
+    brain.fence.dietary_hash,context.explicit_preferences,context.coverage?.learning_paused,
+  ])).digest('hex').slice(0,32) : version;
   return {brain,credentials:{authorization:credentials.authorization,ticket:credentials.ticket,owner:credentials.owner},
-    sessionOwner:`family-brain:${credentials.owner}:${version}`};
+    sessionOwner:`family-brain:${credentials.owner}:${historyVersion}`,
+    requestOwner:`family-brain:${credentials.owner}:${version}`};
 }
 
 export async function validateBrain(brain, credentials, env, transport=null) {
