@@ -1,3 +1,4 @@
+import ai_consent_guard as _ai_consent
 from family_brain import store as brain_store
 import recipe_generation_guard
 from family_brain.recipe_safety import _recipe_violates, _format_preferences_block
@@ -389,7 +390,7 @@ def _set_empty(conn, owner, focus, *, commit=True):
 
 def _generate_plan_with_gpt(ingredients_list, focus, brain_prompt="", dietary_prompt=""):
     from openai import OpenAI, RateLimitError
-    client = OpenAI(
+    client = _ai_consent.provider_client(OpenAI)(
         api_key=os.getenv('OPENAI_API_KEY'),
         timeout=OPENAI_TIMEOUT_SECONDS,
         max_retries=OPENAI_MAX_RETRIES,
@@ -421,7 +422,7 @@ Coherence rules:
     last_exc = None
     for attempt in range(1, 4):
         try:
-            resp = client.chat.completions.create(
+            resp = _ai_consent.provider_call(client.chat.completions.create)(
                 model=os.getenv('OPENAI_MODEL', 'gpt-4o'),
                 messages=[{'role': 'system', 'content': system}, {'role': 'user', 'content': user}],
                 temperature=0.4,
@@ -488,13 +489,13 @@ def _build_recipe_image_prompt(title):
 
 def _generate_recipe_image(title):
     from openai import OpenAI
-    client = OpenAI(
+    client = _ai_consent.provider_client(OpenAI)(
         api_key=os.getenv('OPENAI_API_KEY'),
         timeout=OPENAI_TIMEOUT_SECONDS,
         max_retries=OPENAI_MAX_RETRIES,
     )
     prompt = _build_recipe_image_prompt(title)
-    resp = client.images.generate(
+    resp = _ai_consent.provider_call(client.images.generate)(
         model='gpt-image-1',
         prompt=prompt,
         size='1024x1024',
@@ -770,3 +771,13 @@ def _household_write(conn):
 def _release_household_locks(acquired):
     for lock_conn, name in reversed(acquired):
         _release_named_lock(lock_conn, name)
+
+# AI permission is enforced before admission, including internal async work.
+import ai_consent_guard as _ai_consent
+_before_ai_consent = handler
+_with_ai_consent = _ai_consent.guard_handler(_before_ai_consent)
+def handler(event, context):
+    if False:
+        return _before_ai_consent(event, context)
+    return _with_ai_consent(event, context)
+

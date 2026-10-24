@@ -230,10 +230,13 @@ def handler(event, context):
 def _get_meal_plan(owner):
     conn = _mysql_conn()
     try:
-        table = _meal_plan_table(owner)
-        # Shared-table read cutover (reversible via env flag, default off = per-owner).
+        # SHARED ONLY as of the 2026-08-18 cutover. The per-user read branch is GONE on purpose,
+        # not flag-gated: `os.getenv('READ_SHARED_MEAL_PLAN', '')` defaulted to the per-user table,
+        # so once writes moved to shared, a lost env var (a sam deploy has wiped CLI-set vars on
+        # this stack before) would have silently served every user an empty meal plan with no
+        # error. A flag whose failure mode is silent data disappearance is the hazard, not the
+        # safety net. Rollback is redeploying the previous version.
         # MANDATORY owner_id filter — shared_meal_plan holds every owner's row.
-        use_shared = os.getenv('READ_SHARED_MEAL_PLAN', '').strip().lower() == 'true'
         empty_response = {
             'owner': owner,
             'status': 'empty',
@@ -246,24 +249,13 @@ def _get_meal_plan(owner):
             '_updatedDate': None,
         }
         with conn.cursor() as cur:
-            if use_shared:
-                cur.execute(
-                    "SELECT _id, _owner, status, focus, explanation_title, explanation_paragraph, plan, error_message, _createdDate, _updatedDate "
-                    "FROM shared_meal_plan WHERE owner_id = %s",
-                    [owner],
-                )
-                row = cur.fetchone()
-            else:
-                cur.execute("""
-                    SELECT COUNT(*) AS n FROM information_schema.tables
-                    WHERE table_schema = DATABASE() AND table_name = %s
-                """, [table])
-                if cur.fetchone()['n'] == 0:
-                    return _success(empty_response)
-                cur.execute(
-                    f"SELECT _id, _owner, status, focus, explanation_title, explanation_paragraph, plan, error_message, _createdDate, _updatedDate FROM `{table}` WHERE _id = 'current'",
-                )
-                row = cur.fetchone()
+            cur.execute(
+                "SELECT _id, _owner, status, focus, explanation_title, explanation_paragraph, plan, error_message, _createdDate, _updatedDate, "
+                "TIMESTAMPDIFF(SECOND, _updatedDate, NOW()) AS _generation_age_seconds "
+                "FROM shared_meal_plan WHERE owner_id = %s",
+                [owner],
+            )
+            row = cur.fetchone()
         if not row:
             return _success({
                 'owner': owner,
@@ -276,6 +268,12 @@ def _get_meal_plan(owner):
                 '_createdDate': None,
                 '_updatedDate': None,
             })
+        age_seconds = row.pop('_generation_age_seconds', None)
+        # Twice the maximum Lambda invocation duration. This is a read projection:
+        # keep the persisted plan intact, and let the existing POST retry path work.
+        if row.get('status') == 'regenerating' and age_seconds is not None and age_seconds > 1800:
+            row['status'] = 'failed'
+            row['error_message'] = row.get('error_message') or 'This meal plan did not finish. Please try again.'
         out = {k: json_serial(v) for k, v in row.items()}
         out['owner'] = owner  # response uses 'owner' for API consistency
         if out.get('plan') is None:
@@ -291,39 +289,29 @@ def _post_meal_plan(owner, body):
     if not generator_arn:
         return _error(500, 'Meal plan generator not configured')
 
+    from botocore.config import Config
+    from botocore.exceptions import ClientError, ParamValidationError
+    from generation_claim import claim_generation, DispatchRejected
+    # Keep the database reservation brief. SDK retries could turn a lost first
+    # acknowledgement into an apparent rejection on a later attempt.
+    lambda_client = boto3.client('lambda', config=Config(
+        connect_timeout=2, read_timeout=5, retries={'total_max_attempts': 1},
+    ))
+
+    def dispatch():
+        try:
+            response = lambda_client.invoke(
+                FunctionName=generator_arn, InvocationType='Event',
+                Payload=json.dumps({'owner': owner, 'focus': focus}),
+            )
+        except (ClientError, ParamValidationError) as exc:
+            raise DispatchRejected(str(exc)) from exc
+        if response.get('StatusCode') != 202:
+            raise RuntimeError('Meal plan dispatch acknowledgement was not confirmed')
+
     conn = _mysql_conn()
-    should_invoke = False
-    try:
-        member_ids = _get_household_member_ids(conn, owner)
-        with conn.cursor() as cur:
-            for member_id in member_ids:
-                _ensure_meal_plan_table(conn, member_id)
-                table = _meal_plan_table(member_id)
-                cur.execute(f"SELECT _id, status, _updatedDate FROM `{table}` WHERE _id = 'current'")
-                row = cur.fetchone()
-                is_recent_regen = False
-                if row and row.get('status') == 'regenerating':
-                    updated_at = row.get('_updatedDate')
-                    if updated_at and (datetime.utcnow() - updated_at).total_seconds() < REGEN_DEBOUNCE_SECONDS:
-                        is_recent_regen = True
-                if row:
-                    if not is_recent_regen:
-                        cur.execute(
-                            f"UPDATE `{table}` SET status = 'regenerating', focus = %s, error_message = NULL, _updatedDate = NOW() WHERE _id = 'current'",
-                            (focus,)
-                        )
-                        should_invoke = True
-                else:
-                    cur.execute(
-                        f"INSERT INTO `{table}` (_id, _owner, status, focus) VALUES ('current', %s, 'regenerating', %s)",
-                        (member_id, focus)
-                    )
-                    should_invoke = True
-        conn.commit()
-        for member_id in member_ids:
-            _dual_write_meal_plan_to_shared(conn, member_id)
-    finally:
-        pass
+    member_ids = _get_household_member_ids(conn, owner)
+    should_invoke = claim_generation(conn, member_ids, focus, REGEN_DEBOUNCE_SECONDS, dispatch)
 
     if not should_invoke:
         return _success({
@@ -332,13 +320,6 @@ def _post_meal_plan(owner, body):
             'status': 'regenerating',
             'focus': focus,
         }, status=202)
-
-    lambda_client = boto3.client('lambda')
-    lambda_client.invoke(
-        FunctionName=generator_arn,
-        InvocationType='Event',
-        Payload=json.dumps({'owner': owner, 'focus': focus})
-    )
 
     return _success({
         'message': 'Meal plan regeneration started. Poll GET /meal-plan/{owner} for status.',

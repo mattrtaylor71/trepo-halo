@@ -1,4 +1,15 @@
+import ai_consent_guard as _ai_consent
+import ai_consent_guard as _ai_consent
+from recipe_readiness import usable_lines as recipe_usable_lines, complete as recipe_content_complete, outcome as recipe_content_outcome, recovery as recipe_content_recovery, incomplete_error as recipe_incomplete_error, INCOMPLETE_MESSAGE
+from safe_logging import safe_print as print, redact_text
 import base64
+import recipe_batch_checkpoint
+import recipe_work_budget
+import link_recipe_recovery
+import recipe_link_jobs
+import pinterest_recipe
+import admission
+from types import SimpleNamespace
 import hashlib
 # Force republish after dependency-layer restore.
 import json
@@ -48,16 +59,15 @@ import recipe_inventory_llm
 
 _DB_ENV_VARS = ['DB_HOST', 'DB_USER', 'DB_PASS', 'DB_NAME']
 _REQUEST_TIMEOUT_SECONDS = 15
-# Image mirroring runs INSIDE the saved-recipes read path, so its timeout is a direct
-# tax on every list request. At 15s a single unreachable host (kroger.com, which does
-# not answer bots) blew straight past API Gateway's 30s ceiling: two candidate URLs x
-# 15s = 31.2s, the Lambda returned 200 to nobody, and the user got a 503 and an endless
-# "Finding recipes..." spinner on EVERY load, forever. A thumbnail is not worth 15s.
+# Image mirroring runs INSIDE the saved-recipes read path, so its timeout is a direct tax
+# on every list request. At 15s one unreachable host (kroger.com, which does not answer
+# bots) blew past API Gateway's 30s ceiling: 2 candidate URLs x 15s = 31.2s, the Lambda
+# returned 200 to nobody, and the user got a 503 plus an endless "Finding recipes..."
+# spinner on EVERY load, forever. A thumbnail is not worth 15 seconds.
 _IMAGE_MIRROR_TIMEOUT_SECONDS = float(os.getenv('IMAGE_MIRROR_TIMEOUT_SECONDS', '3'))
-# Hard ceiling on time spent mirroring across a WHOLE request, regardless of how many
-# rows or candidate URLs are involved. Past this the remaining rows are served with
-# their original image URLs and mirrored on a later request. Bounded degradation beats
-# a request that never arrives.
+# Hard ceiling on mirroring across a WHOLE request, however many rows or candidate URLs.
+# Past this, rows keep their original image URL and mirror on a later request. Bounded
+# degradation beats a response that never arrives.
 _IMAGE_MIRROR_BUDGET_SECONDS = float(os.getenv('IMAGE_MIRROR_BUDGET_SECONDS', '6'))
 _image_mirror_spent = {'seconds': 0.0}
 
@@ -72,21 +82,23 @@ _image_mirror_failures = {}
 
 
 def _mirror_url_recently_failed(url):
-    expiry = _image_mirror_failures.get(url)
-    return bool(expiry and expiry > time.time())
+    failure = _image_mirror_failures.get(url)
+    return bool(failure and failure[0] > time.time())
 
 
-def _note_mirror_failure(url):
+def _note_mirror_failure(url, permanent=False):
     """Remember a dead URL, and keep the map from growing without bound in a long-lived
     container by dropping entries that have already expired."""
     if not url:
         return
-    _image_mirror_failures[url] = time.time() + _IMAGE_MIRROR_FAILURE_TTL_SECONDS
+    _image_mirror_failures[url] = (time.time() + (_IMAGE_MIRROR_FAILURE_TTL_SECONDS if permanent else 300), permanent)
     if len(_image_mirror_failures) > 5000:
         now = time.time()
-        for key, expiry in list(_image_mirror_failures.items()):
-            if expiry <= now:
+        for key, failure in list(_image_mirror_failures.items()):
+            if failure[0] <= now:
                 _image_mirror_failures.pop(key, None)
+        while len(_image_mirror_failures) > 5000:
+            _image_mirror_failures.pop(next(iter(_image_mirror_failures)))
 
 
 def _ensure_mirror_failed_column(conn, table):
@@ -99,41 +111,51 @@ def _ensure_mirror_failed_column(conn, table):
         pass          # already present, or the table is gone; both are fine
 
 
-def _mark_mirror_failed_in_db(conn, owner, recipe_id):
-    """Persist the failure so a cold container does not re-pay the timeout. Never fatal:
-    losing the marker costs latency, not correctness."""
-    try:
-        table = _saved_recipes_table(owner)
-        _ensure_mirror_failed_column(conn, table)
-        with conn.cursor() as cur:
-            cur.execute(
-                f"UPDATE `{table}` SET image_mirror_failed_at = NOW() WHERE _id = %s LIMIT 1",
-                [recipe_id])
-        conn.commit()
-        # The user-facing list read runs against shared_saved_recipes whenever
-        # READ_SHARED_SAVED_RECIPES is on (it is), so a marker written ONLY to the
-        # per-owner table is invisible to the very code path meant to consume it — the
-        # skip could never fire and every request re-paid the timeout. Mark both.
-        _ensure_mirror_failed_column(conn, 'shared_saved_recipes')
-        with conn.cursor() as cur:
-            cur.execute(
-                "UPDATE `shared_saved_recipes` SET image_mirror_failed_at = NOW() "
-                "WHERE owner_id = %s AND _id = %s LIMIT 1",
-                [owner, recipe_id])
-        conn.commit()
-    except Exception:
-        pass
+def _mark_mirror_failed_in_db(conn, owner, recipe_id, failure_kind='legacy', source_url=None):
+    """Persist each read-path marker independently; a missing legacy table must
+    not prevent the shared row from retaining its failure classification."""
+    metadata = json.dumps({'kind': failure_kind, 'url_hash': _sha256(source_url) if source_url else None})
+    for table, predicate, values, family in [
+        (_saved_recipes_table(owner), '_id = %s', [recipe_id], 'legacy'),
+        ('shared_saved_recipes', 'owner_id = %s AND _id = %s', [owner, recipe_id], 'shared'),
+    ]:
+        try:
+            _ensure_mirror_failed_column(conn, table)
+            with conn.cursor() as cur:
+                try:
+                    cur.execute(f'ALTER TABLE `{table}` ADD COLUMN image_mirror_failure JSON NULL')
+                except pymysql.err.OperationalError as error:
+                    if not error.args or error.args[0] != 1060:
+                        raise
+                cur.execute(f'UPDATE `{table}` SET image_mirror_failed_at=NOW(), image_mirror_failure=%s '
+                            f'WHERE {predicate} LIMIT 1', [metadata] + values)
+            conn.commit()
+        except Exception as error:
+            code = error.args[0] if getattr(error, 'args', ()) and type(error.args[0]) is int else None
+            if code == 1146 and family == 'legacy':
+                continue
+            _log_event(None, 'image_failure_marker_write_failed', table_family=family,
+                       error_type=type(error).__name__, mysql_code=code)
 
 
 def _row_mirror_failed_recently(row):
     failed_at = row.get('image_mirror_failed_at') if isinstance(row, dict) else None
     if not failed_at:
         return False
+    metadata = row.get('image_mirror_failure')
+    try:
+        metadata = json.loads(metadata) if isinstance(metadata, str) else metadata
+    except (ValueError, TypeError):
+        metadata = None
+    if isinstance(metadata, dict) and metadata.get('url_hash'):
+        if metadata['url_hash'] != _sha256(_safe_text(row.get('image_url'))):
+            return False
     try:
         age = (datetime.now() - failed_at).total_seconds()
     except Exception:
         return False
-    return age < _IMAGE_MIRROR_FAILURE_TTL_SECONDS
+    ttl = 300 if isinstance(metadata, dict) and metadata.get('kind') == 'transient' else _IMAGE_MIRROR_FAILURE_TTL_SECONDS
+    return age < ttl
 
 
 
@@ -159,21 +181,6 @@ _VALID_INSTAGRAM_HOSTS = {
     'instagram.com',
     'www.instagram.com',
     'm.instagram.com',
-}
-# Facebook was accepted by the social-domain allowlist but never had a platform of its
-# own, so every FB link fell through to the 'web_recipe' ladder (json-ld -> html) and got
-# saved from og:title alone. That is why FB titles read "4M views · 80K reactions | ...".
-# Measured over 7 days: 304 FB attempts, 49 usable (16.1%) vs 87-93% everywhere else.
-_VALID_FACEBOOK_HOSTS = {
-    'facebook.com',
-    'www.facebook.com',
-    'm.facebook.com',
-    'web.facebook.com',
-    'mobile.facebook.com',
-    'fb.watch',
-    'www.fb.watch',
-    'fb.com',
-    'www.fb.com',
 }
 _EXTRACT_CONTENT_PATHS = {'/extract-caption', '/extract-content'}
 _RECIPE_FROM_CONTENT_PATHS = {'/recipe-from-caption', '/recipe-from-content'}
@@ -503,7 +510,7 @@ def _report_backend_error(op, owner_id=None, code=None, error=None, job_id=None,
     try:
         msg = ''
         if error is not None:
-            msg = error if isinstance(error, str) else str(error)
+            msg = redact_text(error if isinstance(error, str) else str(error))
             if len(msg) > 500:
                 msg = msg[:500]
         print(json.dumps({
@@ -612,13 +619,14 @@ def _get_household_member_ids(conn, acting_user_id):
     return list(dict.fromkeys(members)) or [safe]
 
 
-def _dual_write_saved_recipe_to_shared(conn, owner, recipe_id, request_id=None):
+def _dual_write_saved_recipe_to_shared(conn, owner, recipe_id, request_id=None, transactional=False, required=False):
     """Migration dual-write: mirror a just-saved recipe into shared_saved_recipes
     (owner_id-keyed; per-owner dedupe on resolved_url_hash). saved_recipes is
-    user-private, so owner_id = the acting owner (no member fan-out). Non-blocking:
-    errors are logged + swallowed — a missed dual-write is redundant data, never a
-    failed user save. Off by default (DUAL_WRITE_SAVED_RECIPES)."""
-    if not DUAL_WRITE_SAVED_RECIPES:
+    user-private, so owner_id identifies the copy being mirrored. Default calls log
+    and swallow errors. Transactional callers propagate errors and never commit;
+    required=True retains the projection when shared reads require it even if the
+    optional dual-write flag is off."""
+    if not DUAL_WRITE_SAVED_RECIPES and not required:
         return
     try:
         row = _fetch_saved_recipe_by_id(conn, owner, recipe_id)
@@ -652,15 +660,18 @@ def _dual_write_saved_recipe_to_shared(conn, owner, recipe_id, request_id=None):
                         _createdDate, _updatedDate
                     ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,COALESCE(%s,NOW()),%s)
                     ON DUPLICATE KEY UPDATE
-                        title=VALUES(title), image_url=VALUES(image_url), image_urls=VALUES(image_urls),
-                        source_image_url=VALUES(source_image_url), source_image_urls=VALUES(source_image_urls),
-                        image_storage_key=VALUES(image_storage_key), ingredients=VALUES(ingredients),
-                        instructions=VALUES(instructions), notes=VALUES(notes), raw_caption=VALUES(raw_caption),
-                        raw_content=VALUES(raw_content), extraction_source=VALUES(extraction_source),
-                        recipe_source_used=COALESCE(VALUES(recipe_source_used), recipe_source_used),
-                        author_name=VALUES(author_name), caption_field=VALUES(caption_field),
-                        status=VALUES(status), meal_category=VALUES(meal_category),
-                        _createdDate=VALUES(_createdDate), _updatedDate=VALUES(_updatedDate)""",
+                        source_url=IF(owner_id=VALUES(owner_id) AND _id=VALUES(_id), VALUES(source_url), source_url),
+                        resolved_url=IF(owner_id=VALUES(owner_id) AND _id=VALUES(_id), VALUES(resolved_url), resolved_url),
+                        resolved_url_hash=IF(owner_id=VALUES(owner_id) AND _id=VALUES(_id), VALUES(resolved_url_hash), resolved_url_hash),
+                        title=IF(owner_id=VALUES(owner_id) AND _id=VALUES(_id), VALUES(title), title), image_url=IF(owner_id=VALUES(owner_id) AND _id=VALUES(_id), VALUES(image_url), image_url), image_urls=IF(owner_id=VALUES(owner_id) AND _id=VALUES(_id), VALUES(image_urls), image_urls),
+                        source_image_url=IF(owner_id=VALUES(owner_id) AND _id=VALUES(_id), VALUES(source_image_url), source_image_url), source_image_urls=IF(owner_id=VALUES(owner_id) AND _id=VALUES(_id), VALUES(source_image_urls), source_image_urls),
+                        image_storage_key=IF(owner_id=VALUES(owner_id) AND _id=VALUES(_id), VALUES(image_storage_key), image_storage_key), ingredients=IF(owner_id=VALUES(owner_id) AND _id=VALUES(_id), VALUES(ingredients), ingredients),
+                        instructions=IF(owner_id=VALUES(owner_id) AND _id=VALUES(_id), VALUES(instructions), instructions), notes=IF(owner_id=VALUES(owner_id) AND _id=VALUES(_id), VALUES(notes), notes), raw_caption=IF(owner_id=VALUES(owner_id) AND _id=VALUES(_id), VALUES(raw_caption), raw_caption),
+                        raw_content=IF(owner_id=VALUES(owner_id) AND _id=VALUES(_id), VALUES(raw_content), raw_content), extraction_source=IF(owner_id=VALUES(owner_id) AND _id=VALUES(_id), VALUES(extraction_source), extraction_source),
+                        recipe_source_used=IF(owner_id=VALUES(owner_id) AND _id=VALUES(_id), COALESCE(VALUES(recipe_source_used), recipe_source_used), recipe_source_used),
+                        author_name=IF(owner_id=VALUES(owner_id) AND _id=VALUES(_id), VALUES(author_name), author_name), caption_field=IF(owner_id=VALUES(owner_id) AND _id=VALUES(_id), VALUES(caption_field), caption_field),
+                        status=IF(owner_id=VALUES(owner_id) AND _id=VALUES(_id), VALUES(status), status), meal_category=IF(owner_id=VALUES(owner_id) AND _id=VALUES(_id), VALUES(meal_category), meal_category),
+                        _createdDate=IF(owner_id=VALUES(owner_id) AND _id=VALUES(_id), VALUES(_createdDate), _createdDate), _updatedDate=IF(owner_id=VALUES(owner_id) AND _id=VALUES(_id), VALUES(_updatedDate), _updatedDate)""",
                 (
                     owner, row.get('_id'), row.get('_owner'), row.get('source_type'), row.get('source_url'),
                     row.get('resolved_url'), resolved_url_hash, row.get('title'), row.get('image_url'),
@@ -673,7 +684,32 @@ def _dual_write_saved_recipe_to_shared(conn, owner, recipe_id, request_id=None):
                     ts.get('_createdDate'), ts.get('_updatedDate'),
                 ),
             )
-        conn.commit()
+        # Legacy shared tables may have a globally unique _id. Guard every
+        # duplicate-key assignment above, then verify this owner's exact target.
+        # A foreign ID or same-URL/different-ID collision must not edit another row.
+        with conn.cursor() as cur:
+            cur.execute(
+                f"SELECT owner_id, _id, title, ingredients, instructions, notes, source_url, resolved_url, resolved_url_hash, status FROM `{_SHARED_SAVED_RECIPES_TABLE}` WHERE owner_id=%s AND _id=%s",
+                [owner, recipe_id],
+            )
+            confirmed = cur.fetchone()
+        if not confirmed:
+            raise ValueError('Saved recipe projection identity collision')
+        for field in ('source_url','resolved_url','resolved_url_hash','status'):
+            expected = resolved_url_hash if field=='resolved_url_hash' else (row.get('status') or 'ready') if field=='status' else row.get(field)
+            if confirmed.get(field) != expected:
+                raise ValueError('Saved recipe projection did not retain source/status')
+        if confirmed.get('title') != row.get('title'):
+            raise ValueError('Saved recipe projection did not retain the edited title')
+        for field in ('ingredients', 'instructions', 'notes'):
+            expected = row.get(field)
+            actual = confirmed.get(field)
+            expected = json.loads(expected) if isinstance(expected, str) else expected
+            actual = json.loads(actual) if isinstance(actual, str) else actual
+            if actual != expected:
+                raise ValueError('Saved recipe projection did not retain the edited content')
+        if not transactional:
+            conn.commit()
     except Exception as exc:
         # LOUD, metric-filterable miss marker. The dual-write is non-blocking/
         # swallowed, so the parity count is our only signal a mirror is missing —
@@ -691,6 +727,9 @@ def _dual_write_saved_recipe_to_shared(conn, owner, recipe_id, request_id=None):
         except Exception:
             pass
         _log_event(request_id, 'saved_recipe_shared_dualwrite_failed', owner=owner, recipe_id=recipe_id, error=str(exc))
+
+        if transactional:
+            raise
 
 
 def _fan_out_saved_recipe_to_household(conn, primary_owner, recipe_id, request_id=None):
@@ -858,6 +897,44 @@ def _ensure_column(conn, table, column_name, ddl):
         raise
 
 
+_PROCESSING_STATUS_READY = set()
+
+
+def _ensure_saved_recipe_processing_status(conn, table):
+    """Append the missing enum value without rewriting existing status values.
+
+    This runs before save transactions. The old production SQL mode silently
+    coerced 'processing' to '', so the worker never recognized accepted text.
+    """
+    if table in _PROCESSING_STATUS_READY:
+        return True
+    with conn.cursor() as cur:
+        cur.execute(f"SHOW COLUMNS FROM `{table}` LIKE 'status'")
+        column = cur.fetchone() or {}
+        kind = column.get('Type') or ''
+        if kind.lower().startswith('enum(') and "'processing'" not in kind.lower():
+            expanded = kind[:-1] + ",'processing')"
+            cur.execute("SELECT @@SESSION.lock_wait_timeout AS timeout")
+            previous_timeout = cur.fetchone()['timeout']
+            try:
+                cur.execute("SET SESSION lock_wait_timeout=1")
+                cur.execute(f"ALTER TABLE `{table}` MODIFY COLUMN `status` {expanded} NOT NULL DEFAULT 'ready', ALGORITHM=INPLACE, LOCK=NONE")
+            except pymysql.err.OperationalError as exc:
+                if exc.args[0] in (1205, 1213):
+                    return False  # Use the synchronous save path; never wait out the HTTP deadline.
+                raise
+            finally:
+                cur.execute("SET SESSION lock_wait_timeout=%s", (previous_timeout,))
+    _PROCESSING_STATUS_READY.add(table)
+    return True
+
+
+def _text_processing_schema_ready(conn, owner):
+    if not _ensure_saved_recipe_processing_status(conn, _saved_recipes_table(owner)):
+        return False
+    return not DUAL_WRITE_SAVED_RECIPES or _ensure_saved_recipe_processing_status(conn, _SHARED_SAVED_RECIPES_TABLE)
+
+
 def _ensure_saved_recipes_table(conn, owner):
     table = _saved_recipes_table(owner)
     with conn.cursor() as cur:
@@ -883,7 +960,7 @@ def _ensure_saved_recipes_table(conn, owner):
                 extraction_source VARCHAR(32),
                 author_name VARCHAR(255),
                 caption_field VARCHAR(64) NULL,
-                status ENUM('ready', 'failed') NOT NULL DEFAULT 'ready',
+                status ENUM('ready', 'failed', 'processing') NOT NULL DEFAULT 'ready',
                 _createdDate DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 _updatedDate DATETIME DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
                 UNIQUE KEY uniq_resolved_url_hash (resolved_url_hash),
@@ -912,6 +989,7 @@ def _ensure_saved_recipes_table(conn, owner):
     # the guess.
     _ensure_column(conn, table, 'recipe_source_used',
                    "`recipe_source_used` VARCHAR(48) NULL AFTER `extraction_source`")
+
 
 
 # Same 4-value taxonomy the recipe generator uses for "Use What I Have", so saved
@@ -958,7 +1036,7 @@ def _classify_meal_category(title, ingredients, request_id=None):
             "dips, drinks, and small bites. Pick the single best fit."
         )
         user = f"Title: {title}\nIngredients: {', '.join(ings[:20])}"
-        response = client.chat.completions.create(
+        response = _ai_consent.provider_call(client.chat.completions.create)(
             model=model,
             temperature=0,
             response_format={'type': 'json_object'},
@@ -987,7 +1065,11 @@ def _apply_saved_recipe_meal_category(conn, owner, recipe_id, title, ingredients
         if provided in RECIPE_MEAL_CATEGORIES:
             category = provided
         else:
-            category = _classify_meal_category(title, ingredients, request_id=request_id)
+            try:
+                with recipe_work_budget.phase(max_seconds=6):
+                    category = _classify_meal_category(title, ingredients, request_id=request_id)
+            except recipe_work_budget.WorkLimit:
+                category = _meal_category_heuristic(title, ingredients) or 'other'
         table = _saved_recipes_table(owner)
         with conn.cursor() as cur:
             cur.execute(
@@ -1066,6 +1148,22 @@ def _parse_json_field(val):
     return []
 
 
+def _canonical_explore_source_url(value):
+    """Put the content ID in the path for clients that discard URL queries."""
+    from urllib.parse import urlparse, parse_qs
+    import uuid
+    if not isinstance(value, str):
+        return value
+    try:
+        parsed = urlparse(value)
+        if (parsed.hostname or '').lower() not in ('instagram.com', 'www.instagram.com') or parsed.path.rstrip('/').lower() != '/trepohq':
+            return value
+        candidate = (parse_qs(parsed.query).get('trepo_recipe') or [''])[0]
+        return 'https://trepo.ai/explore/' + str(uuid.UUID(candidate))
+    except (ValueError, TypeError):
+        return value
+
+
 def _serialize_row(row):
     out = {k: json_serial(v) for k, v in row.items()}
     out['id'] = out.pop('_id', None)
@@ -1074,9 +1172,17 @@ def _serialize_row(row):
     out['notes'] = _parse_json_field(row.get('notes'))
     out['image_urls'] = _parse_json_field(row.get('image_urls'))
     out['source_image_urls'] = _parse_json_field(row.get('source_image_urls'))
+    for field in ('source_url', 'resolved_url'):
+        out[field] = _canonical_explore_source_url(out.get(field))
     out['platform'] = out.get('source_type')
     out['content'] = out.get('raw_content') or out.get('raw_caption') or None
     out['caption'] = out.get('raw_caption') or out.get('raw_content') or None
+    if not out.get('status'):
+        out['status'] = 'ready' if recipe_content_complete(out) else 'failed'
+    out['content_outcome'] = recipe_content_outcome(out)
+    out['content_revision'] = _saved_recipe_content_revision(row)
+    if out['content_outcome'] != 'ready':
+        out['recovery'] = recipe_content_recovery(out)
     return out
 
 
@@ -1155,7 +1261,7 @@ def _get_owner_kitchen_version(conn, owner):
     return int(row.get('kitchen_version') or 0)
 
 
-def _get_cached_recipe_availability(conn, owner, recipe_ids, min_kitchen_version=None):
+def _get_cached_recipe_availability(conn, owner, recipe_ids, min_kitchen_version=None, recipe_rows=None):
     """Return a dict keyed by recipe_id with cached availability data from owner_recipe_availability table.
 
     If min_kitchen_version is provided, discard cache rows with a lower version (stale).
@@ -1182,13 +1288,19 @@ def _get_cached_recipe_availability(conn, owner, recipe_ids, min_kitchen_version
                            matched_count, missing_count, ingredient_matches, missing_ingredients,
                            substitution_candidates, substitution_summary, substitution_status, analysis_status
                     FROM `{_OWNER_RECIPE_AVAILABILITY_TABLE}`
-                    WHERE owner = %s AND recipe_source = 'saved' AND recipe_id IN ({placeholders})""",
-                [safe_owner] + safe_ids,
+                    WHERE owner = %s AND recipe_source = %s AND recipe_id IN ({placeholders})""",
+                [safe_owner, _availability_cache_source('saved')] + safe_ids,
             )
             rows = cur.fetchall() or []
+        if recipe_rows is None:
+            recipe_rows = _read_requested_personalization_rows(conn, owner, safe_ids)
+        current = {_safe_text(r.get('_id')): r for r in recipe_rows}
+        household_key = _saved_recipe_household_key(_saved_recipe_member_ids(conn, owner))
         result = {}
         for row in rows:
             rid = _safe_text(row.get('recipe_id'))
+            if not _saved_recipe_evidence_matches(current.get(rid), row, household_key):
+                continue
             if not rid:
                 continue
             cached_version = int(row.get('kitchen_version') or 0)
@@ -1212,13 +1324,13 @@ def _get_cached_recipe_availability(conn, owner, recipe_ids, min_kitchen_version
         return {}
 
 
-def _get_kitchen_items_for_matching(conn, owner):
+def _get_kitchen_items_for_matching(conn, owner, member_ids=None):
     if USE_SHARED_TABLES:
-        member_ids = _get_household_member_ids(conn, owner)
+        member_ids = member_ids if member_ids is not None else _saved_recipe_member_ids(conn, owner)
         placeholders = ','.join(['%s'] * len(member_ids))
         with conn.cursor() as cur:
             cur.execute(f"""
-                SELECT `_id`, `product_name`, `product_description`
+                SELECT `_id`, `product_name`, `product_description`, `quantity_value`, `quantity_unit`, `remaining_quantity`
                 FROM `shared_kitchen`
                 WHERE `owner_id` IN ({placeholders})
                   AND `action` = 'IN'
@@ -1238,7 +1350,7 @@ def _get_kitchen_items_for_matching(conn, owner):
             cur.execute("""
                 SELECT column_name FROM information_schema.columns
                 WHERE table_schema = DATABASE() AND table_name = %s
-                  AND column_name IN ('product_description', 'analysis_stage', 'analysis_status')
+                  AND column_name IN ('product_description', 'analysis_stage', 'analysis_status', 'quantity', 'quantity_value', 'quantity_unit', 'remaining_quantity')
             """, [table_name])
             column_names = {
                 (row.get('column_name') or row.get('COLUMN_NAME') or '').strip()
@@ -1254,6 +1366,9 @@ def _get_kitchen_items_for_matching(conn, owner):
             select_fields = "`_id`, `product_name`"
             if 'product_description' in column_names:
                 select_fields += ", `product_description`"
+            for field in ('quantity', 'quantity_value', 'quantity_unit', 'remaining_quantity'):
+                if field in column_names:
+                    select_fields += f", `{field}`"
             cur.execute(f"""
                 SELECT {select_fields}
                 FROM `{table_name}`
@@ -1262,15 +1377,10 @@ def _get_kitchen_items_for_matching(conn, owner):
             """)
             rows = cur.fetchall() or []
     items = []
-    seen = set()
     for row in rows:
         display_name = _safe_text(row.get('product_name'))
         if not display_name:
             continue
-        dedupe_key = display_name.lower()
-        if dedupe_key in seen:
-            continue
-        seen.add(dedupe_key)
         description = _safe_text(row.get('product_description')) or None
         name_parts = [display_name]
         if description:
@@ -1279,6 +1389,10 @@ def _get_kitchen_items_for_matching(conn, owner):
         items.append({
             'item_id': _safe_text(row.get('_id')) or None,
             'display_name': display_name,
+            'quantity': row.get('quantity'),
+            'quantity_value': row.get('quantity_value'),
+            'quantity_unit': row.get('quantity_unit'),
+            'remaining_quantity': row.get('remaining_quantity'),
             'description': description,
             'canonical_ingredient': ' '.join(tokens),
             'tokens': tokens,
@@ -1287,9 +1401,11 @@ def _get_kitchen_items_for_matching(conn, owner):
 
 
 def _build_kitchen_match_context(conn, owner):
+    members = _saved_recipe_member_ids(conn, owner)
     return {
         'kitchen_version': _get_owner_kitchen_version(conn, owner),
-        'kitchen_candidates': _get_kitchen_items_for_matching(conn, owner),
+        'kitchen_candidates': _get_kitchen_items_for_matching(conn, owner, member_ids=members),
+        'saved_recipe_household_key': _saved_recipe_household_key(members),
     }
 
 
@@ -1376,19 +1492,24 @@ def _compute_recipe_availability(recipe_ingredients, kitchen_context, request_id
         'title': _safe_text((recipe or {}).get('title')),
         'ingredients': _clean_string_list((recipe or {}).get('ingredients') or recipe_ingredients or []),
     }
-    availability_map, _ = recipe_inventory_llm.match_recipes_fast(
-        [recipe_payload],
-        kitchen_context,
-        request_id=request_id,
-        log_fn=_log_inventory_match_event,
-        source_label='saved',
-        substitution_callback=_suggest_saved_recipe_substitutions,
-    )
-    result = availability_map.get(recipe_payload['id']) or recipe_inventory_llm.deterministic_availability(
-        recipe_payload,
-        kitchen_context,
-        substitution_callback=_suggest_saved_recipe_substitutions,
-    )
+    try:
+        with recipe_work_budget.phase():
+            availability_map, _ = recipe_inventory_llm.match_recipes_fast(
+                [recipe_payload],
+                kitchen_context,
+                request_id=request_id,
+                log_fn=_log_inventory_match_event,
+                source_label='saved',
+                substitution_callback=_suggest_saved_recipe_substitutions,
+                inline_single=True,
+            )
+            result = availability_map.get(recipe_payload['id']) or recipe_inventory_llm.deterministic_availability(
+                recipe_payload,
+                kitchen_context,
+                substitution_callback=_suggest_saved_recipe_substitutions,
+            )
+    except recipe_work_budget.WorkLimit:
+        result = recipe_inventory_llm.deterministic_availability(recipe_payload, kitchen_context)
     return _local_deterministic_merge(result, kitchen_context)
 
 
@@ -1398,7 +1519,7 @@ def _local_deterministic_merge(availability, kitchen_context):
     kitchen_candidates = (kitchen_context or {}).get('kitchen_candidates') or []
     changed = False
     for match in ingredient_matches:
-        if match.get('match_status') != 'missing':
+        if match.get('match_status') != 'missing' or match.get('quantity_status') == 'insufficient':
             continue
         recipe_text = _safe_text(match.get('recipe_ingredient'))
         if not recipe_text:
@@ -1419,6 +1540,10 @@ def _local_deterministic_merge(availability, kitchen_context):
             _safe_text(m.get('recipe_ingredient'))
             for m in ingredient_matches if m.get('match_status') == 'missing'
         ]
+    # Older layer versions remain deployable during the additive rollout.
+    enforce = getattr(recipe_inventory_llm, 'enforce_quantity_availability', None)
+    if enforce and ingredient_matches:
+        return enforce({'ingredients': [m['recipe_ingredient'] for m in ingredient_matches]}, kitchen_context, availability)
     return availability
 
 
@@ -1501,7 +1626,7 @@ Only include substitutions that are genuinely plausible. If no good substitution
         'kitchen_items': kitchen_items,
     })
     try:
-        response = _openai_client().chat.completions.create(
+        response = _ai_consent.provider_call(_openai_client().chat.completions.create)(
             model=_OPENAI_SUBSTITUTION_MODEL,
             temperature=0.2,
             messages=[
@@ -1543,7 +1668,7 @@ Only include substitutions that are genuinely plausible. If no good substitution
 def _build_owner_recipe_availability_record(owner, recipe_source, recipe_id, availability):
     return {
         'owner': _safe_text(owner),
-        'recipe_source': _safe_text(recipe_source),
+        'recipe_source': _availability_cache_source(_safe_text(recipe_source)),
         'recipe_id': _safe_text(recipe_id),
         'kitchen_version': int((availability or {}).get('kitchen_version') or 0),
         'can_make_exact': 1 if (availability or {}).get('can_make_exact') else 0,
@@ -1564,6 +1689,9 @@ def _persist_owner_recipe_availability_rows(conn, rows):
     if not rows:
         return
     _ensure_owner_recipe_availability_table(conn)
+    persist_quantities = getattr(recipe_inventory_llm, 'persist_quantity_availability_rows', None)
+    if persist_quantities:
+        return persist_quantities(conn, rows, saved_recipe_guard=_saved_recipe_cache_guard)
     params = [
         (
             row['owner'],
@@ -1616,8 +1744,8 @@ def _delete_owner_recipe_availability(conn, owner, recipe_source, recipe_id):
     _ensure_owner_recipe_availability_table(conn)
     with conn.cursor() as cur:
         cur.execute(
-            f"DELETE FROM `{_OWNER_RECIPE_AVAILABILITY_TABLE}` WHERE owner = %s AND recipe_source = %s AND recipe_id = %s",
-            [_safe_text(owner), _safe_text(recipe_source), _safe_text(recipe_id)],
+            f"DELETE FROM `{_OWNER_RECIPE_AVAILABILITY_TABLE}` WHERE owner = %s AND recipe_source IN (%s, %s) AND recipe_id = %s",
+            [_safe_text(owner), _safe_text(recipe_source), _availability_cache_source(_safe_text(recipe_source)), _safe_text(recipe_id)],
         )
     conn.commit()
 
@@ -1631,13 +1759,11 @@ def _serialize_saved_recipe_with_availability(conn, owner, row, kitchen_context=
         request_id=request_id,
         recipe=recipe,
     )
-    recipe['availability'] = {
-        'kitchen_version': availability['kitchen_version'],
-        'can_make_exact': availability['can_make_exact'],
-        'can_make_with_subs': availability['can_make_with_subs'],
-        'matched_count': availability['matched_count'],
-        'missing_count': availability['missing_count'],
-    }
+    availability = _stamp_saved_recipe_evidence(availability, row, kitchen_context)
+    preserve = getattr(recipe_inventory_llm, 'confirmed_availability_for_response', None)
+    if preserve:
+        availability = preserve(conn, owner, 'saved', recipe.get('id'), availability)
+    recipe['availability'] = _availability_summary(availability)
     recipe['ingredient_matches'] = availability['ingredient_matches']
     recipe['missing_ingredients'] = availability['missing_ingredients']
     recipe['substitution_candidates'] = availability['substitution_candidates']
@@ -1757,6 +1883,8 @@ def _serialize_saved_recipe_batch_job(job, event=None):
         'job_id': job_id,
         'type': _safe_text(job.get('type')) or _SAVED_RECIPE_BATCH_JOB_TYPE,
         'status': _safe_text(job.get('status')).lower() or 'unknown',
+        'outcome': ('partial' if job.get('partial_errors') else 'complete')
+                   if job.get('status') == _JOB_STATUS_COMPLETED else _safe_text(job.get('status')).lower(),
         'owner': owner or None,
         'image_count': int(job.get('image_count') or 0),
         'count': int(job.get('result_count') or 0),
@@ -1796,13 +1924,14 @@ def _load_saved_recipe_batch_payload(job):
 
 
 def _get_saved_recipe_batch_job(job_id):
-    item = _jobs_table().get_item(Key={'job_id': job_id}).get('Item')
+    item = _jobs_table().get_item(Key={'job_id': job_id}, ConsistentRead=True).get('Item')
     if not item or _safe_text(item.get('type')) != _SAVED_RECIPE_BATCH_JOB_TYPE:
         return None
     return item
 
 
 def _put_saved_recipe_batch_job(job):
+    job.setdefault('ai_consent_actor', _ai_recipe_owner.get())
     _jobs_table().put_item(Item=job)
     return job
 
@@ -1874,7 +2003,7 @@ def _update_saved_recipe_batch_job(job_id, **fields):
             'payload_s3_key': _safe_text(job.get('payload_s3_key')),
             'kind': _safe_text(job.get('submission_kind')),
         }
-        job['ttl'] = job.get('ttl') or _failed_job_ttl_epoch()
+        job['ttl'] = None if job.get('admission_operation_id') else (job.get('ttl') or _failed_job_ttl_epoch())
     _put_saved_recipe_batch_job(job)
     return job
 
@@ -1954,24 +2083,18 @@ def _mirror_recipe_image(owner, recipe_id, source_image_url, request_id=None):
     digest = _sha256(source_url)[:16]
     response = None
     try:
-        response = requests.get(
-            source_url,
-            timeout=_IMAGE_MIRROR_TIMEOUT_SECONDS,
-            allow_redirects=True,
-            headers={'User-Agent': _USER_AGENT, 'Accept-Language': 'en-US,en;q=0.9'}
-        )
-        response.raise_for_status()
-        content_type = _safe_text(response.headers.get('Content-Type')).split(';', 1)[0].lower()
-        if not content_type.startswith('image/'):
-            raise RuntimeError(f'Unexpected image content type: {content_type or "unknown"}')
-        image_bytes = response.content
-        if not image_bytes:
-            raise RuntimeError('Downloaded image was empty.')
+        image_bytes, content_type, resolved_url = _load_remote_image(
+            source_url, timeout_seconds=_IMAGE_MIRROR_TIMEOUT_SECONDS,
+            deadline_seconds=_IMAGE_MIRROR_TIMEOUT_SECONDS)
+        # The card thumbnail may be cropped; keep the complete source separately
+        # so image zoom can show the original recipe without losing its edges.
+        original_url = _upload_saved_recipe_source_image(
+            owner, recipe_id, image_bytes, content_type, request_id=request_id)
         # Normalize wide landscape heroes to a square before storing so they can't blow out
         # the recipe-detail layout on older iOS builds. No-op for near-square/portrait; on
         # any decode error the original bytes pass through unchanged.
         image_bytes, content_type = _normalize_hero_image_bytes(image_bytes, content_type)
-        ext = _guess_image_extension(content_type, response.url or source_url)
+        ext = _guess_image_extension(content_type, resolved_url)
         key = f"recipe-images/{safe_owner}/saved-recipes/{recipe_id}-{digest}.{ext}"
         boto3.client('s3').put_object(
             Bucket=bucket,
@@ -1994,7 +2117,7 @@ def _mirror_recipe_image(owner, recipe_id, source_image_url, request_id=None):
             'image_url': owned_url,
             'image_urls': [owned_url],
             'source_image_url': source_url,
-            'source_image_urls': [source_url],
+            'source_image_urls': [original_url],
             'image_storage_key': key,
         }
     except Exception as exc:
@@ -2051,13 +2174,14 @@ def _prepare_saved_recipe_image_fields(owner, recipe_id, extraction, request_id=
 
 
 def _openai_client():
+    if not _ai_consent.allowed(_ai_recipe_owner.get()): return None
     if not os.getenv('OPENAI_API_KEY'):
         raise ServiceError('OPENAI_API_KEY is not set.', status_code=500)
-    return OpenAI(
+    return recipe_batch_checkpoint.bounded_client(_ai_consent.provider_client(OpenAI)(
         api_key=os.getenv('OPENAI_API_KEY'),
         timeout=_OPENAI_TIMEOUT_SECONDS,
         max_retries=_OPENAI_MAX_RETRIES,
-    )
+    ))
 
 
 def _strip_code_fences(text):
@@ -2258,25 +2382,76 @@ def _normalize_image_submission(submission):
     raise ServiceError('Missing image_url or image_base64.', status_code=400)
 
 
-def _load_remote_image(image_url):
+_GENERIC_IMAGE_TYPES = {'', 'application/octet-stream', 'binary/octet-stream', 'application/binary'}
+
+def _verified_generic_image_type(image_bytes):
+    """Trust a decoded raster format, never the URL extension or binary MIME label."""
+    from PIL import Image
+    try:
+        with Image.open(BytesIO(image_bytes)) as image:
+            if image.width * image.height > 25_000_000:
+                raise ServiceError('This image has too many pixels.', status_code=413)
+            content_type = Image.MIME.get(image.format, '')
+            if image.format not in {'JPEG', 'PNG', 'GIF', 'WEBP', 'AVIF', 'HEIF'}:
+                raise ValueError('Unsupported raster format')
+            image.load()  # Reject corrupt/truncated bodies before uploading to owned storage.
+            return content_type
+    except ServiceError:
+        raise
+    except Exception as exc:
+        raise ServiceError('The source did not return a valid image.', status_code=422,
+                           extra={'error_code': 'invalid_image'}) from exc
+
+
+def _load_remote_image(image_url, *, timeout_seconds=None, deadline_seconds=20):
     response = None
     try:
         response = requests.get(
             image_url,
-            timeout=_REQUEST_TIMEOUT_SECONDS,
+            timeout=_REQUEST_TIMEOUT_SECONDS if timeout_seconds is None else timeout_seconds,
+            stream=True,
             allow_redirects=True,
             headers={'User-Agent': _USER_AGENT, 'Accept-Language': 'en-US,en;q=0.9'}
         )
         response.raise_for_status()
-        content_type = _normalize_image_content_type(response.headers.get('Content-Type'), source_url=response.url or image_url)
-        image_bytes = response.content
-        if not content_type.startswith('image/'):
+        content_type = _safe_text(response.headers.get('Content-Type')).split(';', 1)[0].lower()
+        if not content_type.startswith('image/') and content_type not in _GENERIC_IMAGE_TYPES:
             raise ServiceError(f'Unexpected image content type: {content_type or "unknown"}', status_code=400)
+        limit = 25 * 1024 * 1024
+        try:
+            advertised_size = int(response.headers.get('Content-Length') or 0)
+        except (TypeError, ValueError):
+            advertised_size = 0
+        if advertised_size > limit:
+            raise ServiceError('This image is too large. Please choose an image under 25 MB.', status_code=413)
+        chunks, size = [], 0
+        deadline = time.monotonic() + deadline_seconds
+        for chunk in response.iter_content(chunk_size=65536):
+            if time.monotonic() > deadline:
+                raise ServiceError('The image download took too long. Please try again.', status_code=503)
+            size += len(chunk)
+            if size > limit:
+                raise ServiceError('This image is too large. Please choose an image under 25 MB.', status_code=413)
+            chunks.append(chunk)
+        image_bytes = b''.join(chunks)
         if not image_bytes:
             raise ServiceError('Downloaded image was empty.', status_code=400)
-        return image_bytes, content_type, response.url or image_url
+        if content_type in _GENERIC_IMAGE_TYPES:
+            content_type = _verified_generic_image_type(image_bytes)
+        return image_bytes, _normalize_image_content_type(content_type), response.url or image_url
+    except requests.HTTPError as exc:
+        status = getattr(exc.response, 'status_code', None)
+        if status in (403, 404, 410):
+            raise ServiceError('This image is unavailable at its source. Please upload it again.',
+                               status_code=422, extra={'error_code': 'source_unavailable'}) from exc
+        if status in (408, 429):
+            raise ServiceError('The image provider is temporarily busy. Please try again.',
+                               status_code=status, extra={'error_code': 'provider_busy'}) from exc
+        raise ServiceError('The image provider is temporarily unavailable. Please try again.',
+                           status_code=502, extra={'error_code': 'provider_unavailable'}) from exc
     except requests.RequestException as exc:
-        raise ServiceError(f'Could not fetch image URL: {exc}', status_code=502)
+        raise ServiceError('The image could not be downloaded. Please try again.',
+                           status_code=502, extra={'error_code': 'provider_unavailable'}) from exc
     finally:
         if response is not None:
             response.close()
@@ -2325,6 +2500,10 @@ def _prepare_image_for_vision(submission):
     else:
         image_bytes = image_input['image_bytes']
         content_type = image_input['content_type']
+
+    if submission.get('_expected_sha256') is not None:
+        if len(image_bytes) != submission.get('_expected_size') or _sha256_bytes(image_bytes) != submission['_expected_sha256']:
+            raise ServiceError('The uploaded photo changed. Please import the original image again.', status_code=409)
 
     normalized_content_type = _normalize_image_content_type(content_type, source_url=source_image_url or '')
     if normalized_content_type not in _VISION_SUPPORTED_CONTENT_TYPES:
@@ -2384,8 +2563,29 @@ Rules:
 - Do not return markdown fences or extra prose."""
 
 
+def _is_uniform_recipe_image(image_bytes):
+    """Reject only provably empty static rasters, not faint text or sparse pages."""
+    from PIL import Image, UnidentifiedImageError
+    try:
+        with Image.open(BytesIO(image_bytes)) as image:
+            if getattr(image, 'n_frames', 1) != 1:
+                return False
+            if image.width * image.height > 25_000_000:
+                raise ServiceError('This image has too many pixels.', status_code=413)
+            with image.convert('RGBA') as pixels:
+                extrema = pixels.getextrema()
+                # Fully transparent pixels cannot supply visible recipe information.
+                return extrema[3] == (0, 0) or all(low == high for low, high in extrema)
+    except (UnidentifiedImageError, OSError):
+        # This guard is not the format validator; retain the existing decoder path.
+        return False
+
+
+
 def _extract_recipe_fragment_from_image(prepared_image, request_id=None, image_index=None,
                                         escalate_on_not_recipe=True):
+    if _is_uniform_recipe_image(prepared_image['image_bytes']):
+        raise ServiceError('Not enough recipe information. Try a clearer photo with ingredients and steps.', status_code=422)
     client = _openai_client()
     image_reference = f"data:{prepared_image['content_type']};base64,{base64.b64encode(prepared_image['image_bytes']).decode('ascii')}"
     # A transient OpenAI blip was flagging VALID recipe images as not_recipe → the whole
@@ -2395,6 +2595,7 @@ def _extract_recipe_fragment_from_image(prepared_image, request_id=None, image_i
     fallback_model = os.getenv('OPENAI_RECIPE_VISION_FALLBACK_MODEL', 'gpt-5.4-2026-03-05')
     attempts = [(_OPENAI_VISION_MODEL, 0.0), (_OPENAI_VISION_MODEL, 0.5), (fallback_model, 0.4)]
     last_reason = 'not_recipe'
+    provider_failures = 0
     for attempt_idx, (model, delay) in enumerate(attempts):
         if delay:
             time.sleep(delay)
@@ -2413,10 +2614,11 @@ def _extract_recipe_fragment_from_image(prepared_image, request_id=None, image_i
             # gpt-5.x / o-series reject a custom temperature; only set it for the 4.x model.
             if not str(model).startswith('gpt-5') and not str(model).startswith('o'):
                 kwargs['temperature'] = 0.1
-            response = client.chat.completions.create(**kwargs)
+            response = _ai_consent.provider_call(client.chat.completions.create)(**kwargs)
             payload = json.loads(_strip_code_fences(response.choices[0].message.content))
         except Exception as exc:
-            last_reason = str(exc)
+            provider_failures += 1
+            last_reason = type(exc).__name__
             _log_event(request_id, 'saved_recipe_image_extract_retry', model=model,
                        image_index=image_index, attempt=attempt_idx + 1, failure_reason=last_reason)
             continue
@@ -2446,7 +2648,10 @@ def _extract_recipe_fragment_from_image(prepared_image, request_id=None, image_i
         # really is a recipe and a transient blip is the likely explanation.
         if not escalate_on_not_recipe and last_reason == 'not_recipe':
             break
-    # All attempts, including the flagship failover, agree it's not a usable recipe.
+    # Provider outages and malformed output are not evidence that the photo is unsuitable.
+    if provider_failures:
+        raise ServiceError('The recipe reader is temporarily unavailable. Please try again.', status_code=503)
+    # All completed attempts agree it's not a usable recipe.
     raise ServiceError('Not enough recipe information.', status_code=422)
 
 
@@ -2480,6 +2685,7 @@ def _extract_recipe_from_image(image_submission, request_id=None):
     return extraction, prepared_image
 
 
+@recipe_work_budget.bounded
 def _extract_recipe_from_social_preview_images(extraction, request_id=None):
     candidate_urls = _unique_texts([
         extraction.get('image_url'),
@@ -2549,7 +2755,7 @@ def _group_image_fragments(fragments, request_id=None):
 
     started = time.time()
     try:
-        response = _openai_client().chat.completions.create(
+        response = _ai_consent.provider_call(_openai_client().chat.completions.create)(
             model=_OPENAI_VISION_MODEL,
             # Deterministic grouping: identical retries should group identically, so a
             # re-drive is a genuine retry rather than a fresh roll of the dice.
@@ -2569,6 +2775,8 @@ def _group_image_fragments(fragments, request_id=None):
             latency_ms=int((time.time() - started) * 1000),
             failure_reason=str(exc),
         )
+        if recipe_batch_checkpoint._deadline.get() is not None:
+            raise ServiceError('Recipe page grouping is temporarily unavailable.', status_code=503) from exc
         return [{'title_hint': fragment.get('title_hint') or '', 'fragments': [fragment]} for fragment in fragments]
 
     used = set()
@@ -2669,18 +2877,18 @@ def _extract_recipe_clusters_from_images(image_submissions, request_id=None):
     fragments = []
     for image_index, image_submission in enumerate(image_submissions or []):
         try:
-            prepared_image = _prepare_image_for_vision(image_submission)
-            fragment = _extract_recipe_fragment_from_image(
-                prepared_image,
-                request_id=request_id,
-                image_index=image_index,
-            )
+            prepared_image = _run_with_transient_retry(
+                lambda: _prepare_image_for_vision(image_submission), request_id=request_id, label='prepare_recipe_image')
+            fragment = _run_with_transient_retry(
+                lambda: _extract_recipe_fragment_from_image(prepared_image, request_id=request_id, image_index=image_index),
+                request_id=request_id, label='extract_recipe_image')
             fragments.append(fragment)
-        except ServiceError as exc:
+        except Exception as exc:
             partial_errors.append({
                 'image_index': image_index,
-                'error': str(exc),
-                'status_code': exc.status_code,
+                'error': str(exc) if isinstance(exc, ServiceError) else 'This image could not be processed. Please try again.',
+                'status_code': exc.status_code if isinstance(exc, ServiceError) else 503,
+                'retryable': _is_transient_failure(exc),
             })
 
     if not fragments:
@@ -2744,7 +2952,7 @@ def _recipe_image_digest(recipe):
 def _generate_recipe_image(recipe, request_id=None):
     started = time.time()
     try:
-        response = _openai_client().images.generate(
+        response = _ai_consent.provider_call(_openai_client().images.generate)(
             model=_OPENAI_RECIPE_IMAGE_MODEL,
             prompt=_build_recipe_image_prompt(recipe),
             size='1024x1024',
@@ -2813,6 +3021,10 @@ def _upload_saved_recipe_source_images(owner, recipe_id, prepared_images, reques
                 image_index=image_index,
                 failure_reason=str(exc),
             )
+            # A successful recipe save must not silently lose one of its source
+            # pages. This runs before the recipe INSERT; the batch can report the
+            # failed cluster and retry it using the retained submission.
+            raise ServiceError('The original image could not be stored. Please try again.', status_code=503) from exc
     return _unique_texts(urls)
 
 
@@ -2984,7 +3196,7 @@ _APIFY_PROXY_ENDPOINT = 'proxy.apify.com:8000'
 _PROXY_FETCH_TIMEOUT_SECONDS = max(1, min(30, int(os.getenv(_FETCH_PROXY_TIMEOUT_ENV, '25'))))
 # Tier 3 is metered (residential proxies bill per GB) and a recipe page is ~500KB, so the
 # 3 ladder runs of one import would otherwise buy the same HTML three times. Short-TTL
-# memo, tier-3 ONLY — tiers 1 and 2 keep their exact current fetch-every-time behavior.
+# memo for proxy and plain-header recoveries; tier 1 still tries a fresh fetch.
 # The TTL is per-container and short enough that a later import re-fetches fresh.
 _PROXY_FETCH_CACHE = {}
 _PROXY_FETCH_CACHE_TTL_SECONDS = 180
@@ -3006,7 +3218,7 @@ def _apify_proxy_password():
     if token:
         try:
             resp = requests.get('https://api.apify.com/v2/users/me',
-                                params={'token': token}, timeout=10)
+                                headers={'Authorization': f'Bearer {token}'}, timeout=10)
             if resp.status_code < 400:
                 data = (resp.json() or {}).get('data') or {}
                 password = _safe_text((data.get('proxy') or {}).get('password'))
@@ -3112,6 +3324,33 @@ def _fetch_page(url, request_id=None):
     except requests.RequestException as exc:
         attempts.append({'tier': 'requests', 'status': f'error: {exc}'})
         blocked = True
+
+    # Some publishers reject the synthetic Chrome client hints while accepting an
+    # ordinary public HTML request. Try that small header set before changing
+    # transport. Bound the extra attempt to five seconds and reuse successful
+    # HTML during resolve/extract, just as we already do for proxy responses.
+    if blocked and not is_social:
+        cached = _proxy_cache_get(url)
+        if cached is not None:
+            return cached
+        try:
+            plain = requests.get(
+                url, timeout=min(5, _REQUEST_TIMEOUT_SECONDS), allow_redirects=True,
+                headers={'User-Agent': 'Mozilla/5.0', 'Accept': 'text/html'},
+            )
+            attempts.append({'tier': 'requests_plain', 'status': plain.status_code})
+            if plain.status_code < 400 and not _looks_like_challenge(plain.text):
+                _log_event(request_id, 'web_fetch_recovered', url=url,
+                           tier1_status=attempts[0]['status'], status=plain.status_code,
+                           tier='requests_plain')
+                result = _FetchResult(str(plain.url) or url, plain.status_code,
+                                      plain.text, 'requests_plain')
+                _proxy_cache_put(url, result)
+                return result
+            refused = refused or (plain.status_code in _FETCH_BLOCK_STATUSES
+                                  or _looks_like_challenge(plain.text))
+        except requests.RequestException as exc:
+            attempts.append({'tier': 'requests_plain', 'status': f'error: {exc}'})
 
     # Tier 2: TLS-fingerprint impersonation, only when tier 1 looked blocked.
     if blocked:
@@ -3226,65 +3465,6 @@ def _recover_instagram_content_url(resolved_url, raw_url=None, normalized_url=No
     return resolved_url  # genuine profile/login/etc. — _detect_platform will 400 it
 
 
-# Facebook content paths, taken from the shapes actually observed in 30 days of saves
-# rather than guessed: /reel/<id> (503), /<user>/videos/<id> (18), /<user>/posts/<id> (7),
-# /groups/<id>/... (6). Share-sheet links (/share/r/, /share/v/, /share/p/) are short-links
-# that only reveal their real path after redirect resolution, so they are accepted here too
-# — same resolve-then-validate contract Instagram uses.
-_FACEBOOK_CONTENT_MARKERS = (
-    '/reel/', '/reels/', '/videos/', '/video/', '/posts/', '/share/', '/watch',
-    '/groups/', '/permalink.php', '/story.php', '/video.php', '/photo.php', '/media/',
-)
-# Hosts whose every path is a content short-link, so there is nothing to validate.
-_FACEBOOK_SHORTLINK_HOSTS = {'fb.watch', 'www.fb.watch', 'fb.com', 'www.fb.com'}
-# Query keys that identify a post even when the path alone does not (watch/?v=, story.php).
-_FACEBOOK_CONTENT_QUERY_KEYS = ('v', 'video_id', 'story_fbid', 'fbid')
-
-
-def _facebook_path_is_content(host, path, query):
-    """True when this Facebook URL points at a specific post/video rather than a
-    profile, a login wall, or the feed."""
-    if host in _FACEBOOK_SHORTLINK_HOSTS:
-        return True
-    if any(marker in path for marker in _FACEBOOK_CONTENT_MARKERS):
-        return True
-    keys = parse_qs(query or '')
-    return any(keys.get(key) for key in _FACEBOOK_CONTENT_QUERY_KEYS)
-
-
-def _recover_facebook_content_url(resolved_url, raw_url=None, normalized_url=None, request_id=None):
-    """Facebook login-wall-redirects a share link from datacenter IPs exactly the way
-    Instagram does: resolved_url becomes /login/?next=<url-encoded real target>. Measured
-    at 19 of 554 FB saves in 30 days, and the recovered targets are real content
-    (story.php?story_fbid=... / photo.php?fbid=...). Recover the target from `next` so the
-    gate passes and yt-dlp gets a URL it can actually extract."""
-    parsed = urlparse(resolved_url)
-    host = (parsed.netloc or '').lower()
-    if not (host in _VALID_FACEBOOK_HOSTS or host.endswith('.facebook.com')):
-        return resolved_url
-    if _facebook_path_is_content(host, (parsed.path or '').lower(), parsed.query):
-        return resolved_url  # already a content URL — nothing to recover
-
-    next_param = None
-    qs = parse_qs(parsed.query or '')
-    if qs.get('next'):
-        next_param = unquote(qs['next'][0])
-    for candidate in (next_param, normalized_url, raw_url):
-        text = _safe_text(candidate)
-        if not text or '://' not in text:
-            continue
-        cand = urlparse(text)
-        cand_host = (cand.netloc or '').lower()
-        if not (cand_host in _VALID_FACEBOOK_HOSTS or cand_host.endswith('.facebook.com')):
-            continue
-        if _facebook_path_is_content(cand_host, (cand.path or '').lower(), cand.query):
-            _log_event(request_id, 'facebook_login_wall_fallback',
-                       raw_url=raw_url, resolved_url=resolved_url,
-                       next_param=next_param, canonical_url=text)
-            return text
-    return resolved_url  # genuine profile/login/etc. — _detect_platform will 400 it
-
-
 def _detect_platform(url, raw_url=None, request_id=None):
     parsed = urlparse(url)
     host = (parsed.netloc or '').lower()
@@ -3304,20 +3484,6 @@ def _detect_platform(url, raw_url=None, request_id=None):
             reason='non_content_path',
         )
         raise ServiceError('Share a link to a specific Instagram post or reel.', status_code=400)
-    if host in _VALID_FACEBOOK_HOSTS or host.endswith('.facebook.com'):
-        if _facebook_path_is_content(host, path, parsed.query):
-            return 'facebook'
-        # Non-content Facebook URL (profile / login wall we could not recover / marketplace).
-        # Previously these fell through to 'web_recipe' and were saved from og:title, i.e. a
-        # view-count string dressed up as a recipe. Failing fast is honest and cheap.
-        _log_event(
-            request_id,
-            'facebook_url_rejected',
-            raw_url=raw_url,
-            resolved_url=url,
-            reason='non_content_path',
-        )
-        raise ServiceError('Share a link to a specific Facebook video, reel or post.', status_code=400)
     return 'web_recipe'
 
 
@@ -3394,10 +3560,14 @@ def _extract_visible_text_snippet(soup, max_lines=24):
 
 def _is_ytdlp_retryable_error(message):
     text = _safe_text(message).lower()
+    # A login/content wall does not change when we immediately repeat the same
+    # request and credentials. Let the existing provider chain try its next source.
+    # Instagram's combined message mentions rate limits too; that is not an
+    # explicit HTTP 429 and must not stall every caption/audio attempt three times.
+    if any(fragment in text for fragment in ('login required', 'use --cookies', 'requested content is not available')):
+        return False
     return any(fragment in text for fragment in (
         'rate-limit reached',
-        'login required',
-        'requested content is not available',
         'http error 429',
         'timed out',
         'temporarily unavailable',
@@ -3495,7 +3665,15 @@ def _extract_ytdlp_info(resolved_url, download=False, outtmpl=None):
     if outtmpl:
         options['outtmpl'] = outtmpl
     if download:
+        options.update(max_filesize=recipe_work_budget.MAX_MEDIA_BYTES,
+                       progress_hooks=[recipe_work_budget.download_progress], noprogress=True)
         options['format'] = 'bestaudio/best'
+        host = (urlparse(resolved_url).hostname or '').lower()
+        if host == 'tiktok.com' or host.endswith('.tiktok.com'):
+            # Older yt-dlp labels TikTok's /media-video-hvc1/ variants as AAC,
+            # although they contain video only. Prefer real audio/muxed media;
+            # sending the silent variant to transcription always fails.
+            options['format'] = 'bestaudio/best[url!*=media-video-hvc1]'
     cookiefile = _resolve_ytdlp_cookiefile()
     if cookiefile:
         options['cookiefile'] = cookiefile
@@ -3504,6 +3682,8 @@ def _extract_ytdlp_info(resolved_url, download=False, outtmpl=None):
         try:
             with yt_dlp.YoutubeDL(options) as ydl:
                 return ydl.extract_info(resolved_url, download=download)
+        except recipe_work_budget.WorkLimit:
+            raise
         except Exception as exc:
             last_exc = exc
             if attempt >= _YTDLP_MAX_ATTEMPTS or not _is_ytdlp_retryable_error(exc):
@@ -3538,6 +3718,29 @@ def _extract_ytdlp(resolved_url):
         'caption_field': caption_field,
         'warnings': warnings,
     }
+
+
+def _tiktok_recovery_video_url(video):
+    """Use a smaller copy of the same TikTok when the default exceeds our cap."""
+    video = video if isinstance(video, dict) else {}
+    primary = video.get('play_addr') or {}
+    def size(address):
+        try:
+            return int(address.get('data_size') or 0)
+        except (TypeError, ValueError, AttributeError):
+            return 0
+    def url(address):
+        urls = address.get('url_list') or [] if isinstance(address, dict) else []
+        return next((u for u in urls if isinstance(u, str) and u.startswith('https://')), '')
+    original = url(primary)
+    if original and 0 < size(primary) <= link_recipe_recovery.MAX_BYTES:
+        return original
+    alternatives = [entry.get('play_addr') for entry in (video.get('bit_rate') or [])
+                    if isinstance(entry, dict)]
+    alternatives += [video.get('play_addr_bytevc1'), video.get('play_addr_h264')]
+    alternatives = [a for a in alternatives if isinstance(a, dict) and url(a)
+                    and 0 < size(a) <= link_recipe_recovery.MAX_BYTES]
+    return url(min(alternatives, key=size)) if alternatives else original
 
 
 def _extract_tiktok_scrapecreators(resolved_url):
@@ -3597,12 +3800,15 @@ def _extract_tiktok_scrapecreators(resolved_url):
         'image_url': image_urls[0] if image_urls else '',
         'image_urls': image_urls,
         'source': 'scrapecreators',
+        'is_slideshow': is_slideshow,
+        'video_url': _tiktok_recovery_video_url(detail.get('video')),
         'author_name': author_name,
         'caption_field': 'desc',
         'warnings': [],
     }
 
 
+@recipe_work_budget.bounded
 def _extract_recipe_text_via_rekognition(image_urls, request_id=None):
     """Fast/cheap OCR over carousel slide images via AWS Rekognition DetectText.
     Used for TikTok photo slideshows whose recipe lives in the slide text (not the
@@ -3709,6 +3915,7 @@ def _apify_ig_attempt_remember(cache_key, outcome, payload):
     _APIFY_IG_ATTEMPT_CACHE[cache_key] = (outcome, payload)
 
 
+@recipe_work_budget.bounded
 def _extract_instagram_apify(resolved_url, request_id=None):
     token = _safe_text(os.getenv(_APIFY_TOKEN_ENV))
     if not token:
@@ -3732,10 +3939,10 @@ def _extract_instagram_apify(resolved_url, request_id=None):
     try:
         response = requests.post(
             endpoint,
-            params={'token': token},
             json=payload,
             timeout=_APIFY_RUN_TIMEOUT_SECONDS,
-            headers={'User-Agent': _USER_AGENT, 'Accept': 'application/json'},
+            headers={'User-Agent': _USER_AGENT, 'Accept': 'application/json',
+                     'Authorization': f'Bearer {token}'},
         )
         response.raise_for_status()
         post = _extract_first_apify_post(response.json(), fallback_url=resolved_url)
@@ -3759,6 +3966,8 @@ def _extract_instagram_apify(resolved_url, request_id=None):
             'caption_field': 'caption',
             'warnings': [],
             'media_url': _safe_text(post.get('media_url')),
+            'video_url': _safe_text(post.get('video_url')),
+            'audio_url': _safe_text(post.get('audio_url')),
         }
         _apify_ig_attempt_remember(cache_key, 'ok', result)
         return result
@@ -3878,8 +4087,9 @@ def _extract_web_article_text(soup, max_chars=None):
     return '\n'.join(lines).strip()
 
 
-def _extract_html_metadata(resolved_url):
-    soup = _fetch_html_soup(resolved_url)
+def _extract_html_metadata(resolved_url, soup=None, require_recipe_body=False):
+    soup = soup if soup is not None else _fetch_html_soup(resolved_url)
+    has_recipe_body = False
     title = _safe_text(_meta_content(soup, 'og:title', 'twitter:title'))
     if not title and soup.title:
         title = _safe_text(soup.title.get_text())
@@ -3910,6 +4120,7 @@ def _extract_html_metadata(resolved_url):
                            body_chars=len(body_text), merged_chars=len(merged),
                            capped=len(body_text) >= _WEB_BODY_MAX_CHARS)
                 content = merged
+                has_recipe_body = True
         elif body_text:
             # Body found but too thin on quantities to trust. This is the step-2
             # population — a page whose recipe is NOT in its prose — so log it by host
@@ -3917,6 +4128,8 @@ def _extract_html_metadata(resolved_url):
             _log_event(None, 'web_body_text_rejected', host=host,
                        body_chars=len(body_text),
                        quantities=len(_WEB_QUANTITY_PATTERN.findall(body_text)))
+    if require_recipe_body and not has_recipe_body:
+        raise ServiceError(pinterest_recipe.MESSAGE, status_code=422)
     if not content:
         raise ServiceError('HTML metadata did not include source text.', status_code=502)
     image_urls = _unique_texts([
@@ -4044,8 +4257,8 @@ def _select_richest_recipe_node(soup):
     return first
 
 
-def _extract_json_ld_recipe(resolved_url):
-    soup = _fetch_html_soup(resolved_url)
+def _extract_json_ld_recipe(resolved_url, soup=None, require_complete=False):
+    soup = soup if soup is not None else _fetch_html_soup(resolved_url)
     recipe_node = _select_richest_recipe_node(soup)
     if not recipe_node:
         raise ServiceError('No Recipe JSON-LD was found on the page.', status_code=502)
@@ -4055,6 +4268,8 @@ def _extract_json_ld_recipe(resolved_url):
     author_name = _parse_author_name(recipe_node.get('author')) or None
     ingredients = recipe_node.get('recipeIngredient') if isinstance(recipe_node.get('recipeIngredient'), list) else []
     instructions = _parse_instructions(recipe_node.get('recipeInstructions'))
+    if require_complete and (not any(_safe_text(i) for i in ingredients) or not instructions):
+        raise ServiceError(pinterest_recipe.MESSAGE, status_code=422)
     image_urls = _normalize_image_values(recipe_node.get('image'), base_url=resolved_url)
 
     lines = []
@@ -4176,15 +4391,38 @@ def _run_provider_pipeline(normalized_url, resolved_url, platform, providers, re
     raise ServiceError(f'Could not extract content from this {platform} URL.', status_code=502, extra={'warnings': warnings})
 
 
+@recipe_work_budget.bounded
 def _extract_content(url, request_id=None):
     normalized_url = _normalize_url(url)
+    if len(normalized_url) > recipe_link_jobs.MAX_URL:
+        raise ServiceError('This recipe link is too long. Share its original page link instead.', status_code=422)
+    if urlparse(normalized_url).path.lower().endswith('.pdf'):
+        # Retain the extracted document text in raw_content while a signed link
+        # is still valid. Never treat a PDF byte stream as HTML metadata.
+        try:
+            document = link_recipe_recovery.pdf_source(normalized_url)
+        except Exception as exc:
+            _log_event(request_id, 'recipe_document_unavailable', failure_type=type(exc).__name__)
+            raise ServiceError('Could not extract recipe content from this URL.', status_code=422) from exc
+        return {'url': normalized_url, 'resolved_url': normalized_url, 'platform': 'web_recipe',
+            'title': document.get('title') or 'Recipe', 'caption': document['content'],
+            'content': document['content'], 'source': 'pdf_text', 'image_urls': [], 'image_url': ''}
+    if pinterest_recipe.is_pinterest(normalized_url):
+        try:
+            publisher_url, publisher_html = pinterest_recipe.resolve(normalized_url)
+            soup = BeautifulSoup(publisher_html, 'html.parser')
+            result = _run_provider_pipeline(normalized_url, publisher_url, 'web_recipe', [
+                ('json-ld', lambda u: _extract_json_ld_recipe(u, soup=soup, require_complete=True)),
+                ('html', lambda u: _extract_html_metadata(u, soup=soup, require_recipe_body=True)),
+            ], request_id=request_id)
+            _log_event(request_id, 'pinterest_publisher_resolved', publisher_host=urlparse(publisher_url).hostname)
+            return result
+        except (pinterest_recipe.PinterestSourceError, ServiceError) as exc:
+            raise ServiceError(pinterest_recipe.MESSAGE, status_code=422) from exc
     resolved_url = _resolve_url(normalized_url, request_id=request_id)
     # Recover from Instagram's login-wall redirect before gating/extraction so a
     # real reel/post isn't mis-rejected and Apify gets the canonical content URL.
     resolved_url = _recover_instagram_content_url(
-        resolved_url, raw_url=url, normalized_url=normalized_url, request_id=request_id)
-    # Same login-wall recovery for Facebook, for the same reason (see the helper).
-    resolved_url = _recover_facebook_content_url(
         resolved_url, raw_url=url, normalized_url=normalized_url, request_id=request_id)
     platform = _detect_platform(resolved_url, raw_url=url, request_id=request_id)
     providers = {
@@ -4203,18 +4441,6 @@ def _extract_content(url, request_id=None):
             # `_analyze_extraction` fallback (one timeout per job, not two) and so its
             # success/failure events are attributable to the job in the logs.
             ('apify', lambda u: _extract_instagram_apify(u, request_id=request_id)),
-            ('html', _extract_html_metadata),
-        ],
-        # Facebook: yt-dlp is the ONLY provider that reads the real caption. Verified
-        # against live production URLs (yt-dlp 2026.07.04): FacebookReelIE matches
-        # facebook.com/reel/<id> — the shape 503 of 554 FB saves resolve to — and FacebookIE
-        # covers /<user>/videos/, /<user>/posts/ and story.php. It also follows /share/r/
-        # links itself. Apify is deliberately absent: the configured actor is
-        # apify~instagram-scraper, which cannot read Facebook at all.
-        # html stays as the last rung so a yt-dlp miss degrades to exactly today's behaviour
-        # rather than to a hard failure.
-        'facebook': [
-            ('yt-dlp', _extract_ytdlp),
             ('html', _extract_html_metadata),
         ],
         'web_recipe': [
@@ -4269,10 +4495,8 @@ def _recipe_is_incomplete(recipe_text, structured=None):
 # on every saved-recipes route (verified across all 29 integrations), so a slow sync save
 # can cross the ceiling and 504/503 — losing the very recoveries phase-1 added.
 #
-# ASYNC invocations are exempt: a job worker has the Lambda's 120s and no gateway in front
-# of it, so it must always attempt the audio leg. The budget applies ONLY to a synchronous
-# HTTP request, where blowing the ceiling turns a would-be 422 into a 503 and a would-be
-# recovery into nothing at all.
+# Async work has a separate native Lambda deadline (recipe_work_budget). Both paths
+# reserve time to persist an honest terminal outcome before their response deadline.
 #
 # A skipped attempt is NOT a lost recovery: the job is self-heal captured (payload_s3_key +
 # input_refs + ttl), and scripts/redrive_failed_saves.py speaks the async path — so an
@@ -4363,23 +4587,19 @@ def _rung_fits(rung):
 
     Returns (fits, remaining, needed) so the caller can log why it skipped."""
     remaining = _sync_time_remaining()
+    native_work = recipe_work_budget.remaining()
+    if native_work is not None:
+        remaining = min(remaining, native_work) if remaining is not None else native_work
     if remaining is None:
         return True, None, None
     needed = _RUNG_COST_SECONDS.get(rung, 5.0) + _RESERVE_AFTER_LADDER_SECONDS
+    if remaining < needed:
+        recipe_work_budget.note_rung_skip()
     return remaining >= needed, remaining, needed
 
 
 def _audio_fallback_supported(platform):
-    """Despite the name this gates the whole VIDEO half of the ladder — slide OCR, preview
-    OCR and audio transcription all sit behind the single early return in
-    `_analyze_extraction`. So a platform listed here must support all three.
-
-    Facebook qualifies, verified against live production URLs rather than assumed:
-      - audio:   yt-dlp downloaded a real m4a (51KB) from facebook.com/reel/<id>, which is
-                 what `_transcribe_audio_from_url` needs on the non-Apify path.
-      - OCR:     yt-dlp returns `thumbnail`/`thumbnails`, so image_urls is populated.
-    """
-    return platform in {'tiktok', 'instagram', 'facebook'}
+    return platform in {'tiktok', 'instagram'}
 
 
 def _choose_downloaded_media_file(temp_dir, info):
@@ -4461,18 +4681,21 @@ def _transcript_has_recipe_signal(transcript):
 def _download_media_to(temp_dir, media_url):
     """Stream a direct CDN media link to disk. Bounded so a surprise large asset can't
     blow the Lambda's /tmp or Whisper's 25MB upload ceiling."""
-    limit = int(os.getenv('TRANSCRIBE_MEDIA_MAX_BYTES', str(24 * 1024 * 1024)))
+    limit = min(recipe_work_budget.MAX_MEDIA_BYTES, int(os.getenv('TRANSCRIBE_MEDIA_MAX_BYTES', str(recipe_work_budget.MAX_MEDIA_BYTES))))
     path = temp_dir / 'apify_media.mp4'
     total = 0
-    with requests.get(media_url, stream=True, timeout=_REQUEST_TIMEOUT_SECONDS) as resp:
+    with recipe_work_budget.phase(recipe_work_budget.DOWNLOAD_SECONDS), requests.get(media_url, stream=True, timeout=min(_REQUEST_TIMEOUT_SECONDS, recipe_work_budget.phase_seconds(recipe_work_budget.DOWNLOAD_SECONDS))) as resp:
         resp.raise_for_status()
+        try:
+            recipe_work_budget.check_bytes(int(resp.headers.get('Content-Length', 0)), limit)
+        except (TypeError, ValueError):
+            pass
         with path.open('wb') as handle:
             for chunk in resp.iter_content(chunk_size=262144):
                 if not chunk:
                     continue
                 total += len(chunk)
-                if total > limit:
-                    raise RuntimeError(f'Media exceeded {limit} bytes; refusing to transcribe.')
+                recipe_work_budget.check_bytes(total, limit)
                 handle.write(chunk)
     if not total:
         raise RuntimeError('Media download was empty.')
@@ -4490,11 +4713,6 @@ def _transcribe_audio_from_url(resolved_url, request_id=None, source_context=Non
     media_url = _safe_text((source_context or {}).get('media_url'))
     media_source = 'apify_media' if media_url else 'yt-dlp'
     try:
-        client = OpenAI(
-            api_key=os.getenv('OPENAI_API_KEY'),
-            timeout=_OPENAI_TIMEOUT_SECONDS,
-            max_retries=_OPENAI_MAX_RETRIES,
-        )
         with tempfile.TemporaryDirectory() as temp_dir_name:
             temp_dir = Path(temp_dir_name)
             if media_url:
@@ -4502,18 +4720,29 @@ def _transcribe_audio_from_url(resolved_url, request_id=None, source_context=Non
                 # binary in the deployment package and no layer providing one).
                 media_path = _download_media_to(temp_dir, media_url)
             else:
-                info = _extract_ytdlp_info(
-                    resolved_url,
-                    download=True,
-                    outtmpl=str(temp_dir / '%(id)s.%(ext)s'),
-                )
+                with recipe_work_budget.phase(recipe_work_budget.DOWNLOAD_SECONDS):
+                    info = _extract_ytdlp_info(
+                        resolved_url,
+                        download=True,
+                        outtmpl=str(temp_dir / '%(id)s.%(ext)s'),
+                    )
+                recipe_work_budget.check_bytes(info.get('filesize'))
                 media_path = _choose_downloaded_media_file(temp_dir, info)
-            with media_path.open('rb') as media_file:
-                response = client.audio.transcriptions.create(
-                    model=_DEFAULT_TRANSCRIPTION_MODEL,
-                    file=media_file,
-                    response_format='verbose_json',
+            # Both download routes must pass the same final guard before upload.
+            recipe_work_budget.check_bytes(media_path.stat().st_size)
+            with recipe_work_budget.phase(recipe_work_budget.TRANSCRIBE_SECONDS, reserve=5), media_path.open('rb') as media_file:
+                _ai_consent.require(_ai_recipe_owner.get())
+                client = _ai_consent.provider_client(OpenAI)(
+                    api_key=os.getenv('OPENAI_API_KEY'),
+                    timeout=recipe_work_budget.phase_seconds(recipe_work_budget.TRANSCRIBE_SECONDS, reserve=5),
+                    max_retries=0,
                 )
+                try:
+                    response = _ai_consent.provider_call(client.audio.transcriptions.create)(
+                        model=_DEFAULT_TRANSCRIPTION_MODEL, file=media_file, response_format='verbose_json',
+                    )
+                finally:
+                    client.close()
         transcript = _safe_text(getattr(response, 'text', ''))
         segments = getattr(response, 'segments', None) or []
         if isinstance(segments, list):
@@ -4711,7 +4940,7 @@ def _refine_recipe_structured(content, request_id=None, source_context=None):
             }
             if attempt == 1:
                 kwargs['response_format'] = {'type': 'json_object'}
-            response = client.chat.completions.create(**kwargs)
+            response = _ai_consent.provider_call(client.chat.completions.create)(**kwargs)
             payload = _loads_recipe_json(_strip_code_fences(response.choices[0].message.content))
             if payload is not None:
                 break
@@ -4737,7 +4966,7 @@ def _refine_recipe_structured(content, request_id=None, source_context=None):
                               job_id=(source_context or {}).get('resolved_url'))
         raise ServiceError(
             'Could not read this recipe right now — please try again.',
-            status_code=422,
+            status_code=503,
         )
 
     recipe = {
@@ -4797,6 +5026,7 @@ def _content_can_support_a_recipe(content):
     return bool(_RECIPE_SIGNAL_RE.search(text))
 
 
+@recipe_work_budget.bounded
 def _recipe_response_from_content(content, request_id=None, source_context=None):
     if not _content_can_support_a_recipe(content):
         _log_event(request_id, 'recipe_refine_refused_ungrounded',
@@ -4836,6 +5066,9 @@ def _overlay_extraction_fallback(extraction, fallback_result, merged_content=Non
 
 
 def _analyze_extraction(extraction, request_id=None):
+    # Defense in depth for legacy/redirected extractions: a pin caption is not a recipe.
+    if pinterest_recipe.is_pinterest(_safe_text(extraction.get('resolved_url') or extraction.get('url'))):
+        raise ServiceError(pinterest_recipe.MESSAGE, status_code=422)
     response, structured_recipe = _recipe_response_from_content(
         extraction['content'],
         request_id=request_id,
@@ -5092,7 +5325,22 @@ def _update_saved_recipe_image_fields(conn, owner, recipe_id, image_fields):
     _dual_write_saved_recipe_to_shared(conn, owner, recipe_id)
 
 
-def _invoke_saved_recipe_repair_async(owner, recipe_id, url, request_id=None):
+def _valid_recipe_repair_url(url):
+    """Reject permanent non-web inputs before dispatch and on queued redelivery."""
+    from urllib.parse import urlsplit
+    if not isinstance(url, str) or not url.strip():
+        return False
+    try:
+        parsed = urlsplit(url.strip())
+        return (parsed.scheme.lower() in ('http', 'https') and bool(parsed.hostname)
+                and parsed.username is None and parsed.password is None
+                and not any(char.isspace() for char in parsed.netloc))
+    except ValueError:
+        return False
+
+
+
+def _invoke_saved_recipe_repair_async(owner, recipe_id, url, request_id=None, expected_revision=None):
     """Hand an unreadable save to the background repair agent.
 
     The sync save is bounded by the gateway's 29s, which is why audio transcription gets
@@ -5101,137 +5349,192 @@ def _invoke_saved_recipe_repair_async(owner, recipe_id, url, request_id=None):
     steps for a talking video.
     """
     function_name = _safe_text(os.getenv('AWS_LAMBDA_FUNCTION_NAME'))
-    if not function_name or not _safe_text(url):
+    if not function_name or not _valid_recipe_repair_url(url):
         return False
     try:
-        boto3.client('lambda').invoke(
-            FunctionName=function_name,
-            InvocationType='Event',
-            Payload=json.dumps({
-                'async_task': _ASYNC_TASK_REPAIR_SAVED_RECIPE,
-                'owner': owner, 'recipe_id': recipe_id, 'url': url,
-            }).encode('utf-8'),
-        )
+        if not recipe_link_jobs.enqueue(SimpleNamespace(**globals()), owner, recipe_id, url,
+                                        expected_revision, request_id=request_id):
+            return False
         _log_event(request_id, 'saved_recipe_repair_enqueued', owner=owner, recipe_id=recipe_id)
         return True
     except Exception as exc:
         _log_event(request_id, 'saved_recipe_repair_enqueue_failed',
-                   owner=owner, recipe_id=recipe_id, failure_reason=str(exc)[:160])
+                   owner=owner, recipe_id=recipe_id, failure_type=type(exc).__name__)
         return False
 
 
-def _repair_saved_recipe(owner, recipe_id, url, request_id=None):
-    """Re-extract one recipe properly and write it back only if it is genuinely better.
+def _saved_recipe_content_revision(row):
+    """Opaque optimistic revision; no schema migration for installed clients.
 
-    Never downgrades: a repair that comes back no richer than what is stored leaves the row
-    alone and marks it failed, so a user is never worse off for having been repaired. The
-    grounding test applies here too — if the second pass still has nothing real to work from,
-    the recipe stays empty rather than being filled with a plausible guess.
+    Include source, status, content and admission identity. Network/model work must not
+    hold row locks, and any concurrent edit or source replacement wins.
     """
+    fields = ('_id', '_owner', 'source_url', 'resolved_url', 'title', 'ingredients',
+              'instructions', 'notes', 'extraction_source', 'recipe_source_used',
+              'status', '_createdDate')
+    values = {field: row.get(field) for field in fields}
+    for field in ('ingredients', 'instructions', 'notes'):
+        if isinstance(values[field], str):
+            try:
+                values[field] = json.loads(values[field])
+            except ValueError:
+                pass
+    return hashlib.sha256(json.dumps(values, sort_keys=True, default=str).encode()).hexdigest()
+
+
+def _enqueue_saved_recipe_repair_or_finish(conn, owner, recipe_id, url, request_id=None):
+    """A failed admission must not leave an unscheduled bookmark processing forever."""
+    before = _fetch_saved_recipe_by_id(conn, owner, recipe_id)
+    if not before or before.get('status') not in ('repairing', 'processing'):
+        return False
+    revision = _saved_recipe_content_revision(before)
+    if _invoke_saved_recipe_repair_async(owner, recipe_id, url, request_id=request_id, expected_revision=revision):
+        return True
+    table = _saved_recipes_table(owner)
+    fields = _drift_safe_select(conn, table)
+    conn.begin()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(f"SELECT {fields} FROM `{table}` WHERE _id=%s AND _owner=%s FOR UPDATE", [recipe_id, owner])
+            row = cur.fetchone()
+            if not row or _saved_recipe_content_revision(row) != revision:
+                conn.rollback()
+                return False
+            cur.execute(f"UPDATE `{table}` SET status='failed' WHERE _id=%s AND _owner=%s", [recipe_id, owner])
+        _dual_write_saved_recipe_to_shared(conn, owner, recipe_id, request_id=request_id,
+            transactional=True, required=os.getenv('READ_SHARED_SAVED_RECIPES', '').strip().lower() == 'true')
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    _log_event(request_id, 'saved_recipe_repair_outcome', owner=owner, recipe_id=recipe_id,
+               outcome='link_retained', reason='dispatch_unavailable')
+    return False
+
+
+def _repair_saved_recipe(owner, recipe_id, url, request_id=None, expected_revision=None,
+                         recovery_attempt=1, force_media=False, recovery_correction=None):
+    _ai_consent.require(_ai_recipe_owner.get())
+    """Recover an empty bookmark, without replacing content of unknown provenance.
+
+    Legacy rows do not identify human versus generated fields. Nonempty content
+    therefore belongs to the user; list length is never permission to replace it.
+    Compare the pre-extraction revision under lock and commit required mirrors in
+    the same transaction. A late job cannot resurrect a deleted recipe.
+    """
+    if not _valid_recipe_repair_url(url):
+        return {'error': 'invalid source URL', 'code': 'invalid_source_url', 'retryable': False}
     conn = _mysql_conn()
     try:
         row = _fetch_saved_recipe_by_id(conn, owner, recipe_id)
         if not row:
-            return {'error': 'recipe not found'}
+            return {'repaired': False, 'outcome': 'skipped', 'reason': 'deleted'}
+        sources = [row.get('source_url'), row.get('resolved_url')]
+        if not any(source and _resolved_url_hash(source) == _resolved_url_hash(url) for source in sources):
+            return {'repaired': False, 'outcome': 'skipped', 'reason': 'source_changed'}
+        revision = _saved_recipe_content_revision(row)
+        if expected_revision and expected_revision != revision:
+            return {'repaired': False, 'outcome': 'skipped', 'reason': 'changed_before_repair'}
         current = _serialize_row(row)
         before = (len(current.get('ingredients') or []), len(current.get('instructions') or []))
+        current_complete = recipe_content_complete(current)
+        if current_complete and row.get('status') == 'ready':
+            return {'repaired': False, 'outcome': 'ready', 'reason': 'existing_content', 'before': before}
 
-        # No sync deadline here: let the full ladder run, audio included.
         _mark_sync_request_start(False)
-        extraction = _extract_content(url, request_id=request_id)
-        response, structured = _analyze_extraction(extraction, request_id=request_id)
-        ing = (structured or {}).get('ingredients') or []
-        ins = (structured or {}).get('instructions') or []
-        after = (len(ing), len(ins))
-
-        # Counts only, deliberately.
-        #
-        # Replacing a FABRICATED recipe with a grounded one of equal size is the right thing in
-        # principle, and there is a real case for it: a recipe invented from a 22-character
-        # caption keeps the invention because 4/5 is not "better" than 4/5. But deciding
-        # "was the stored one fabricated?" reliably needs provenance we do not record at save
-        # time, and two attempts to infer it from stored text got it wrong — once deleting
-        # recipes that had just been rebuilt successfully. Until provenance is recorded
-        # explicitly, this stays on counts, where it cannot lose content.
-        better = (after[0] > before[0] or after[1] > before[1]
-                  or (before == (0, 0) and after != (0, 0)))
-        if not better:
-            # The second pass, with audio and no deadline, still found nothing real. That is a
-            # verdict: this post genuinely does not contain its recipe (here, a reel captioned
-            # only "#JerkChicken" whose transcript has no recipe signal either).
-            #
-            # If what is stored was FABRICATED, clear it. Leaving invented ingredients on a
-            # recipe we now know is ungrounded is the exact harm the user reported — a phantom
-            # tomato they would have shopped for. Keep the title, link and image so the save is
-            # still theirs, and say plainly that we could not read it.
-            # Only a SECOND pass that also produced nothing proves the post lacks its recipe.
-            #
-            # This used to test `extraction['content']` alone — the caption — but
-            # _analyze_extraction legitimately builds the recipe from caption PLUS the audio
-            # transcript. So a recipe correctly recovered from speech was judged "ungrounded"
-            # on the caption and WIPED. That destroyed real content on rows whose re-extraction
-            # had just returned a full recipe. If the second pass produced anything, keep it.
-            fabricated = (after == (0, 0)
-                          and not _content_can_support_a_recipe(extraction.get('content')))
-            table = _saved_recipes_table(owner)
-            with conn.cursor() as cur:
-                if fabricated:
-                    cur.execute(
-                        f"""UPDATE `{table}` SET ingredients = %s, instructions = %s, notes = %s,
-                                status = 'failed' WHERE _id = %s AND _owner = %s""",
-                        (json.dumps([]), json.dumps([]),
-                         json.dumps(["This post doesn't include its recipe — the caption and the "
-                                     "audio don't list ingredients or steps. Open the original to "
-                                     "watch it, or send us a link that has the recipe written out."]),
-                         recipe_id, owner))
-                elif before == (0, 0):
-                    # Genuinely nothing, before or after — an honest failure.
-                    cur.execute(f"UPDATE `{table}` SET status = 'failed' WHERE _id = %s AND _owner = %s",
-                                (recipe_id, owner))
-                else:
-                    # The repair found nothing NEW, but the row still holds a real recipe.
-                    # Marking that 'failed' hides a perfectly good saved recipe from the user
-                    # over a background job they never asked for. Leave it usable.
-                    cur.execute(f"UPDATE `{table}` SET status = 'ready' WHERE _id = %s AND _owner = %s",
-                                (recipe_id, owner))
-            conn.commit()
-            _dual_write_saved_recipe_to_shared(conn, owner, recipe_id, request_id=request_id)
-            _log_event(request_id, 'saved_recipe_repair_no_improvement',
-                       owner=owner, recipe_id=recipe_id, before=str(before), after=str(after))
-            return {'repaired': False, 'before': before, 'after': after}
-
-        # Merge per FIELD rather than replacing wholesale. A repair can come back with more
-        # ingredients but fewer steps (seen: 9/8 -> 10/7); overwriting on the strength of the
-        # improved field alone silently drops the other one. Keep whichever list is richer.
-        keep_ing = ing if len(ing) > before[0] else (current.get('ingredients') or [])
-        keep_ins = ins if len(ins) > before[1] else (current.get('instructions') or [])
-        table = _saved_recipes_table(owner)
-        with conn.cursor() as cur:
-            cur.execute(
-                f"""UPDATE `{table}` SET title = %s, ingredients = %s, instructions = %s,
-                        notes = %s, extraction_source = %s, recipe_source_used = %s,
-                        status = 'ready'
-                    WHERE _id = %s AND _owner = %s""",
-                (structured.get('title') or current.get('title') or 'Recipe',
-                 json.dumps(keep_ing), json.dumps(keep_ins),
-                 json.dumps(structured.get('notes') or []),
-                 _append_extraction_source(current.get('extraction_source'), 'repair'),
-                 # Record what THIS pass actually read. A repair that succeeded off the audio
-                 # transcript must not later be re-judged against the caption alone — that
-                 # exact inference is what wiped real recipes.
-                 _safe_text(response.get('recipe_source_used')) or None,
-                 recipe_id, owner))
-        conn.commit()
-        _dual_write_saved_recipe_to_shared(conn, owner, recipe_id, request_id=request_id)
-        _log_event(request_id, 'saved_recipe_repaired', owner=owner, recipe_id=recipe_id,
-                   before=str(before), after=str(after),
-                   source_used=response.get('recipe_source_used'))
-        return {'repaired': True, 'before': before, 'after': after}
-    finally:
+        verified_recovery = False
         try:
-            conn.close()
+            if link_recipe_recovery.enabled():
+                options = {'attempt': recovery_attempt, 'force_media': force_media} if recovery_attempt != 1 or force_media else {}
+                if recovery_correction:
+                    options['correction'] = recovery_correction
+                if row.get('extraction_source') == 'pdf_text' and row.get('raw_content'):
+                    options['retained_document'] = row['raw_content']
+                recovered = link_recipe_recovery.recover(SimpleNamespace(**globals()), owner, url, request_id, **options)
+                if recovered.get('pending') or recovered.get('retryable'):
+                    raise link_recipe_recovery.RecoveryBusy(recovered.get('reason') or 'pending',
+                                                          force_media=recovered.get('force_media', False),
+                                                          correction=recovered.get('correction'))
+                structured = recovered.get('recipe') or {}
+                verified_recovery = bool(recovered.get('recipe'))
+                response = {'recipe_source_used': 'source_checked_link_v1' if verified_recovery else None}
+            else:
+                extraction = _extract_content(url, request_id=request_id)
+                response, structured = _analyze_extraction(extraction, request_id=request_id)
+        except link_recipe_recovery.RecoveryBusy:
+            raise
+        except Exception as exc:
+            # End processing honestly; the lock below still protects newer edits.
+            _log_event(request_id, 'saved_recipe_repair_extraction_failed', owner=owner, recipe_id=recipe_id, failure_type=type(exc).__name__)
+            response, structured = {}, {}
+        structured = structured or {}
+        ing = _clean_string_list(structured.get('ingredients') or [])
+        ins = _clean_string_list(structured.get('instructions') or [])
+        after = (len(ing), len(ins))
+        # A coherent source-backed recipe needs ingredients AND directions.
+        # Preserve partial old content for explicit user recovery, rather than
+        # silently combining lists extracted on different occasions.
+        replace_empty = before == (0, 0) and recipe_content_complete({'ingredients': ing, 'instructions': ins})
+        # New admissions carry the exact content revision that scheduled repair.
+        # Fill only missing directions when the source re-extraction independently
+        # returns the same ingredient list. Older jobs and edited/changed recipes
+        # retain the conservative no-overwrite behavior.
+        same_ingredients = ([_safe_text(x).casefold() for x in ing]
+                            == [_safe_text(x).casefold() for x in (current.get('ingredients') or [])])
+        fill_steps = (bool(expected_revision) and row.get('status') in ('repairing', 'processing')
+                      and before[0] > 0 and before[1] == 0 and bool(ins) and same_ingredients)
+        # Only a new automatic admission with the unchanged scheduling revision
+        # can replace its generated partial content as one coherent source recipe.
+        # Legacy content, edits and source replacements keep the old protection.
+        replace_admission = (verified_recovery and bool(expected_revision)
+                             and row.get('status') in ('repairing', 'processing') and not current_complete
+                             and recipe_content_complete({'ingredients': ing, 'instructions': ins}))
+        if replace_admission:
+            fill_steps = False
+        repair_content = replace_empty or fill_steps or replace_admission
+        pending_note = "We couldn't read the full recipe from this post yet — we're still working on it."
+        # Remove only our own obsolete processing copy. Other notes may be human
+        # edits and must survive; a failed re-extraction is never proof otherwise.
+        recovered_notes = ([] if replace_admission else
+                           [note for note in (current.get('notes') or []) if note != pending_note])
+        if repair_content and verified_recovery:
+            recovered_notes = _unique_texts(recovered_notes + _clean_string_list(structured.get('notes') or []))
+        ready = current_complete or repair_content
+        table = _saved_recipes_table(owner)
+        select_fields = _drift_safe_select(conn, table)
+        conn.begin()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(f"SELECT {select_fields} FROM `{table}` WHERE _id=%s AND _owner=%s FOR UPDATE",
+                            [recipe_id, owner])
+                locked = cur.fetchone()
+                if not locked or _saved_recipe_content_revision(locked) != revision:
+                    conn.rollback()
+                    return {'repaired': False, 'outcome': 'skipped', 'reason': 'changed_or_deleted'}
+                if repair_content:
+                    cur.execute(f"""UPDATE `{table}` SET title=%s, ingredients=%s, instructions=%s, notes=%s,
+                                extraction_source=%s, recipe_source_used=%s, status='ready', _updatedDate=NOW()
+                                WHERE _id=%s AND _owner=%s""",
+                                [(structured.get('title') if replace_admission else current.get('title')) or structured.get('title') or 'Recipe',
+                                 json.dumps(current.get('ingredients') if fill_steps else ing), json.dumps(ins), json.dumps(recovered_notes),
+                                 _append_extraction_source(current.get('extraction_source'), 'repair'),
+                                 _safe_text(response.get('recipe_source_used')) or None, recipe_id, owner])
+                else:
+                    cur.execute(f"UPDATE `{table}` SET status=%s,notes=%s WHERE _id=%s AND _owner=%s",
+                                ['ready' if ready else 'failed', json.dumps(recovered_notes), recipe_id, owner])
+            require_shared = os.getenv('READ_SHARED_SAVED_RECIPES', '').strip().lower() == 'true'
+            _dual_write_saved_recipe_to_shared(conn, owner, recipe_id, request_id=request_id,
+                                              transactional=True, required=require_shared)
+            conn.commit()
         except Exception:
-            pass
+            conn.rollback()
+            raise
+        outcome = 'ready' if ready else 'link_retained'
+        _log_event(request_id, 'saved_recipe_repair_outcome', owner=owner, recipe_id=recipe_id,
+                   outcome=outcome, replaced_empty=replace_empty, before=str(before), after=str(after))
+        return {'repaired': repair_content, 'outcome': outcome, 'before': before, 'after': after, 'filled_steps': fill_steps, 'replaced_admission': replace_admission}
+    finally:
+        conn.close()
 
 
 def _invoke_saved_recipe_image_generation_async(owner, recipe_id, request_id=None):
@@ -5249,7 +5552,7 @@ def _invoke_saved_recipe_image_generation_async(owner, recipe_id, request_id=Non
         boto3.client('lambda').invoke(
             FunctionName=function_name,
             InvocationType='Event',
-            Payload=json.dumps({
+            Payload=json.dumps({'ai_consent_actor':_ai_recipe_owner.get(),
                 'async_task': _ASYNC_TASK_GENERATE_SAVED_RECIPE_IMAGE,
                 'owner': owner,
                 'recipe_id': recipe_id,
@@ -5284,7 +5587,7 @@ def _invoke_saved_recipe_text_refinement_async(owner, recipe_id, content, reques
         boto3.client('lambda').invoke(
             FunctionName=function_name,
             InvocationType='Event',
-            Payload=json.dumps({
+            Payload=json.dumps({'ai_consent_actor':_ai_recipe_owner.get(),
                 'async_task': _ASYNC_TASK_REFINE_SAVED_RECIPE_TEXT,
                 'owner': owner,
                 'recipe_id': recipe_id,
@@ -5312,7 +5615,7 @@ def _invoke_personalize_warm(owner, recipe_ids, request_id=None):
         boto3.client('lambda').invoke(
             FunctionName=function_name,
             InvocationType='Event',
-            Payload=json.dumps({
+            Payload=json.dumps({'ai_consent_actor':_ai_recipe_owner.get(),
                 'async_task': _ASYNC_TASK_PERSONALIZE_WARM,
                 'owner': owner,
                 'recipe_ids': recipe_ids,
@@ -5329,6 +5632,7 @@ def _invoke_personalize_warm(owner, recipe_ids, request_id=None):
 
 
 def _handle_personalize_warm_task(event, request_id=None):
+    _ai_consent.require(_ai_recipe_owner.get())
     """Background task: compute availability for the deferred recipe_ids and persist to the
     cache table so subsequent personalize polls/opens hit the cache. Never re-fires warm."""
     owner = _safe_text((event or {}).get('owner'))
@@ -5342,42 +5646,11 @@ def _handle_personalize_warm_task(event, request_id=None):
         _ensure_recipe_personalization_tables(conn)
         kitchen_context = _build_kitchen_match_context(conn, owner)
         current_version = int((kitchen_context or {}).get('kitchen_version') or 0)
+        rows = _read_requested_personalization_rows(conn, owner, recipe_ids)
         cached = _get_cached_recipe_availability(conn, owner, recipe_ids,
-                                                 min_kitchen_version=current_version)
+                                                 min_kitchen_version=current_version, recipe_rows=rows)
         todo_ids = [rid for rid in recipe_ids if rid not in cached]
-        if not todo_ids:
-            _log_event(request_id, 'saved_personalize_warm', owner=owner, warmed=0)
-            return {'statusCode': 200, 'body': 'warm'}
-        # Load the recipe rows using the SAME read path _personalize_saved_recipes uses
-        # (respect READ_SHARED_SAVED_RECIPES + table existence identically).
-        table = _saved_recipes_table(owner)
-        use_shared = os.getenv('READ_SHARED_SAVED_RECIPES', '').strip().lower() == 'true'
-        if not use_shared:
-            with conn.cursor() as cur:
-                cur.execute("""
-                    SELECT COUNT(*) AS n FROM information_schema.tables
-                    WHERE table_schema = DATABASE() AND table_name = %s
-                """, [table])
-                if cur.fetchone()['n'] == 0:
-                    _log_event(request_id, 'saved_personalize_warm', owner=owner, warmed=0)
-                    return {'statusCode': 200, 'body': 'warm'}
-            _ensure_saved_recipes_table(conn, owner)
-        with conn.cursor() as cur:
-            if use_shared:
-                cur.execute(
-                    f"""SELECT {_drift_safe_select(conn, 'shared_saved_recipes', extra_fields=['image_mirror_failed_at'])}
-                        FROM `shared_saved_recipes`
-                        WHERE {_household_owner_filter(conn, owner)[0]}
-                        ORDER BY COALESCE(_updatedDate, _createdDate) DESC""",
-                    _household_owner_filter(conn, owner)[1],
-                )
-            else:
-                cur.execute(
-                    f"""SELECT {_drift_safe_select(conn, table)}
-                        FROM `{table}`
-                        ORDER BY COALESCE(_updatedDate, _createdDate) DESC""",
-                )
-            rows = cur.fetchall() or []
+        original_rows = {_safe_text(r.get('_id')): r for r in rows}
         todo_set = set(todo_ids)
         recipes = [r for r in (_serialize_row(row) for row in rows)
                    if r.get('id') in todo_set]
@@ -5390,11 +5663,12 @@ def _handle_personalize_warm_task(event, request_id=None):
                 batch, kitchen_context, request_id=request_id) or {}
             # _compute_* does NOT persist; write the cache ourselves so warm actually helps.
             overlay_rows = [
-                _build_owner_recipe_availability_record(owner, 'saved', rid, avail)
-                for rid, avail in computed.items() if rid and avail
+                _build_owner_recipe_availability_record(owner, 'saved', rid,
+                    _stamp_saved_recipe_evidence(avail, original_rows[rid], kitchen_context))
+                for rid, avail in computed.items() if rid in original_rows and avail
             ]
-            _persist_owner_recipe_availability_rows(conn, overlay_rows)
-            warmed += len(overlay_rows)
+            accepted = _persist_owner_recipe_availability_rows(conn, overlay_rows) or []
+            warmed += len(accepted)
         _log_event(request_id, 'saved_personalize_warm', owner=owner, warmed=warmed)
         return {'statusCode': 200, 'body': 'warm'}
     finally:
@@ -5415,13 +5689,15 @@ def _handle_async_saved_recipe_text_task(event, request_id=None):
     conn = _mysql_conn()
     try:
         _ensure_saved_recipes_table(conn, owner)
+        existing = _fetch_saved_recipe_by_id(conn, owner, recipe_id)
+        conn.commit()
+        if not existing or existing.get('status') != 'processing':
+            return {'statusCode': 200}
+        _ai_consent.require(_ai_recipe_owner.get())
         extraction = _build_text_recipe_extraction(content)
         recipe_response, structured_recipe = _analyze_extraction(extraction, request_id=request_id)
         if recipe_response['recipe'] == 'Not enough recipe information.':
-            table = _saved_recipes_table(owner)
-            with conn.cursor() as cur:
-                cur.execute(f"UPDATE `{table}` SET status = 'failed' WHERE _id = %s AND _owner = %s", (recipe_id, owner))
-            conn.commit()
+            _mark_saved_recipe_text_failed(conn, owner, recipe_id, request_id=request_id)
             _log_event(request_id, 'saved_recipe_async_text_failed', owner=owner, recipe_id=recipe_id, reason='not_enough_info')
             # The pasted text simply had no recipe in it. That is an upstream CONTENT
             # outcome the user already sees, not a fault in our backend — so record a
@@ -5431,12 +5707,13 @@ def _handle_async_saved_recipe_text_task(event, request_id=None):
                        severity='low', source='save_recipe_text')
             return {'statusCode': 200}
         table = _saved_recipes_table(owner)
+        conn.begin()
         with conn.cursor() as cur:
             cur.execute(
                 f"""UPDATE `{table}` SET
                     title = %s, ingredients = %s, instructions = %s, notes = %s,
                     extraction_source = %s, status = 'ready'
-                WHERE _id = %s AND _owner = %s""",
+                WHERE _id = %s AND _owner = %s AND status = 'processing'""",
                 (
                     structured_recipe['title'] or extraction['title'] or 'Recipe',
                     json.dumps(structured_recipe['ingredients']),
@@ -5447,6 +5724,12 @@ def _handle_async_saved_recipe_text_task(event, request_id=None):
                     owner,
                 ),
             )
+            changed = cur.rowcount
+        if not changed:
+            conn.commit()
+            return {'statusCode': 200}
+        _dual_write_saved_recipe_to_shared(conn, owner, recipe_id,
+                                          request_id=request_id, transactional=True)
         conn.commit()
         # Saved recipes show a real photo or a title emoji, never an invented one. Skip the
         # invoke entirely rather than paying for a Lambda that returns immediately.
@@ -5475,19 +5758,25 @@ def _handle_async_saved_recipe_text_task(event, request_id=None):
         _log_event(request_id, 'saved_recipe_async_text_complete', owner=owner, recipe_id=recipe_id,
                    latency_ms=int((time.time() - started) * 1000))
         return {'statusCode': 200}
+    except _ai_consent.AIConsentRequired:
+        conn.rollback()
+        # Acknowledge only after the processing placeholder is durably terminal.
+        _mark_saved_recipe_text_failed(conn, owner, recipe_id, request_id=request_id)
+        return {'statusCode':200, 'error':'ai_consent_required'}
     except Exception as exc:
         print(f"[async-text-refine] Error: {exc}")
         import traceback
         traceback.print_exc()
         _report_backend_error('save_recipe_text', owner_id=owner, code='refine_error', error=exc, job_id=recipe_id)
+        conn.rollback()
         try:
-            table = _saved_recipes_table(owner)
-            with conn.cursor() as cur:
-                cur.execute(f"UPDATE `{table}` SET status = 'failed' WHERE _id = %s AND _owner = %s", (recipe_id, owner))
-            conn.commit()
+            _mark_saved_recipe_text_failed(conn, owner, recipe_id, request_id=request_id)
         except Exception:
-            pass
+            # An asynchronous Lambda return code does not trigger a retry.
+            raise RuntimeError('saved_recipe_terminal_persistence_failed') from None
         return {'statusCode': 500}
+    finally:
+        conn.close()
 
 
 def _refresh_saved_recipe_generated_image(conn, owner, recipe_id, request_id=None):
@@ -5544,8 +5833,25 @@ def _refresh_saved_recipe_generated_image(conn, owner, recipe_id, request_id=Non
     return refreshed_recipe
 
 
+def _hide_unavailable_recipe_image(row):
+    # Response-only fallback. Keep original URLs and stored recipe data so a
+    # replacement upload/recovery can still restore the image later.
+    row['image_url'] = None
+    row['image_urls'] = []
+    return row
+
+
 def _ensure_owned_saved_recipe_image(conn, owner, row, request_id=None):
     if not row:
+        return row
+    if _row_mirror_failed_recently(row):
+        metadata = row.get('image_mirror_failure')
+        try:
+            metadata = json.loads(metadata) if isinstance(metadata, str) else metadata
+        except (ValueError, TypeError):
+            metadata = None
+        if isinstance(metadata, dict) and metadata.get('kind') == 'source_unavailable':
+            return _hide_unavailable_recipe_image(row)
         return row
     # Out of budget for this request: hand the row back untouched. It keeps its original
     # image URL and gets mirrored on a later request. Serving the list is what matters.
@@ -5553,8 +5859,6 @@ def _ensure_owned_saved_recipe_image(conn, owner, row, request_id=None):
         return row
     # Known-dead image: skip entirely rather than re-pay the timeout on every single
     # read. This is what stops one unreachable host taxing a user's list forever.
-    if _row_mirror_failed_recently(row):
-        return row
     recipe_id = _safe_text(row.get('_id'))
     current_image_url = _safe_text(row.get('image_url'))
     if not recipe_id or not current_image_url:
@@ -5568,10 +5872,13 @@ def _ensure_owned_saved_recipe_image(conn, owner, row, request_id=None):
         current_image_url,
     ])
     attempted_any = False
+    permanent_failures = []
     for candidate_url in candidate_urls:
         if _image_mirror_budget_left() <= 0:
-            return row
+            permanent_failures.append(False)  # Remaining candidates were not classified.
+            break
         if _mirror_url_recently_failed(candidate_url):
+            permanent_failures.append(_image_mirror_failures[candidate_url][1])
             continue                      # already known dead, in this container
         attempted_any = True
         attempt_started = time.time()
@@ -5580,16 +5887,28 @@ def _ensure_owned_saved_recipe_image(conn, owner, row, request_id=None):
             _update_saved_recipe_image_fields(conn, owner, recipe_id, image_fields)
             row.update(image_fields)
             return row
-        except Exception:
-            _note_mirror_failure(candidate_url)
+        except Exception as error:
+            permanent = (
+                isinstance(error, requests.HTTPError)
+                and getattr(error.response, 'status_code', None) in (403, 404, 410)
+            ) or (
+                isinstance(error, ServiceError)
+                and (error.extra or {}).get('error_code') == 'source_unavailable'
+            )
+            permanent_failures.append(permanent)
+            _note_mirror_failure(candidate_url, permanent=permanent)
             continue
         finally:
             # Charge every attempt, successful or not. Failures are the expensive ones.
             _image_mirror_spent['seconds'] += time.time() - attempt_started
-    if attempted_any:
+    if attempted_any or (permanent_failures and all(permanent_failures)):
         # Persist the failure so a cold container inherits the knowledge instead of
         # rediscovering it at the user's expense.
-        _mark_mirror_failed_in_db(conn, owner, recipe_id)
+        _mark_mirror_failed_in_db(conn, owner, recipe_id,
+                                 failure_kind='source_unavailable' if permanent_failures and all(permanent_failures) else 'transient',
+                                 source_url=current_image_url)
+        if permanent_failures and all(permanent_failures):
+            return _hide_unavailable_recipe_image(row)
 
     refresh_url = _safe_text(row.get('source_url') or row.get('resolved_url'))
     if not refresh_url:
@@ -5677,11 +5996,8 @@ def _read_own_saved_recipe_rows(conn, owner, limit, before):
         if use_shared:
             from_table = 'shared_saved_recipes'
             from_ref = '`shared_saved_recipes`'
-            # Household-aware: show every member's saved recipes, not just the acting
-            # user's. Mutations remain per-owner (see _household_owner_filter).
-            owner_sql, owner_params = _household_owner_filter(conn, owner)
-            where_parts.append(owner_sql)
-            params.extend(owner_params)
+            where_parts.append("owner_id = %s")
+            params.append(owner)
         else:
             from_table = table
             from_ref = f'`{table}`'
@@ -5690,7 +6006,7 @@ def _read_own_saved_recipe_rows(conn, owner, limit, before):
             params.append(before)
         where_clause = ("WHERE " + " AND ".join(where_parts)) if where_parts else ""
         cur.execute(
-            f"""SELECT {_drift_safe_select(conn, from_table, extra_fields=['image_mirror_failed_at'])}
+            f"""SELECT {_drift_safe_select(conn, from_table, extra_fields=['image_mirror_failed_at', 'image_mirror_failure'])}
                 FROM {from_ref}
                 {where_clause}
                 ORDER BY COALESCE(_updatedDate, _createdDate) DESC
@@ -5698,10 +6014,6 @@ def _read_own_saved_recipe_rows(conn, owner, limit, before):
             params,
         )
         rows = cur.fetchall() or []
-    if use_shared:
-        # The same recipe saved by two members would otherwise appear twice; prefer the
-        # acting user's own copy so tapping it opens an editable row.
-        rows = _dedupe_household_rows(rows, owner)
     has_more = len(rows) > limit
     return rows[:limit], has_more
 
@@ -5715,6 +6027,19 @@ def _read_household_saved_recipe_rows(conn, acting_owner, member_ids, limit, bef
     `resolved_url_hash` (popped from the serialized payload later)."""
     acting = _safe_owner_token(acting_owner)
     collected = []
+    if os.getenv('READ_SHARED_SAVED_RECIPES', '').strip().lower() == 'true':
+        fields = _drift_safe_select(conn, 'shared_saved_recipes', extra_fields=['resolved_url_hash'])
+        with conn.cursor() as cur:
+            for member_id in member_ids:
+                params = [member_id]
+                before_sql = ''
+                if before:
+                    before_sql = ' AND COALESCE(_updatedDate, _createdDate) < %s'
+                    params.append(before)
+                cur.execute(f'SELECT {fields} FROM `shared_saved_recipes` WHERE owner_id=%s{before_sql} ORDER BY COALESCE(_updatedDate, _createdDate) DESC LIMIT {limit + 1}', params)
+                collected.extend(cur.fetchall() or [])
+        selected = _select_household_saved_recipe_rows(collected, acting_owner)
+        return selected[:limit], len(selected) > limit
     for member_id in member_ids:
         table = _saved_recipes_table(member_id)
         with conn.cursor() as cur:
@@ -5742,27 +6067,7 @@ def _read_household_saved_recipe_rows(conn, acting_owner, member_ids, limit, bef
             )
             collected.extend(cur.fetchall() or [])
 
-    def _recency(r):
-        return r.get('_updatedDate') or r.get('_createdDate') or datetime.min
-
-    collected.sort(key=_recency, reverse=True)
-
-    seen = {}          # resolved_url_hash -> index into deduped
-    deduped = []
-    for r in collected:
-        h = _safe_text(r.get('resolved_url_hash'))
-        if not h:
-            deduped.append(r)  # null/blank hash never collapses (legacy rows)
-            continue
-        if h not in seen:
-            seen[h] = len(deduped)
-            deduped.append(r)
-        else:
-            idx = seen[h]
-            existing = deduped[idx]
-            # Prefer the acting user's own copy for the surviving row's content.
-            if _safe_owner_token(r.get('_owner')) == acting and _safe_owner_token(existing.get('_owner')) != acting:
-                deduped[idx] = r
+    deduped = _select_household_saved_recipe_rows(collected, acting_owner)
 
     has_more = len(deduped) > limit
     return deduped[:limit], has_more
@@ -5798,6 +6103,28 @@ def _stamp_saved_by(conn, recipes):
     return recipes
 
 
+def _preview_recipe_availability(owner, body):
+    """Read current household inventory for a shared/unsaved recipe; never save it.
+
+    The HTTP owner guard runs before this function. A request cannot supply kitchen
+    rows, a different owner or stored availability. Matching is bounded and local.
+    """
+    ingredients = body.get('ingredients') if isinstance(body, dict) else None
+    if (not isinstance(ingredients, list) or not 1 <= len(ingredients) <= 100 or
+            any(not isinstance(line, str) or not line.strip() or len(line) > 500
+                for line in ingredients)):
+        return _error(400, 'Provide between 1 and 100 ingredient lines, up to 500 characters each.')
+    conn = _mysql_conn()
+    try:
+        context = _build_kitchen_match_context(conn, owner)
+        result = recipe_inventory_llm.preview_availability(
+            {'id': 'preview', 'ingredients': ingredients}, context)
+        return _success({'id': 'preview', 'availability': _availability_summary(result),
+                         'ingredient_matches': result['ingredient_matches']})
+    finally:
+        conn.close()
+
+
 def _get_saved_recipes(owner, query=None, request_id=None):
     conn = _mysql_conn()
     limit = _parse_limit(query)
@@ -5823,6 +6150,10 @@ def _get_saved_recipes(owner, query=None, request_id=None):
         _ensure_owned_saved_recipe_image(conn, _safe_owner_token(r.get('_owner')) or owner, r, request_id=request_id)
         for r in rows
     ]
+    current_rows = {_safe_text(r.get('_id')): r for r in
+                    _read_requested_personalization_rows(conn, owner, [_safe_text(r.get('_id')) for r in rows])}
+    rows = [r for r in rows if _safe_text(r.get('_id')) in current_rows
+            and _saved_recipe_evidence(r) == _saved_recipe_evidence(current_rows[_safe_text(r.get('_id'))])]
     serialized_rows = [_serialize_row(row) for row in rows]
     for s in serialized_rows:
         s.pop('resolved_url_hash', None)  # keep the payload field set identical to own reads
@@ -5830,18 +6161,12 @@ def _get_saved_recipes(owner, query=None, request_id=None):
     # Availability is keyed to the ACTING owner's kitchen (housemate copies simply
     # show availability=None until personalized — same as an uncomputed own recipe).
     current_kv = _get_owner_kitchen_version(conn, owner)
-    availability_map = _get_cached_recipe_availability(conn, owner, recipe_ids, min_kitchen_version=current_kv)
+    availability_map = _get_cached_recipe_availability(conn, owner, recipe_ids, min_kitchen_version=current_kv, recipe_rows=rows)
     recipes = []
     for serialized in serialized_rows:
         avail = availability_map.get(serialized.get('id'))
         if avail:
-            serialized['availability'] = {
-                'kitchen_version': avail['kitchen_version'],
-                'can_make_exact': avail['can_make_exact'],
-                'can_make_with_subs': avail['can_make_with_subs'],
-                'matched_count': avail['matched_count'],
-                'missing_count': avail['missing_count'],
-            }
+            serialized['availability'] = _availability_summary(avail)
             serialized['ingredient_matches'] = avail['ingredient_matches']
             serialized['missing_ingredients'] = avail['missing_ingredients']
             serialized['substitution_candidates'] = avail['substitution_candidates']
@@ -5866,38 +6191,178 @@ def _get_saved_recipes(owner, query=None, request_id=None):
     })
 
 
+
+def _saved_recipe_evidence(row):
+    return {'owner': _safe_owner_token(row.get('_owner') or row.get('owner_id')),
+            'revision': _saved_recipe_content_revision(row)}
+
+
+def _saved_recipe_household_key(members):
+    # A digest binds inventory scope without exposing member IDs in the wire payload.
+    return _sha256(json.dumps(sorted(set(members)), separators=(',', ':')))
+
+
+def _stamp_saved_recipe_evidence(availability, row, kitchen_context):
+    # Additive JSON evidence: old clients ignore it; no request or schema migration.
+    result = dict(availability or {})
+    matches = [dict(m) for m in result.get('ingredient_matches') or []]
+    if matches:
+        matches[0]['saved_recipe_evidence'] = {
+            **_saved_recipe_evidence(row),
+            'household_key': (kitchen_context or {}).get('saved_recipe_household_key'),
+        }
+    result['ingredient_matches'] = matches
+    return result
+
+
+def _saved_recipe_evidence_matches(row, availability, household_key):
+    if not row or not availability or not household_key:
+        return False
+    matches = _parse_json_field(availability.get('ingredient_matches')) or []
+    return (isinstance(matches, list) and bool(matches) and isinstance(matches[0], dict)
+            and matches[0].get('saved_recipe_evidence') == {
+                **_saved_recipe_evidence(row), 'household_key': household_key})
+
+
+def _persist_saved_availability_response(conn, recipes, overlay_rows):
+    accepted = _persist_owner_recipe_availability_rows(conn, overlay_rows) or []
+    accepted_ids = {r['recipe_id'] for r in accepted}
+    for recipe in recipes:
+        if recipe.get('id') not in accepted_ids:
+            for field in ('availability', 'ingredient_matches', 'missing_ingredients',
+                          'substitution_candidates', 'substitution_summary', 'substitution_status'):
+                recipe[field] = None
+    return accepted
+
+
+def _select_household_saved_recipe_rows(rows, acting_owner):
+    """One winner for both library and personalization, including legacy fan-out IDs."""
+    acting = _safe_owner_token(acting_owner)
+    def recency(row):
+        return str(row.get('_updatedDate') or row.get('_createdDate') or '')
+    def identity(row):
+        return (_safe_text(row.get('_id')), _safe_owner_token(row.get('_owner') or row.get('owner_id')))
+    ordered = sorted(rows, key=lambda r: (
+        identity(r)[1] == acting, recency(r), identity(r)), reverse=True)
+    selected, ids, hashes = [], set(), set()
+    for row in ordered:
+        rid, _ = identity(row)
+        source_hash = _safe_text(row.get('resolved_url_hash'))
+        if not rid or rid in ids or (source_hash and source_hash in hashes):
+            continue
+        selected.append(row)
+        ids.add(rid)
+        if source_hash:
+            hashes.add(source_hash)
+    return sorted(selected, key=lambda r: (recency(r), identity(r)), reverse=True)
+
+
+def _saved_recipe_member_ids(conn, owner, for_update=False):
+    if not for_update:
+        return list(dict.fromkeys([_safe_owner_token(owner)] + _get_household_member_ids(conn, owner)))
+    # Lock membership before recipe/cache rows. A leave/join cannot cross a
+    # confirmation or cache commit. All actors use the same member lock order.
+    from quantity_confirmation import ConfirmationRejected
+    acting = _safe_owner_token(owner)
+    with conn.cursor() as cur:
+        cur.execute('SELECT owner_id FROM new_users WHERE user_id=%s LIMIT 1', [acting])
+        observed = cur.fetchone()
+        if not observed:
+            raise ConfirmationRejected('REFRESH_AVAILABILITY')
+        household = observed.get('owner_id')
+        cur.execute('SELECT user_id, owner_id FROM new_users WHERE owner_id=%s OR user_id=%s ORDER BY user_id FOR UPDATE',
+                    [household, acting])
+        rows = cur.fetchall() or []
+    actor = next((r for r in rows if _safe_owner_token(r.get('user_id')) == acting), None)
+    if not actor or actor.get('owner_id') != household:
+        raise ConfirmationRejected('REFRESH_AVAILABILITY')
+    return sorted(set([acting] + [_safe_owner_token(r['user_id']) for r in rows
+                                 if household and r.get('owner_id') == household]))
+
+
+def _read_requested_personalization_rows(conn, owner, recipe_ids, for_update=False, member_ids=None):
+    """Exact authorized rows, with the same winner as the household library."""
+    requested = list(dict.fromkeys(_safe_text(v) for v in recipe_ids if _safe_text(v)))
+    if not requested:
+        return []
+    members = member_ids if member_ids is not None else _saved_recipe_member_ids(conn, owner, for_update=for_update)
+    collected = []
+    placeholders = ','.join(['%s'] * len(requested))
+    lock = ' FOR UPDATE' if for_update else ''
+    if os.getenv('READ_SHARED_SAVED_RECIPES', '').strip().lower() == 'true':
+        fields = _drift_safe_select(conn, 'shared_saved_recipes', extra_fields=['resolved_url_hash'])
+        owners = ','.join(['%s'] * len(members))
+        with conn.cursor() as cur:
+            cur.execute(f'SELECT {fields} FROM `shared_saved_recipes` WHERE owner_id IN ({owners}) AND _id IN ({placeholders}) ORDER BY owner_id, _id{lock}', members + requested)
+            collected = cur.fetchall() or []
+    else:
+        for member in sorted(members):
+            table = _saved_recipes_table(member)
+            with conn.cursor() as cur:
+                cur.execute('SELECT COUNT(*) AS n FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name=%s', [table])
+                if (cur.fetchone() or {}).get('n', 0) == 0:
+                    continue
+                fields = _drift_safe_select(conn, table, extra_fields=['resolved_url_hash'])
+                cur.execute(f'SELECT {fields} FROM `{table}` WHERE _id IN ({placeholders}) ORDER BY _id{lock}', requested)
+                collected.extend(cur.fetchall() or [])
+    by_id = {_safe_text(r.get('_id')): r for r in _select_household_saved_recipe_rows(collected, owner)}
+    return [by_id[rid] for rid in requested if rid in by_id]
+
+
+def _saved_recipe_cache_guard(conn, owner, recipe_ids):
+    # Called inside the quantity cache transaction, before its cache row locks.
+    members = _saved_recipe_member_ids(conn, owner, for_update=True)
+    household_key = _saved_recipe_household_key(members)
+    rows = _read_requested_personalization_rows(conn, owner, recipe_ids, for_update=True, member_ids=members)
+    by_id = {_safe_text(r.get('_id')): r for r in rows}
+    with conn.cursor() as cur:
+        cur.execute('SELECT kitchen_version FROM owner_kitchen_state WHERE owner=%s FOR UPDATE', [owner])
+        version = int((cur.fetchone() or {}).get('kitchen_version') or 0)
+    return lambda record: (_saved_recipe_evidence_matches(by_id.get(record.get('recipe_id')), record, household_key)
+                           and int(record.get('kitchen_version') or 0) == version)
+
+
+def _saved_recipe_confirmation_guard(conn, owner, recipe_id):
+    guard = _saved_recipe_cache_guard(conn, owner, [recipe_id])
+    return lambda row: guard({**row, 'recipe_id': recipe_id})
+
+
 def _personalize_saved_recipes(owner, request_id=None, recipe_ids=None):
     """Phase 2: run the LLM batch, persist results, and return per-recipe personalization data."""
     conn = _mysql_conn()
     try:
-        table = _saved_recipes_table(owner)
-        # Shared-table read cutover (reversible via env flag, default off = per-owner).
-        use_shared = os.getenv('READ_SHARED_SAVED_RECIPES', '').strip().lower() == 'true'
-        if not use_shared:
+        if recipe_ids:
+            rows = _read_requested_personalization_rows(conn, owner, recipe_ids)
+        else:
+            table = _saved_recipes_table(owner)
+            # Shared-table read cutover (reversible via env flag, default off = per-owner).
+            use_shared = os.getenv('READ_SHARED_SAVED_RECIPES', '').strip().lower() == 'true'
+            if not use_shared:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        SELECT COUNT(*) AS n FROM information_schema.tables
+                        WHERE table_schema = DATABASE() AND table_name = %s
+                    """, [table])
+                    if cur.fetchone()['n'] == 0:
+                        return _success({'owner': owner, 'recipes': []})
+                _ensure_saved_recipes_table(conn, owner)
             with conn.cursor() as cur:
-                cur.execute("""
-                    SELECT COUNT(*) AS n FROM information_schema.tables
-                    WHERE table_schema = DATABASE() AND table_name = %s
-                """, [table])
-                if cur.fetchone()['n'] == 0:
-                    return _success({'owner': owner, 'recipes': []})
-            _ensure_saved_recipes_table(conn, owner)
-        with conn.cursor() as cur:
-            if use_shared:
-                cur.execute(
-                    f"""SELECT {_drift_safe_select(conn, 'shared_saved_recipes', extra_fields=['image_mirror_failed_at'])}
-                        FROM `shared_saved_recipes`
-                        WHERE {_household_owner_filter(conn, owner)[0]}
-                        ORDER BY COALESCE(_updatedDate, _createdDate) DESC""",
-                    _household_owner_filter(conn, owner)[1],
-                )
-            else:
-                cur.execute(
-                    f"""SELECT {_drift_safe_select(conn, table)}
-                        FROM `{table}`
-                        ORDER BY COALESCE(_updatedDate, _createdDate) DESC""",
-                )
-            rows = cur.fetchall() or []
+                if use_shared:
+                    cur.execute(
+                        f"""SELECT {_drift_safe_select(conn, 'shared_saved_recipes', extra_fields=['image_mirror_failed_at', 'image_mirror_failure', 'resolved_url_hash'])}
+                            FROM `shared_saved_recipes`
+                            WHERE {_household_owner_filter(conn, owner)[0]}
+                            ORDER BY COALESCE(_updatedDate, _createdDate) DESC""",
+                        _household_owner_filter(conn, owner)[1],
+                    )
+                else:
+                    cur.execute(
+                        f"""SELECT {_drift_safe_select(conn, table, extra_fields=['resolved_url_hash'])}
+                            FROM `{table}`
+                            ORDER BY COALESCE(_updatedDate, _createdDate) DESC""",
+                    )
+                rows = cur.fetchall() or []
+        rows = _select_household_saved_recipe_rows(rows, owner)
         _ensure_recipe_personalization_tables(conn)
         kitchen_context = _build_kitchen_match_context(conn, owner)
         serialized_rows = [_serialize_row(row) for row in rows]
@@ -5911,13 +6376,16 @@ def _personalize_saved_recipes(owner, request_id=None, recipe_ids=None):
         # is left uncached this call and fills in on the next call.
         current_version = int((kitchen_context or {}).get('kitchen_version') or 0)
         all_ids = [r.get('id') for r in serialized_rows if r.get('id')]
-        cached_map = _get_cached_recipe_availability(conn, owner, all_ids, min_kitchen_version=current_version)
+        cached_map = _get_cached_recipe_availability(conn, owner, all_ids, min_kitchen_version=current_version, recipe_rows=rows)
         pending = [r for r in serialized_rows if r.get('id') and r.get('id') not in cached_map]
         to_compute = pending[:_MAX_PERSONALIZE_SYNC_COMPUTE]
         computed_map = (
             _compute_saved_recipe_availability_batch(to_compute, kitchen_context, request_id=request_id)
             if to_compute else {}
         )
+        original_rows = {_safe_text(r.get('_id')): r for r in rows}
+        computed_map = {rid: _stamp_saved_recipe_evidence(avail, original_rows[rid], kitchen_context)
+                        for rid, avail in (computed_map or {}).items() if rid in original_rows}
         availability_map = dict(cached_map)
         availability_map.update(computed_map)
         _log_event(request_id, 'saved_personalize_availability', owner=owner,
@@ -5928,20 +6396,28 @@ def _personalize_saved_recipes(owner, request_id=None, recipe_ids=None):
         remaining_ids = [r.get('id') for r in pending[len(to_compute):] if r.get('id')]
         if _PERSONALIZE_ASYNC_WARM and remaining_ids:
             _invoke_personalize_warm(owner, remaining_ids[:_PERSONALIZE_WARM_MAX], request_id=request_id)
+        # Provider work happens outside locks. Recheck access/content afterwards;
+        # a deleted/departed recipe is omitted and an edited recipe needs a fresh check.
+        current_rows = {_safe_text(r.get('_id')): r for r in
+                        _read_requested_personalization_rows(conn, owner, all_ids)}
+        latest_version = _get_owner_kitchen_version(conn, owner)
+        household_key = _saved_recipe_household_key(_saved_recipe_member_ids(conn, owner))
+        availability_map = {rid: avail for rid, avail in availability_map.items()
+                            if _saved_recipe_evidence_matches(current_rows.get(rid), avail, household_key)
+                            and int(avail.get('kitchen_version') or 0) == latest_version}
         personalization_list = []
         overlay_rows = []
         for serialized in serialized_rows:
+            if serialized.get('id') not in current_rows:
+                continue
             recipe_id = serialized.get('id')
             avail = availability_map.get(recipe_id) or {}
+            preserve = getattr(recipe_inventory_llm, 'confirmed_availability_for_response', None)
+            if preserve and recipe_id in computed_map:
+                avail = preserve(conn, owner, 'saved', recipe_id, avail)
             personalization_list.append({
                 'id': recipe_id,
-                'availability': {
-                    'kitchen_version': avail.get('kitchen_version'),
-                    'can_make_exact': avail.get('can_make_exact'),
-                    'can_make_with_subs': avail.get('can_make_with_subs'),
-                    'matched_count': avail.get('matched_count'),
-                    'missing_count': avail.get('missing_count'),
-                } if avail else None,
+                'availability': _availability_summary(avail) if avail else None,
                 'ingredient_matches': avail.get('ingredient_matches'),
                 'substitution_candidates': avail.get('substitution_candidates'),
                 'substitution_summary': avail.get('substitution_summary'),
@@ -5949,7 +6425,12 @@ def _personalize_saved_recipes(owner, request_id=None, recipe_ids=None):
             })
             if avail and recipe_id and recipe_id in computed_map:
                 overlay_rows.append(_build_owner_recipe_availability_record(owner, 'saved', recipe_id, avail))
-        _persist_owner_recipe_availability_rows(conn, overlay_rows)
+        accepted = _persist_owner_recipe_availability_rows(conn, overlay_rows) or []
+        accepted_ids = {r['recipe_id'] for r in accepted}
+        for result in personalization_list:
+            if result['id'] in computed_map and result['id'] not in accepted_ids:
+                for field in ('availability', 'ingredient_matches', 'substitution_candidates', 'substitution_summary', 'substitution_status'):
+                    result[field] = None
         return _success({'owner': owner, 'recipes': personalization_list})
     finally:
         pass
@@ -6123,6 +6604,14 @@ def _explore_shortcircuit_extraction(conn, url, request_id=None):
 
 
 def _save_saved_recipe_record(conn, owner, extraction, request_id=None, prepared_images=None):
+    try:
+        recipe_link_jobs.ensure_url_capacity(conn,
+            [_saved_recipes_table(owner)] + ([_SHARED_SAVED_RECIPES_TABLE] if DUAL_WRITE_SAVED_RECIPES else []),
+            [extraction.get('url'), extraction.get('resolved_url')])
+    except ValueError as exc:
+        if str(exc) == 'source_url_too_long':
+            raise ServiceError('This recipe link is too long. Share its original page link instead.', status_code=422) from exc
+        raise
     # Write the canonical-identity hash, but LOOK UP both it and the legacy raw-URL hash
     # so reels saved before canonicalization still dedupe instead of duplicating.
     # For non-Instagram URLs the canonical key is the URL itself, so both are identical
@@ -6141,7 +6630,8 @@ def _save_saved_recipe_record(conn, owner, extraction, request_id=None, prepared
             kitchen_context=kitchen_context,
             request_id=request_id,
         )
-        _persist_owner_recipe_availability_rows(conn, [overlay_row])
+        _dual_write_saved_recipe_to_shared(conn, owner, existing['_id'], request_id=request_id)
+        _persist_saved_availability_response(conn, [serialized_existing], [overlay_row])
         _log_event(
             request_id,
             'saved_recipe_deduped',
@@ -6169,17 +6659,35 @@ def _save_saved_recipe_record(conn, owner, extraction, request_id=None, prepared
         # by construction and never went through the refine step that computes a source.
         recipe_response = {'recipe': _format_recipe_text(structured_recipe), 'model': 'explore',
                            'recipe_source_used': 'explore'}
+    elif extraction.get('platform') in {'tiktok', 'instagram'} and link_recipe_recovery.enabled():
+        # A caption can name a dish without teaching the recipe. The legacy
+        # refiner can turn that into one generic step, which looks complete and
+        # prevents video/audio recovery. Admit the original link as processing
+        # and let the existing source-checked worker produce the first recipe.
+        # Its bounded cache, source verification and revision fence still apply.
+        recipe_response = {'recipe': 'Not enough recipe information.', 'model': None}
+        structured_recipe = {}
+        _log_event(request_id, 'saved_recipe_source_verification_required',
+                   platform=extraction.get('platform'),
+                   resolved_url=extraction.get('resolved_url'))
     else:
-        recipe_response, structured_recipe = _analyze_extraction(
-            extraction,
-            request_id=request_id,
-        )
+        try:
+            recipe_response, structured_recipe = _analyze_extraction(extraction, request_id=request_id)
+        except (recipe_work_budget.WorkLimit, ServiceError) as exc:
+            if isinstance(exc, ServiceError) and extraction.get('platform') in {'text', 'image', 'explore'}:
+                raise
+            recipe_response = {'recipe': 'Not enough recipe information.', 'model': None}
+            structured_recipe = {}
     # Nothing usable in the source. Do NOT invent a recipe, and do NOT throw the save away
     # either: keep what is genuinely known (title, link, image), mark it honestly, and hand it
     # to the repair agent, which can spend minutes on audio transcription that a 29s request
     # cannot. The user keeps their save and gets the real recipe shortly after, instead of
     # either losing it or being handed a confident fabrication.
     ungrounded = recipe_response['recipe'] == 'Not enough recipe information.'
+    terminal_reason = recipe_work_budget.terminal_reason() or extraction.get('terminal_work_reason')
+    _defer_link_recovery = (link_recipe_recovery.enabled() and terminal_reason == 'deadline'
+                            and extraction.get('platform') not in {'text', 'image', 'explore'})
+    _repairable_platform = extraction.get('platform') not in {'text', 'image', 'explore'} and (not terminal_reason or _defer_link_recovery)
 
     # A save can also come back GROUNDED but incomplete: a video whose caption lists the
     # ingredients while the method is only ever spoken aloud. Those pass the grounding check,
@@ -6189,35 +6697,11 @@ def _save_saved_recipe_record(conn, owner, extraction, request_id=None, prepared
     # audio transcription the 29s sync path skips.
     _ins = (structured_recipe or {}).get('instructions') or []
     _ing = (structured_recipe or {}).get('ingredients') or []
-    # Widened 2026-08-04. The old condition was platform in {tiktok, instagram} AND
-    # ingredients > 0 AND instructions == 0, which left two measured gaps (7-day window,
-    # 5,223 saves, 782 broken, only 230 ever touched by repair):
-    #   * 28 saves 'ready' with ZERO ingredients AND zero steps — excluded by `_ing > 0`.
-    #   * every Facebook save — excluded by the platform set.
-    # Both are now covered. Deliberately still EXCLUDED:
-    #   * manual saves (text/image/explore): there is no source URL to re-extract from, and
-    #     `_invoke_saved_recipe_repair_async` would no-op on the empty url anyway.
-    #   * 'web_recipe' rows that already hold ingredients. Repair re-runs the SAME two
-    #     providers (json-ld, html) with no OCR/audio rung, so it cannot learn anything new,
-    #     and `_repair_saved_recipe`'s anti-fabrication branch can WIPE a row whose second
-    #     pass comes back empty. Queueing ~93 such rows a week to be re-derived by an
-    #     identical code path is pure downgrade risk for zero expected gain.
-    _repairable_platform = extraction.get('platform') not in {'text', 'image', 'explore'}
-    # Video platforms get the full ladder on repair (slide OCR, preview OCR, audio), so a
-    # missing method section is genuinely recoverable there.
     incomplete_video = (
         not ungrounded
-        and _audio_fallback_supported(extraction.get('platform'))
+        and extraction.get('platform') in {'tiktok', 'instagram'}
         and len(_ins) == 0
-    )
-    # A save with NOTHING in it has nothing to lose: `before == (0, 0)` means the repair
-    # agent's "strictly richer" gate can only improve it or mark it honestly failed, never
-    # wipe real content. Worth a pass on any URL-backed platform.
-    empty_ready = (
-        not ungrounded
-        and _repairable_platform
-        and len(_ins) == 0
-        and len(_ing) == 0
+        and len(_ing) > 0
     )
 
     if ungrounded:
@@ -6227,7 +6711,7 @@ def _save_saved_recipe_record(conn, owner, extraction, request_id=None, prepared
         structured_recipe = {
             'title': _safe_text(extraction.get('title')) or _safe_text(structured_recipe and structured_recipe.get('title')) or 'Recipe',
             'ingredients': [], 'instructions': [],
-            'notes': ["We couldn't read the full recipe from this post yet — we're still working on it."],
+            'notes': [] if terminal_reason else ["We couldn't read the full recipe from this post yet — we're still working on it."],
         }
         recipe_response = {'recipe': _format_recipe_text(structured_recipe), 'model': None}
 
@@ -6250,13 +6734,23 @@ def _save_saved_recipe_record(conn, owner, extraction, request_id=None, prepared
             source_image_urls = [hinted] + list(source_image_urls or [])
         image_fields = _build_source_backed_saved_recipe_image_fields(source_image_urls=source_image_urls)
     else:
-        image_fields = _prepare_saved_recipe_image_fields(
-            owner,
-            recipe_id,
-            extraction,
-            request_id=request_id,
-        )
+        try:
+            with recipe_work_budget.phase(max_seconds=6):
+                image_fields = _prepare_saved_recipe_image_fields(owner, recipe_id, extraction, request_id=request_id)
+        except recipe_work_budget.WorkLimit:
+            image_fields = _build_source_backed_saved_recipe_image_fields(
+                source_image_urls=_unique_texts(extraction.get('image_urls') or [extraction.get('image_url')]))
 
+    # Image enrichment can consume the remaining provider budget after analysis.
+    # Recheck before choosing status or scheduling repair; sync may still defer.
+    terminal_reason = terminal_reason or recipe_work_budget.terminal_reason()
+    if terminal_reason and not (link_recipe_recovery.enabled() and terminal_reason == 'deadline'):
+        _repairable_platform = False
+        if ungrounded:
+            structured_recipe['notes'] = []
+
+    if _repairable_platform and not recipe_content_complete(structured_recipe):
+        _repairable_platform = _text_processing_schema_ready(conn, owner)
     table = _saved_recipes_table(owner)
     try:
         with conn.cursor() as cur:
@@ -6294,27 +6788,19 @@ def _save_saved_recipe_record(conn, owner, extraction, request_id=None, prepared
                      _safe_text(recipe_response.get('recipe_source_used')) or None),
                     extraction.get('author_name'),
                     extraction.get('caption_field') or None,
-                    'repairing' if ungrounded else 'ready',
+                    'ready' if recipe_content_complete(structured_recipe) else 'processing' if _repairable_platform else 'failed',
                 )
             )
         conn.commit()
-        if ungrounded or incomplete_video or empty_ready:
+        if _repairable_platform and not recipe_content_complete(structured_recipe):
             # Hand it to the background repair agent, which is not bound by the gateway's 29s
             # and can afford the audio transcription this save could not.
-            #
-            # No retry loop is possible here: this is the ONLY enqueue site in the module and
-            # it sits on the save path, which `_repair_saved_recipe` never re-enters (it does
-            # a bare UPDATE). One save therefore buys at most one repair, forever. There is
-            # also no historical scan — eligibility is evaluated per-save, so widening the
-            # condition cannot queue a backlog of old rows on any request.
-            if incomplete_video or empty_ready:
+            if incomplete_video:
                 _log_event(request_id, 'saved_recipe_queued_for_repair_incomplete',
                            platform=extraction.get('platform'),
                            ingredients=len(_ing),
-                           instructions=len(_ins),
-                           reason='empty_ready' if empty_ready else 'no_instructions',
                            resolved_url=extraction.get('resolved_url'))
-            _invoke_saved_recipe_repair_async(owner, recipe_id,
+            _enqueue_saved_recipe_repair_or_finish(conn, owner, recipe_id,
                                               extraction.get('resolved_url') or extraction.get('url'),
                                               request_id=request_id)
     except pymysql.err.IntegrityError as exc:
@@ -6347,7 +6833,6 @@ def _save_saved_recipe_record(conn, owner, extraction, request_id=None, prepared
         kitchen_context=kitchen_context,
         request_id=request_id,
     )
-    _persist_owner_recipe_availability_rows(conn, [overlay_row])
     _log_event(
         request_id,
         'saved_recipe_created',
@@ -6370,6 +6855,7 @@ def _save_saved_recipe_record(conn, owner, extraction, request_id=None, prepared
     )
     # Migration dual-write to shared_saved_recipes (flag-gated, non-blocking).
     _dual_write_saved_recipe_to_shared(conn, owner, recipe_id, request_id=request_id)
+    _persist_saved_availability_response(conn, [serialized_row], [overlay_row])
     # Fan out to household members
     try:
         _fan_out_saved_recipe_to_household(conn, owner, recipe_id, request_id=request_id)
@@ -6388,6 +6874,16 @@ def _build_saved_recipe_post_response(owner, results, partial_errors=None):
     if not results:
         raise ServiceError('Not enough recipe information.', status_code=422, extra={'partial_errors': partial_errors})
 
+    retained = [result for result in results if not recipe_content_complete(result.get('recipe'))]
+    results = [result for result in results if recipe_content_complete(result.get('recipe'))]
+    partial_errors.extend(recipe_incomplete_error(result['recipe']) for result in retained)
+    if not results:
+        retained_recipe = retained[0]['recipe']
+        return _success({'owner':owner, 'recipe':retained_recipe,
+                         'deduped':bool(retained[0].get('deduped')),
+                         'retained_recipes':[result['recipe'] for result in retained],
+                         'code':'recipe_content_incomplete', 'error':INCOMPLETE_MESSAGE,
+                         'recovery':recipe_content_recovery(retained_recipe)}, status=422)
     has_created = any(not result.get('deduped') for result in results)
     status = 201 if has_created else 200
     if len(results) == 1:
@@ -6397,6 +6893,8 @@ def _build_saved_recipe_post_response(owner, results, partial_errors=None):
             'recipe': result['recipe'],
             'deduped': bool(result.get('deduped')),
         }
+        if retained:
+            body['retained_recipes'] = [entry['recipe'] for entry in retained]
         if partial_errors:
             body['partial_errors'] = partial_errors
         return _success(body, status=status)
@@ -6413,6 +6911,8 @@ def _build_saved_recipe_post_response(owner, results, partial_errors=None):
         ],
         'count': len(results),
     }
+    if retained:
+        body['retained_recipes'] = [entry['recipe'] for entry in retained]
     if partial_errors:
         body['partial_errors'] = partial_errors
     return _success(body, status=status)
@@ -6427,13 +6927,32 @@ def _build_saved_recipe_batch_accept_response(owner, job, event=None):
 
 
 def _build_saved_recipe_batch_job_response(owner, job, recipes=None, results=None, partial_errors=None, event=None):
-    body = {
-        'owner': owner,
-        'job': _serialize_saved_recipe_batch_job(job, event=event),
-        'recipes': recipes or [],
-        'results': results or [],
-        'count': len(results or []),
-    }
+    serialized_job = _serialize_saved_recipe_batch_job(job, event=event)
+    recipes = list(recipes or [])
+    results = list(results or [])
+    partial_errors = list(partial_errors or [])
+    retained = [recipe for recipe in recipes if not recipe_content_complete(recipe)]
+    ready = [recipe for recipe in recipes if recipe_content_complete(recipe)]
+    if serialized_job.get('status') == 'completed' and retained:
+        pending = any(recipe_content_outcome(recipe) == 'processing' for recipe in retained)
+        serialized_job['status'] = 'running' if pending else 'completed' if ready else 'failed'
+        if not pending:
+            partial_errors.extend(recipe_incomplete_error(recipe) for recipe in retained)
+            if not ready:
+                serialized_job['error'] = INCOMPLETE_MESSAGE
+                serialized_job['code'] = 'recipe_content_incomplete'
+        serialized_job['result_count'] = len(ready)
+        serialized_job['count'] = len(ready)
+        serialized_job['outcome'] = 'running' if pending else 'partial' if ready else 'failed'
+    if serialized_job.get('status') == 'completed' and not recipes:
+        serialized_job.update(status='failed',error='No usable recipe result is available.',code='recipe_result_unavailable',result_count=0)
+    ready_ids = {recipe.get('id') for recipe in ready}
+    verified_results = [entry for entry in results if (entry.get('recipe') or {}).get('id') in ready_ids]
+    body = {'owner':owner, 'job':serialized_job, 'recipes':ready,
+            'results':verified_results, 'count':len(verified_results)}
+    if retained:
+        body['retained_recipes'] = retained
+        body['content_outcome'] = 'processing' if any(recipe_content_outcome(r) == 'processing' for r in retained) else 'partial' if ready else 'link_retained'
     if partial_errors:
         body['partial_errors'] = partial_errors
     return _success(body)
@@ -6444,13 +6963,12 @@ def _process_saved_recipe_image_batch(conn, owner, image_submissions, request_id
     results = []
 
     def _save_cluster(cluster):
-        result, _ = _save_saved_recipe_record(
-            conn,
-            owner,
-            cluster['extraction'],
-            request_id=request_id,
-            prepared_images=cluster.get('prepared_images') or [],
-        )
+        result, _ = _run_with_transient_retry(
+            lambda: _save_saved_recipe_record(conn, owner, cluster['extraction'],
+                request_id=request_id, prepared_images=cluster.get('prepared_images') or []),
+            request_id=request_id, label='persist_recipe_image_cluster')
+        if not _safe_text(((result or {}).get('recipe') or {}).get('id')):
+            raise ServiceError('Recipe persistence was not confirmed. Please try again.', status_code=503)
         return {
             'recipe_id': ((result or {}).get('recipe') or {}).get('id'),
             'deduped': bool((result or {}).get('deduped')),
@@ -6461,7 +6979,7 @@ def _process_saved_recipe_image_batch(conn, owner, image_submissions, request_id
         try:
             results.append(_save_cluster(cluster))
             continue
-        except ServiceError as exc:
+        except Exception as exc:
             fragments = list(cluster.get('fragments') or [])
             # MERGED-FIRST, PER-IMAGE ON FAILURE. The merged attempt above is what a
             # one-recipe-across-pages batch needs (51% of real multi-image batches), so it
@@ -6469,11 +6987,12 @@ def _process_saved_recipe_image_batch(conn, owner, image_submissions, request_id
             # as wrong and retry the images individually — a fallback on evidence rather
             # than a guess from image count. Losing the whole batch to one combined 422 is
             # the failure this exists to prevent.
-            if len(fragments) < 2:
+            if len(fragments) < 2 or not isinstance(exc, ServiceError) or exc.status_code != 422:
                 partial_errors.append({
                     'image_indexes': cluster.get('image_indexes') or [],
-                    'error': str(exc),
-                    'status_code': exc.status_code,
+                    'error': str(exc) if isinstance(exc, ServiceError) else 'This recipe could not be saved. Please try again.',
+                    'status_code': exc.status_code if isinstance(exc, ServiceError) else 503,
+                    'retryable': _is_transient_failure(exc),
                 })
                 continue
             _log_event(
@@ -6492,11 +7011,12 @@ def _process_saved_recipe_image_batch(conn, owner, image_submissions, request_id
                 try:
                     results.append(_save_cluster(single))
                     recovered_any = True
-                except ServiceError as inner:
+                except Exception as inner:
                     partial_errors.append({
                         'image_indexes': single.get('image_indexes') or [],
-                        'error': str(inner),
-                        'status_code': inner.status_code,
+                        'error': str(inner) if isinstance(inner, ServiceError) else 'This image could not be saved. Please try again.',
+                        'status_code': inner.status_code if isinstance(inner, ServiceError) else 503,
+                        'retryable': _is_transient_failure(inner),
                     })
             _log_event(
                 request_id,
@@ -6515,6 +7035,8 @@ def _process_saved_recipe_image_batch(conn, owner, image_submissions, request_id
 
 
 def _enqueue_saved_recipe_batch_job(owner, submission, request_id=None, event=None):
+    if recipe_batch_checkpoint.enabled(owner):
+        return recipe_batch_checkpoint.enqueue(SimpleNamespace(**globals()), owner, submission, event, request_id)
     job_id = uuid.uuid4().hex
     now = _utc_now_iso()
     payload_key = _put_saved_recipe_batch_payload(owner, job_id, submission)
@@ -6544,7 +7066,7 @@ def _enqueue_saved_recipe_batch_job(owner, submission, request_id=None, event=No
         boto3.client('lambda').invoke(
             FunctionName=function_name,
             InvocationType='Event',
-            Payload=json.dumps({
+            Payload=json.dumps({'ai_consent_actor':_ai_recipe_owner.get(),
                 'async_task': _ASYNC_TASK_PROCESS_SAVED_RECIPE_BATCH,
                 'owner': owner,
                 'job_id': job_id,
@@ -6610,7 +7132,7 @@ def _enqueue_saved_recipe_url_job(owner, url, request_id=None, event=None):
         boto3.client('lambda').invoke(
             FunctionName=function_name,
             InvocationType='Event',
-            Payload=json.dumps({
+            Payload=json.dumps({'ai_consent_actor':_ai_recipe_owner.get(),
                 'async_task': _ASYNC_TASK_PROCESS_SAVED_RECIPE_URL,
                 'owner': owner,
                 'job_id': job_id,
@@ -6679,7 +7201,7 @@ def _fetch_saved_recipe_batch_results(conn, owner, job, request_id=None):
             'recipe': recipe,
             'deduped': bool((entry or {}).get('deduped')),
         })
-    _persist_owner_recipe_availability_rows(conn, overlay_rows)
+    _persist_saved_availability_response(conn, recipes, overlay_rows)
     return recipes, results, partial_errors
 
 
@@ -6746,10 +7268,32 @@ def _post_saved_recipe(owner, body, request_id=None):
                     async_job=job.get('job_id'),
                 )
                 return _build_saved_recipe_batch_accept_response(owner, job, event=body.get('_event'))
+            source_deferred = False
             if extraction is None:
-                extraction = _extract_content(submission['url'], request_id=request_id)
+                try:
+                    extraction = _extract_content(submission['url'], request_id=request_id)
+                except (recipe_work_budget.WorkLimit, ServiceError):
+                    # Failed public sources keep their link and get one background
+                    # recovery attempt. Pure input validation below still applies.
+                    # Legacy URL clients accept a recipe receipt, not an async job.
+                    # Retain only an input that passes the existing pure validators;
+                    # the sync budget may then defer one longer repair attempt.
+                    normalized_url = _normalize_url(submission['url'])
+                    platform = _detect_platform(normalized_url, raw_url=submission['url'], request_id=request_id)
+                    extraction = {'url': normalized_url, 'resolved_url': normalized_url, 'platform': platform,
+                                  'title': 'Recipe', 'caption': '', 'content': '', 'source': 'deadline_retained'}
+                    source_deferred = True
             result, _ = _save_saved_recipe_record(conn, owner, extraction, request_id=request_id)
-            response = _build_saved_recipe_post_response(owner, [result])
+            if source_deferred and not recipe_content_complete(result.get('recipe')):
+                # 200/201 acknowledges the retained link, never ready recipe content.
+                retained = result['recipe']
+                response = _success({'owner': owner, 'recipe': retained,
+                    'deduped': bool(result.get('deduped')), 'code': 'recipe_content_incomplete',
+                    'content_outcome': recipe_content_outcome(retained),
+                    'recovery': recipe_content_recovery(retained)},
+                    status=200 if result.get('deduped') else 201)
+            else:
+                response = _build_saved_recipe_post_response(owner, [result])
             response_result_count = 1
         elif submission['kind'] == 'content':
             extraction = _build_text_recipe_extraction(
@@ -6762,8 +7306,17 @@ def _post_saved_recipe(owner, body, request_id=None):
             if existing:
                 # Duplicate — return synchronously
                 existing = _ensure_owned_saved_recipe_image(conn, owner, existing, request_id=request_id)
+                # A prior accepted text save may predate projection publication.
+                _dual_write_saved_recipe_to_shared(conn, owner, existing['_id'], request_id=request_id, transactional=True)
+                conn.commit()
                 serialized_existing = _serialize_row(existing)
-                response = _success({'owner': owner, 'recipe': serialized_existing, 'deduped': True}, status=200)
+                response = _build_saved_recipe_post_response(owner, [{'recipe':serialized_existing,'deduped':True}])
+                response_result_count = 1
+            elif not _text_processing_schema_ready(conn, owner):
+                # An older table may have an active metadata lock. Preserve the shipped
+                # synchronous contract instead of blocking or storing an invalid status.
+                result, _ = _save_saved_recipe_record(conn, owner, extraction, request_id=request_id)
+                response = _build_saved_recipe_post_response(owner, [result])
                 response_result_count = 1
             else:
                 # Insert placeholder, refine asynchronously
@@ -6787,6 +7340,7 @@ def _post_saved_recipe(owner, body, request_id=None):
                 table = _saved_recipes_table(owner)
                 dup_row = None
                 try:
+                    conn.begin()
                     with conn.cursor() as cur:
                         cur.execute(
                             f"""INSERT INTO `{table}` (
@@ -6811,6 +7365,9 @@ def _post_saved_recipe(owner, body, request_id=None):
                                 json.dumps([_text_hero_image(extraction)] if _text_hero_image(extraction) else []),
                             ),
                         )
+                    # The list projection must exist before returning a saved recipe.
+                    # Refinement is optional background work, never a visibility gate.
+                    _dual_write_saved_recipe_to_shared(conn, owner, recipe_id, request_id=request_id, transactional=True)
                     conn.commit()
                 except pymysql.err.IntegrityError as exc:
                     # 1062 = concurrent save of identical text won the race — the
@@ -6821,9 +7378,14 @@ def _post_saved_recipe(owner, body, request_id=None):
                     dup_row = _fetch_saved_recipe_by_hash(conn, owner, resolved_url_hash)
                     if not dup_row:
                         raise
+                except Exception:
+                    conn.rollback()
+                    raise
                 if dup_row:
+                    _dual_write_saved_recipe_to_shared(conn, owner, dup_row['_id'], request_id=request_id, transactional=True)
+                    conn.commit()
                     dup_row = _ensure_owned_saved_recipe_image(conn, owner, dup_row, request_id=request_id)
-                    response = _success({'owner': owner, 'recipe': _serialize_row(dup_row), 'deduped': True}, status=200)
+                    response = _build_saved_recipe_post_response(owner, [{'recipe':_serialize_row(dup_row),'deduped':True}])
                     response_result_count = 1
                 else:
                     _invoke_saved_recipe_text_refinement_async(owner, recipe_id, content_text, request_id=request_id)
@@ -6883,7 +7445,47 @@ def _get_saved_recipe_batch_job_status(owner, job_id, event=None, request_id=Non
         pass
 
 
+def _delete_saved_recipe_atomic(owner, item_id):
+    from saved_recipe_deletions import (
+        PreparationRequired, RecipeIdentityReused, delete_with_receipt,
+    )
+
+    conn = _mysql_conn()
+    members = [owner]
+    if SAVED_RECIPE_HOUSEHOLD_FANOUT:
+        members = sorted(set(members + list(_get_household_member_ids(conn, owner) or [])))
+    options = {
+        'serialize': json_serial,
+        # List reads may use shared storage; mutation ownership remains personal.
+        'read_shared': False,
+        'delete_shared': DUAL_WRITE_SAVED_RECIPES or os.getenv('READ_SHARED_SAVED_RECIPES', '').strip().lower() == 'true',
+        'cache_sources': ['saved', _availability_cache_source('saved')],
+    }
+    for attempt in range(4):
+        try:
+            result = delete_with_receipt(conn, owner, item_id, members, **options)
+            if result is None:
+                return _error(404, 'Saved recipe not found')
+            return _success({'owner': owner, 'recipe': result})
+        except PreparationRequired as pending:
+            if attempt == 3:
+                return _error(503, 'Recipe changed during deletion. Please retry.')
+            # Availability calculation can perform external work or schema setup.
+            # The kernel has released all transaction locks before asking for it.
+            _ensure_recipe_personalization_tables(conn)
+            context = _build_kitchen_match_context(conn, owner)
+            prepared, _ = _serialize_saved_recipe_with_availability(
+                conn, owner, pending.row, kitchen_context=context,
+            )
+            options.update(prepared=prepared, fingerprint=pending.fingerprint)
+        except RecipeIdentityReused:
+            return _error(409, 'Saved recipe identifier was reused after deletion')
+
+
+
 def _delete_saved_recipe(owner, item_id):
+    if os.getenv('SAVED_RECIPE_ATOMIC_DELETE_V1', '').strip().lower() == 'true':
+        return _delete_saved_recipe_atomic(owner, item_id)
     conn = _mysql_conn()
     try:
         table = _saved_recipes_table(owner)
@@ -6934,11 +7536,101 @@ def _delete_saved_recipe(owner, item_id):
         pass
 
 
-def _update_saved_recipe(owner, item_id, body, request_id=None):
+def _extract_recovery_source(url, request_id=None):
+    from recovery_web import fetch_page
+    html, resolved = fetch_page(url)
+    soup = BeautifulSoup(html, 'html.parser')
+    node = _select_richest_recipe_node(soup)
+    if node:
+        ingredients = node.get('recipeIngredient')
+        if isinstance(ingredients, str):
+            ingredients = [ingredients]
+        elif not isinstance(ingredients, list):
+            ingredients = []
+        structured = {'title':_safe_text(node.get('name')),
+                      'ingredients':_clean_string_list([value for value in ingredients if isinstance(value, str)]),
+                      'instructions':_parse_instructions(node.get('recipeInstructions'))}
+    else:
+        # No inferred link crawling, audio scrape, images or embedded subrequests.
+        _, structured = _recipe_response_from_content(_extract_web_article_text(soup), request_id=request_id)
+    return structured or {}, resolved
+
+
+def _recover_saved_recipe(owner, item_id, body, request_id=None):
+    recovery = body.get('recovery')
+    if not isinstance(recovery, dict) or recovery.get('action') not in ('replace_source','paste_recipe'):
+        return _error(400, 'Choose a recipe recovery action.')
+    revision = body.get('content_revision')
+    if not isinstance(revision, str) or not revision:
+        return _error(400, 'Refresh the recipe before changing its source.')
+    conn = _mysql_conn()
+    row = _fetch_saved_recipe_by_id(conn, owner, item_id)
+    if not row: return _error(404, 'Saved recipe not found')
+    if _saved_recipe_content_revision(row) != revision:
+        return _error(409, 'This recipe changed. Refresh it before saving.')
+    replace = recovery.get('replace_fields') or []
+    if not isinstance(replace,list) or set(replace)-{'title','ingredients','instructions','notes'}:
+        return _error(400, 'Choose which recipe fields to replace.')
+    # A source is one coherent recipe. Never attach new directions to ingredients
+    # retained from another version, even when only one old field is populated.
+    current_content = _serialize_row(row)
+    if (current_content.get('ingredients') or current_content.get('instructions')) and not {'ingredients','instructions'}.issubset(replace):
+        return _error(409, 'Replace the ingredients and steps together to recover this recipe.',
+                      {'code':'recipe_replacement_confirmation_required','replace_fields':['ingredients','instructions']})
+    source_updates = {}
+    if recovery['action'] == 'replace_source':
+        url = _safe_text(recovery.get('url'))
+        if not _valid_recipe_repair_url(url): return _error(400,'Use a public recipe page URL.')
+        try:
+            from recovery_web import recovery_budget
+            with recovery_budget():
+                structured, resolved = _extract_recovery_source(url, request_id=request_id)
+        except recipe_work_budget.WorkLimit:
+            return _error(422, 'This is taking too long. Your saved recipe has not changed. Try again or paste its recipe text.')
+        except ValueError as exc:
+            return _error(422, str(exc))
+        source_updates = {'source_url':url, 'resolved_url':resolved, 'resolved_url_hash':_resolved_url_hash(resolved)}
+        other = _fetch_saved_recipe_by_hash(conn, owner, source_updates['resolved_url_hash'])
+        if other and other.get('_id') != item_id:
+            return _error(409, 'This source is already saved.', {'existing_recipe_id':other['_id']})
+    else:
+        text = _safe_text(recovery.get('text'))
+        if not text or len(text)>30000: return _error(400, 'Paste up to 30,000 characters of recipe text.')
+        try:
+            from recovery_web import recovery_budget
+            with recovery_budget():
+                _, structured = _recipe_response_from_content(text, request_id=request_id)
+        except recipe_work_budget.WorkLimit:
+            return _error(422, 'This is taking too long. Your saved recipe has not changed. Try again or paste its recipe text.')
+        except ValueError as exc:
+            return _error(422, str(exc))
+        structured = structured or {}
+    if not recipe_content_complete(structured):
+        return _error(422, INCOMPLETE_MESSAGE, {'code':'recipe_content_incomplete','recipe':_serialize_row(row),'recovery':recipe_content_recovery(_serialize_row(row))})
+    updates = {'content_revision':revision}
+    for field in ('title','ingredients','instructions','notes'):
+        if field == 'notes' and field not in replace:
+            notes = current_content.get('notes') or []
+            pending_note = "We couldn't read the full recipe from this post yet — we're still working on it."
+            if pending_note in notes:
+                # Bypass input normalization: these are already-stored user notes.
+                source_updates['notes'] = json.dumps([note for note in notes if note != pending_note])
+            continue
+        current = _safe_text(row.get(field)) if field=='title' else current_content.get(field)
+        if field in replace or not current:
+            value = structured.get(field)
+            if value is not None: updates[field]=value
+    # Revision and uniqueness are revalidated inside the same edit transaction.
+    return _update_saved_recipe(owner,item_id,updates,request_id=request_id,_source_updates=source_updates)
+
+
+def _update_saved_recipe(owner, item_id, body, request_id=None, _source_updates=None):
     """Edit a saved recipe's user-editable fields (title, ingredients, steps/instructions,
     notes). Partial updates allowed. Applies to the owner + any household members that have
     the recipe, then recomputes availability since ingredient changes affect kitchen matching."""
-    updates = {}
+    if 'recovery' in body:
+        return _recover_saved_recipe(owner,item_id,body,request_id=request_id)
+    updates = dict(_source_updates or {})
     if 'title' in body:
         title = _safe_text(body.get('title'))
         if not title:
@@ -6972,25 +7664,59 @@ def _update_saved_recipe(owner, item_id, body, request_id=None):
     # propagation happens only when saved-recipe sharing is explicitly enabled.
     targets = set()
     if SAVED_RECIPE_HOUSEHOLD_FANOUT:
-        try:
-            targets = set(_get_household_member_ids(conn, owner) or [])
-        except Exception:
-            targets = set()
+        targets = set(_get_household_member_ids(conn, owner) or [])
     targets.add(_safe_owner_token(owner))
-    set_clause = ', '.join(f"`{col}` = %s" for col in updates) + ", `_updatedDate` = NOW()"
-    vals = list(updates.values())
+    targets = sorted(targets)
+    # Schema preparation may commit implicitly. Finish it before the edit transaction.
     for tid in targets:
-        try:
-            _ensure_saved_recipes_table(conn, tid)
-            mtable = _saved_recipes_table(tid)
-            with conn.cursor() as cur:
+        _ensure_saved_recipes_table(conn, tid)
+    conn.begin()
+    try:
+        with conn.cursor() as cur:
+            # Lock all existing copies in the same order for concurrent household
+            # edits. Recheck the acting copy before changing any required target.
+            acting_exists = False
+            locked_rows = {}
+            for tid in targets:
+                target_table = _saved_recipes_table(tid)
+                cur.execute(f"SELECT * FROM `{target_table}` WHERE _id = %s LIMIT 1 FOR UPDATE", [item_id])
+                locked = cur.fetchone()
+                if locked is not None: locked_rows[tid] = locked
+                if target_table == table:
+                    acting_exists = locked is not None
+            if not acting_exists:
+                conn.rollback()
+                return _error(404, 'Saved recipe not found')
+            expected_revision = body.get('content_revision')
+            if expected_revision is not None and expected_revision != _saved_recipe_content_revision(locked_rows[_safe_owner_token(owner)]):
+                conn.rollback()
+                return _error(409, 'This recipe changed. Refresh it before saving.')
+            if 'resolved_url_hash' in (_source_updates or {}):
+                for tid in locked_rows:
+                    cur.execute(f"SELECT _id FROM `{_saved_recipes_table(tid)}` WHERE resolved_url_hash=%s AND _id<>%s FOR UPDATE",[_source_updates['resolved_url_hash'],item_id])
+                    if cur.fetchone():
+                        conn.rollback()
+                        return _error(409, 'This source is already saved.')
+            for tid, locked in locked_rows.items():
+                target_updates = dict(updates)
+                # Old clients omit content_revision; retain their partial-edit
+                # contract, but compute readiness from the entire locked row.
+                if 'status' in locked:
+                    target_updates['status'] = 'ready' if recipe_content_complete({**locked, **updates}) else 'failed'
+                set_clause = ', '.join(f"`{col}` = %s" for col in target_updates) + ", `_updatedDate` = NOW()"
+                vals = list(target_updates.values())
+                mtable = _saved_recipes_table(tid)
                 cur.execute(f"UPDATE `{mtable}` SET {set_clause} WHERE _id = %s LIMIT 1", vals + [item_id])
-        except Exception as exc:
-            _log_event(request_id, 'saved_recipe_update_member_error', member=tid, error=str(exc))
-    conn.commit()
-    # Migration dual-write: mirror the edited row into shared_saved_recipes (re-upsert)
-    # so title/ingredient/step edits survive the read cutover. Non-blocking.
-    _dual_write_saved_recipe_to_shared(conn, owner, item_id, request_id=request_id)
+        # Required projections join the same transaction. A shared-read cutover
+        # must never acknowledge an edit while leaving its displayed copy stale.
+        require_shared = os.getenv('READ_SHARED_SAVED_RECIPES', '').strip().lower() == 'true'
+        for tid in targets:
+            _dual_write_saved_recipe_to_shared(conn, tid, item_id, request_id=request_id,
+                                              transactional=True, required=require_shared)
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
 
     # Ingredients may have changed → recompute availability against the owner's kitchen.
     _ensure_recipe_personalization_tables(conn)
@@ -7000,9 +7726,11 @@ def _update_saved_recipe(owner, item_id, body, request_id=None):
         conn, owner, updated_row, kitchen_context=kitchen_context, request_id=request_id,
     )
     try:
-        _persist_owner_recipe_availability_rows(conn, [overlay_row])
+        _persist_saved_availability_response(conn, [serialized_row], [overlay_row])
     except Exception:
-        pass
+        for field in ('availability', 'ingredient_matches', 'missing_ingredients',
+                      'substitution_candidates', 'substitution_summary', 'substitution_status'):
+            serialized_row[field] = None
     _log_event(request_id, 'saved_recipe_updated', item_id=item_id, fields=list(updates.keys()))
     return _success({'owner': owner, 'recipe': serialized_row})
 
@@ -7035,6 +7763,7 @@ def _handle_analyze_url(body, request_id):
 
 
 def _handle_async_saved_recipe_image_task(event, request_id):
+    _ai_consent.require(_ai_recipe_owner.get())
     owner = _safe_text((event or {}).get('owner'))
     recipe_id = _safe_text((event or {}).get('recipe_id'))
     if not owner or not recipe_id:
@@ -7059,7 +7788,7 @@ def _handle_async_saved_recipe_image_task(event, request_id):
 # 4xx ("not a recipe", "not a recipe link") is NOT: the input has not changed, so a retry
 # just re-fails and burns another LLM/provider call. Those wait for a fix plus a sweep,
 # which is what the re-drive runbook is for.
-_TRANSIENT_RETRY_ATTEMPTS = max(0, int(os.getenv('TRANSIENT_RETRY_ATTEMPTS', '2')))
+_TRANSIENT_RETRY_ATTEMPTS = min(2, max(0, int(os.getenv('TRANSIENT_RETRY_ATTEMPTS', '2'))))
 _TRANSIENT_RETRY_BASE_SECONDS = float(os.getenv('TRANSIENT_RETRY_BASE_SECONDS', '2'))
 _TRANSIENT_ERROR_MARKERS = (
     'timed out', 'timeout', 'throttl', 'rate limit', 'too many requests',
@@ -7070,10 +7799,14 @@ _TRANSIENT_ERROR_MARKERS = (
 
 def _is_transient_failure(exc):
     """True when the failure looks like infrastructure, not content."""
+    if isinstance(exc, recipe_work_budget.WorkLimit):
+        return False
     if isinstance(exc, ServiceError):
         # Upstream refusing us (bot wall) is not transient — a retry hits the same wall.
         if _is_upstream_block(exc):
             return False
+        if exc.status_code in (408, 429):
+            return True
         if exc.status_code and exc.status_code < 500:
             return False
         return True
@@ -7109,6 +7842,19 @@ def _handle_async_saved_recipe_url_task(event, request_id):
     job = _get_saved_recipe_batch_job(job_id)
     if not job or _safe_text(job.get('owner')) != owner:
         raise ServiceError('Saved recipe url job not found.', status_code=404)
+    if job.get('status') == _JOB_STATUS_COMPLETED:
+        return {'ok': True, 'owner': owner, 'job_id': job_id, 'status': _JOB_STATUS_COMPLETED,
+                'count': int(job.get('result_count') or 0), 'already_completed': True}
+    if not _ai_consent.allowed(job.get('ai_consent_actor') or _ai_recipe_owner.get()):
+        try:
+            _jobs_table().update_item(Key={'job_id':job_id},
+                UpdateExpression='SET #s=:failed, #error=:error',
+                ConditionExpression='#s <> :completed',
+                ExpressionAttributeNames={'#s':'status','#error':'error'},
+                ExpressionAttributeValues={':failed':_JOB_STATUS_FAILED,':error':'ai_consent_required',':completed':_JOB_STATUS_COMPLETED})
+        except Exception as exc:
+            if getattr(exc,'response',{}).get('Error',{}).get('Code') != 'ConditionalCheckFailedException': raise
+        return {'ok':False,'job_id':job_id,'error':'ai_consent_required'}
     _update_saved_recipe_batch_job(job_id, status=_JOB_STATUS_RUNNING, started_at=_utc_now_iso(), error=None)
     started = time.time()
     conn = _mysql_conn()
@@ -7122,11 +7868,23 @@ def _handle_async_saved_recipe_url_task(event, request_id):
         if extraction is None:
             # Transient-only retry: a provider 5xx/timeout/throttle gets 2 more goes with
             # backoff; a content 422 raises straight through and waits for a fix + sweep.
-            extraction = _run_with_transient_retry(
-                lambda: _extract_content(url, request_id=request_id),
-                request_id=request_id, label='extract_content')
+            try:
+                extraction = _run_with_transient_retry(
+                    lambda: _extract_content(url, request_id=request_id),
+                    request_id=request_id, label='extract_content')
+            except (recipe_work_budget.WorkLimit, ServiceError) as exc:
+                # Keep the accepted link even when its provider never responds.
+                # No network here: budget expiry must not bypass input validation.
+                normalized_url = _normalize_url(url)
+                platform = _detect_platform(normalized_url, raw_url=url, request_id=request_id)
+                extraction = {'url': normalized_url, 'resolved_url': normalized_url, 'platform': platform,
+                              'title': 'Recipe', 'caption': '', 'content': '',
+                              'source': 'deadline_retained' if isinstance(exc, recipe_work_budget.WorkLimit) else 'source_failed_retained',
+                              'terminal_work_reason': exc.reason if isinstance(exc, recipe_work_budget.WorkLimit) else None}
         result, _ = _save_saved_recipe_record(conn, owner, extraction, request_id=request_id)
         recipe_id = ((result or {}).get('recipe') or {}).get('id')
+        if not _safe_text(recipe_id):
+            raise ServiceError('Recipe persistence was not confirmed. Please try again.', status_code=503)
         entry = {'recipe_id': recipe_id, 'deduped': bool((result or {}).get('deduped'))}
         completed_job = _update_saved_recipe_batch_job(
             job_id,
@@ -7225,7 +7983,7 @@ def _handle_async_saved_recipe_url_task(event, request_id):
         }
 
 
-def _handle_async_saved_recipe_batch_task(event, request_id):
+def _handle_async_saved_recipe_batch_task(event, request_id, context=None):
     owner = _safe_text((event or {}).get('owner'))
     job_id = _safe_text((event or {}).get('job_id'))
     if not owner or not job_id:
@@ -7233,6 +7991,21 @@ def _handle_async_saved_recipe_batch_task(event, request_id):
     job = _get_saved_recipe_batch_job(job_id)
     if not job or _safe_text(job.get('owner')) != owner:
         raise ServiceError('Saved recipe batch job not found.', status_code=404)
+    if job.get('status') == _JOB_STATUS_COMPLETED:
+        return {'ok': True, 'owner': owner, 'job_id': job_id, 'status': _JOB_STATUS_COMPLETED,
+                'count': int(job.get('result_count') or 0), 'already_completed': True}
+    if not _ai_consent.allowed(job.get('ai_consent_actor') or _ai_recipe_owner.get()):
+        try:
+            _jobs_table().update_item(Key={'job_id':job_id},
+                UpdateExpression='SET #s=:failed, #error=:error',
+                ConditionExpression='#s <> :completed',
+                ExpressionAttributeNames={'#s':'status','#error':'error'},
+                ExpressionAttributeValues={':failed':_JOB_STATUS_FAILED,':error':'ai_consent_required',':completed':_JOB_STATUS_COMPLETED})
+        except Exception as exc:
+            if getattr(exc,'response',{}).get('Error',{}).get('Code') != 'ConditionalCheckFailedException': raise
+        return {'ok':False,'job_id':job_id,'error':'ai_consent_required'}
+    if job.get('checkpoint_version') == recipe_batch_checkpoint.VERSION:
+        return recipe_batch_checkpoint.run(SimpleNamespace(**globals()), event, context)
     _update_saved_recipe_batch_job(job_id, status=_JOB_STATUS_RUNNING, started_at=_utc_now_iso(), error=None)
     conn = _mysql_conn()
     try:
@@ -7719,7 +8492,19 @@ def _mint_branch_link(share_id, title, image_url, landing_url):
         return url if isinstance(url, str) and url else None
     except Exception as exc:  # noqa: BLE001 — mint must never break share-create
         try:
-            _log_event(None, 'branch_mint_failed', share_id=str(share_id), error=str(exc)[:200])
+            status = getattr(exc, 'code', None)
+            status = status if type(status) is int else None
+            code = 'provider_unavailable'
+            if status == 403:
+                code = 'provider_forbidden'
+                try:
+                    detail = json.loads(exc.read(4096)).get('error', {}).get('message', '')
+                    if 'do not have access to this link creation via API' in detail:
+                        code = 'branch_api_not_entitled'
+                except Exception:
+                    pass
+            _log_event(None, 'branch_mint_failed', share_id=str(share_id),
+                       error_code=code, http_status=status)
         except Exception:
             pass
         return None
@@ -7768,6 +8553,9 @@ def _create_shared_recipe_link(owner, body, request_id=None):
         return _error(400, 'title is required')
     ingredients = _clean_string_list(payload.get('ingredients') or [])
     instructions = _clean_string_list(payload.get('instructions') or [])
+    if not recipe_content_complete({'ingredients': ingredients, 'instructions': instructions}):
+        return _error(422, 'Add the missing ingredients and steps before sharing this recipe.',
+                      {'code': 'recipe_content_incomplete'})
     notes = _clean_string_list(payload.get('notes') or [])
     image_url = _safe_text(payload.get('image_url')) or None
     meal_category = _safe_text(payload.get('meal_category')) or None
@@ -7806,6 +8594,7 @@ def _create_shared_recipe_link(owner, body, request_id=None):
     # mint fails -> the card falls back to the trepo:// scheme + App Store buttons.
     web_url = _share_web_url(share_id, event)
     branch_url = None
+    branch_stored = False
     if str(os.getenv('SHARE_LINKS_USE_BRANCH', '')).strip().lower() in ('1', 'true', 'yes', 'on'):
         branch_url = _mint_branch_link(share_id, title, image_url, web_url)
     if branch_url:
@@ -7816,13 +8605,19 @@ def _create_shared_recipe_link(owner, body, request_id=None):
                     [branch_url, share_id],
                 )
             conn.commit()
+            branch_stored = True
         except Exception as exc:  # noqa: BLE001 — never fail share-create on this
             _log_event(request_id, 'branch_url_store_failed', share_id=share_id, error=str(exc)[:200])
 
+    link_mode = 'enhanced' if branch_stored else 'web_fallback'
+    _log_event(request_id, 'recipe_share_link_outcome', share_id=share_id,
+               link_mode=link_mode,
+               traffic_class='review' if owner == '8fcb37c1-0927-4c31-856a-5b761efc226c' else 'unclassified')
     return _success({
         'share_id': share_id,
         'app_url': f'trepo://r/{share_id}',
         'web_url': web_url,
+        'link_mode': link_mode,
     }, status=201)
 
 
@@ -7908,6 +8703,16 @@ def _claim_shared_recipe(share_id, owner, request_id=None):
             [share_id, owner],
         )
         prior = cur.fetchone()
+
+    if not recipe_content_complete(row):
+        # A historical empty share remains a snapshot, not a pointer to later
+        # private edits. Do not copy an empty recipe or refresh it from its owner.
+        if prior and prior.get('saved_recipe_id'):
+            existing = _fetch_saved_recipe_by_id(conn, owner, prior['saved_recipe_id'])
+            if existing and recipe_content_complete(existing):
+                return _success({'saved_recipe_id': prior['saved_recipe_id'], 'already_saved': True})
+        return _error(422, 'This shared recipe is missing ingredients or steps. Ask the sender to share the complete recipe.',
+                      {'code': 'recipe_content_incomplete'})
 
     _ensure_saved_recipes_table(conn, owner)
     extraction = _shared_link_claim_extraction(share_id, row)
@@ -8242,15 +9047,31 @@ def _handler_impl(event, context):
     )
     if (event or {}).get('async_task') == _ASYNC_TASK_GENERATE_SAVED_RECIPE_IMAGE:
         return _handle_async_saved_recipe_image_task(event, request_id=request_id)
+    if (event or {}).get('async_task') == 'recover_recipe_checkpoints_v2' and not (event or {}).get('requestContext'):
+        api = SimpleNamespace(**globals())
+        result = recipe_batch_checkpoint.recover(api)
+        result['links'] = recipe_link_jobs.recover(api)
+        return result
+    if (event or {}).get('async_task') == recipe_link_jobs.TASK and not (event or {}).get('requestContext'):
+        return recipe_link_jobs.run(SimpleNamespace(**globals()), _safe_text(event.get('job_id')))
     if (event or {}).get('async_task') == _ASYNC_TASK_PROCESS_SAVED_RECIPE_BATCH:
-        return _handle_async_saved_recipe_batch_task(event, request_id=request_id)
+        return _handle_async_saved_recipe_batch_task(event, request_id=request_id, context=context)
     if (event or {}).get('async_task') == _ASYNC_TASK_PROCESS_SAVED_RECIPE_URL:
         return _handle_async_saved_recipe_url_task(event, request_id=request_id)
     if (event or {}).get('async_task') == _ASYNC_TASK_REPAIR_SAVED_RECIPE:
+        # Adopt already-enqueued revision-bound deliveries into the durable
+        # queue. Legacy unversioned repairs retain their conservative behavior.
+        if event.get('expected_revision') and not event.get('requestContext'):
+            queued = recipe_link_jobs.enqueue(SimpleNamespace(**globals()),
+                _safe_text(event.get('owner')), _safe_text(event.get('recipe_id')),
+                _safe_text(event.get('url')), _safe_text(event.get('expected_revision')),
+                request_id=request_id)
+            return {'queued': queued}
         return _repair_saved_recipe(_safe_text(event.get('owner')),
                                     _safe_text(event.get('recipe_id')),
                                     _safe_text(event.get('url')),
-                                    request_id=request_id)
+                                    request_id=request_id,
+                                    expected_revision=_safe_text(event.get('expected_revision')) or None)
     if (event or {}).get('async_task') == _ASYNC_TASK_REFINE_SAVED_RECIPE_TEXT:
         return _handle_async_saved_recipe_text_task(event, request_id=request_id)
     if (event or {}).get('async_task') == _ASYNC_TASK_PERSONALIZE_WARM:
@@ -8306,6 +9127,13 @@ def _handler_impl(event, context):
         if not owner:
             return _error(400, 'Missing owner parameter')
 
+        admission_query = event.get('queryStringParameters') or {}
+        admission_body = _parse_json_body(event) if http_method == 'POST' else {}
+        if admission_query.get('protocol') == admission.PROTOCOL or admission_body.get('protocol') == admission.PROTOCOL:
+            return admission.handle(SimpleNamespace(**globals()), event, owner, http_method,
+                admission_body, admission_query, request_id)
+
+
         # --- Custom recipe categories (self-contained; owner-scoped tags) ---
         if raw_path.endswith('/categories') and '/saved-recipes/' in raw_path:
             if http_method != 'PUT':
@@ -8329,6 +9157,17 @@ def _handler_impl(event, context):
                 return _delete_recipe_category(owner, category_id, request_id=request_id)
             return _error(405, f'Method {http_method} not allowed')
 
+        if raw_path.endswith('/availability-preview'):
+            if http_method != 'POST':
+                return _error(405, 'Use POST to check ingredient availability.')
+            # This additive endpoint is strict even while older routes observe auth.
+            from quantity_confirmation import require_authenticated_owner, ConfirmationRejected
+            try:
+                require_authenticated_owner(event, owner)
+            except ConfirmationRejected as error:
+                return _error(error.status, error.code)
+            return _preview_recipe_availability(owner, _parse_json_body(event))
+
         if http_method == 'GET' and raw_path.endswith('/personalize'):
             qsp = event.get('queryStringParameters') or {}
             ids_param = qsp.get('ids', '')
@@ -8340,6 +9179,8 @@ def _handler_impl(event, context):
             return _get_saved_recipes(owner, event.get('queryStringParameters') or {}, request_id=request_id)
         if http_method == 'POST':
             body = _parse_json_body(event)
+            if body.get('operation') == 'confirm_recipe_amounts':
+                return _confirm_recipe_amounts(owner, body, event)
             body['_event'] = event
             return _post_saved_recipe(owner, body, request_id=request_id)
         if http_method == 'DELETE':
@@ -8405,8 +9246,7 @@ def handler(event, context):
     except Exception:
         pass
 
-    # Arm the audio time budget for SYNC HTTP requests only. An async_task invocation runs
-    # behind a job with no gateway in front of it and must never be budget-limited.
+    # Keep gateway timing; recipe_work_budget also bounds native async invocations.
     try:
         _mark_sync_request_start(
             fields.get('invocation') == 'http' and not _safe_text((event or {}).get('async_task'))
@@ -8417,7 +9257,8 @@ def handler(event, context):
     outcome = 'exception'
     status_code = None
     try:
-        result = _handler_impl(event, context)
+        with recipe_work_budget.invocation(context, fields.get('invocation') == 'http'):
+            result = _handler_impl(event, context)
         outcome = 'returned'
         if isinstance(result, dict):
             status_code = result.get('statusCode')
@@ -8447,3 +9288,86 @@ def handler(event, context):
             _mark_sync_request_start(False)
         except Exception:
             pass
+
+BUILD_STAMP = "2026-08-02T05:59:36Z sha256:a6ad62e45734106c"
+
+
+def _mark_saved_recipe_text_failed(conn, owner, recipe_id, request_id=None):
+    """Persist one terminal outcome in both stores; never undo ready or deleted data."""
+    table = _saved_recipes_table(owner)
+    try:
+        conn.begin()
+        with conn.cursor() as cur:
+            cur.execute(f"SELECT status FROM `{table}` WHERE _id = %s AND _owner = %s FOR UPDATE",
+                        (recipe_id, owner))
+            row = cur.fetchone()
+            if not row or row.get('status') != 'processing':
+                conn.commit()
+                return False
+            cur.execute(f"UPDATE `{table}` SET status = 'failed' WHERE _id = %s AND _owner = %s AND status = 'processing'",
+                        (recipe_id, owner))
+        _dual_write_saved_recipe_to_shared(conn, owner, recipe_id,
+                                          request_id=request_id, transactional=True)
+        conn.commit()
+        return True
+    except Exception:
+        conn.rollback()
+        raise
+
+
+
+def _availability_summary(availability):
+    summarize = getattr(recipe_inventory_llm, 'availability_summary', None)
+    if summarize:
+        return summarize(availability)
+    return {key: availability.get(key) for key in (
+        'kitchen_version', 'can_make_exact', 'can_make_with_subs',
+        'matched_count', 'missing_count',
+    )}
+
+
+
+def _availability_cache_source(source):
+    versioned = getattr(recipe_inventory_llm, 'inventory_cache_source', None)
+    return versioned(source) if versioned else source
+
+
+
+def _confirm_recipe_amounts(owner, body, event):
+    from quantity_confirmation import confirm_cached_availability, require_authenticated_owner, ConfirmationRejected
+    try:
+        require_authenticated_owner(event, owner)
+        conn = _mysql_conn()
+        availability = confirm_cached_availability(conn, owner, body.get('recipe_source'), body.get('recipe_id'), body,
+                                                   saved_recipe_guard=_saved_recipe_confirmation_guard)
+        return _success({'recipe_id': body.get('recipe_id'), 'recipe_source': body.get('recipe_source'),
+                         'availability': _availability_summary(availability),
+                         'ingredient_matches': availability['ingredient_matches']})
+    except ConfirmationRejected as error:
+        return _error(error.status, error.code)
+
+import ai_consent_guard as _ai_consent
+from contextvars import ContextVar as _AIContextVar
+_ai_recipe_owner = _ai_consent.actor_context
+_recipe_handler_before_consent = handler
+def handler(event, context):
+    try:
+        owner = _ai_consent.request_actor(event)
+    except _ai_consent.AIConsentRequired:
+        return _ai_consent.response()
+    except Exception:
+        owner = _ai_consent.UNVERIFIED_ACTOR
+    if event.get('async_task') and not event.get('requestContext'):
+        job = _get_saved_recipe_batch_job(event['job_id']) if event.get('job_id') else None
+        owner = job.get('ai_consent_actor') if job is not None else event.get('ai_consent_actor')
+    token = _ai_recipe_owner.set(owner)
+    try:
+        method = str((event.get('requestContext', {}).get('http', {}) or {}).get('method', '')).upper()
+        if owner and not event.get('async_task') and method not in ('GET', 'HEAD', 'OPTIONS', 'DELETE', 'PUT') and _parse_json_body(event).get('operation') != 'confirm_recipe_amounts' and '/recipe-categories' not in str(event.get('rawPath', '')) and not str(event.get('rawPath','')).endswith('/availability-preview') and _match_share_route(str(event.get('rawPath', '')))[0] not in ('create','claim'):
+            _ai_consent.require(owner)
+        return _recipe_handler_before_consent(event, context)
+    except _ai_consent.AIConsentRequired:
+        return _ai_consent.response()
+    finally:
+        _ai_recipe_owner.reset(token)
+

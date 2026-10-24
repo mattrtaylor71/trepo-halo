@@ -927,6 +927,12 @@ function logHouseholdWriteTargets(label, context, memberIds, details = {}) {
 }
 
 async function triggerKitchenDependentGeneration(context, options = {}) {
+  const consent=(await import('/var/task/ai_consent_guard.cjs')).default;
+  const actor=consent.currentActor();
+  // Optional refresh after a manual edit: missing/withdrawn provenance must not
+  // fall back to another household member's permission.
+  try { if (!await consent.allowed(actor)) return; }
+  catch { return; }
   const env = options?.env || process.env;
   const ownerIds = getTableHouseholdMemberIds(context);
   if (ownerIds.length === 0) {
@@ -963,7 +969,7 @@ async function triggerKitchenDependentGeneration(context, options = {}) {
       await getLambdaClient(env).send(new InvokeCommand({
         FunctionName: functionName,
         InvocationType: "Event",
-        Payload: Buffer.from(JSON.stringify({ owner: ownerId }))
+        Payload: Buffer.from(JSON.stringify({ owner: ownerId, user_id: actor }))
       }));
     } catch (error) {
       console.warn(`[${label}] generator invoke failed for ${ownerId}:`, error?.message || error);
@@ -6891,6 +6897,9 @@ export async function getMealPlan(context, options = {}, executionOptions = {}) 
 }
 
 export async function refreshMealPlan(context, args = {}, options = {}) {
+  const consent=(await import('/var/task/ai_consent_guard.cjs')).default;
+  const actor=consent.currentActor();
+  await consent.requireConsent(actor);
   const ownerId = resolveTableOwnerId(context);
   const memberIds = getTableHouseholdMemberIds(context);
   logHouseholdWriteTargets("meal plan refresh propagation", context, memberIds, {
@@ -6904,7 +6913,7 @@ export async function refreshMealPlan(context, args = {}, options = {}) {
     payload: await fetchHouseholdApiJson(`/meal-plan/${encodeURIComponent(memberId)}`, {
       ...options,
       method: "POST",
-      body: args.focus ? { focus: args.focus } : {}
+      body: { ...(args.focus ? { focus: args.focus } : {}), user_id: actor }
     })
   })));
   const primary = results.find((result) => result.ownerId === ownerId) || results[0] || { ownerId, payload: {} };

@@ -1,7 +1,7 @@
 # trepo_auth.py — SEC-001 Phase B: shared token verification + owner authorization.
 # Observe mode (ENFORCE_AUTH != 'true'): never blocks; logs would-deny decisions.
 # Enforce mode: returns a 403 response dict when the token does not authorize `owner`.
-import os, json, hmac, hashlib, base64, time
+import os, json, hmac, hashlib, base64, time, math
 
 _SECRET = os.getenv('TOKEN_SIGNING_SECRET', '')
 _ENFORCE = os.getenv('ENFORCE_AUTH', 'false').strip().lower() == 'true'
@@ -24,13 +24,20 @@ def _verify_jwt(token):
         if not hmac.compare_digest(expected, _b64url_decode(sig_b64)):
             return None
         header = json.loads(_b64url_decode(header_b64))
-        if header.get('alg') != 'HS256':
+        if not isinstance(header, dict) or header.get('alg') != 'HS256':
             return None
         claims = json.loads(_b64url_decode(payload_b64))
-        if claims.get('iss') != _ISSUER:
+        if not isinstance(claims, dict) or claims.get('iss') != _ISSUER:
             return None
         exp = claims.get('exp')
-        if exp is not None and time.time() > float(exp) + 60:
+        if isinstance(exp, bool) or not isinstance(exp, (int, float)) or not math.isfinite(exp):
+            return None
+        if time.time() > exp + 60:
+            return None
+        nbf = claims.get('nbf')
+        if nbf is not None and (isinstance(nbf, bool) or not isinstance(nbf, (int, float)) or not math.isfinite(nbf) or nbf > time.time() + 60):
+            return None
+        if not any(isinstance(claims.get(k), str) and claims[k] for k in ('owner_id', 'user_id')):
             return None
         return claims
     except Exception:
@@ -38,7 +45,8 @@ def _verify_jwt(token):
 
 def _parse_legacy(token):
     try:
-        return json.loads(base64.b64decode(token).decode('utf-8'))
+        claims = json.loads(base64.b64decode(token, validate=True).decode('utf-8'))
+        return claims if isinstance(claims, dict) else None
     except Exception:
         return None
 
@@ -70,7 +78,7 @@ def require_owner(event, owner=None):
         if owner is None:
             owner = (event.get('pathParameters') or {}).get('owner')
         if not owner:
-            return None
+            return _forbidden(owner, 'missing_owner') if _ENFORCE else None
         auth = _get_header(event, 'authorization') or ''
         token = auth[7:].strip() if auth.lower().startswith('bearer ') else ''
         auth_kind = 'none'
@@ -85,8 +93,8 @@ def require_owner(event, owner=None):
                     auth_kind = 'legacy'
             if claims:
                 for k in ('owner_id', 'user_id'):
-                    if claims.get(k):
-                        authorized_ids.add(str(claims[k]))
+                    if isinstance(claims.get(k), str) and claims[k]:
+                        authorized_ids.add(claims[k])
         match = str(owner) in authorized_ids
         decision = 'allow' if (match and auth_kind == 'jwt') else 'deny'
         print(json.dumps({'evt': 'authz', 'owner': str(owner), 'auth_kind': auth_kind,
@@ -96,7 +104,7 @@ def require_owner(event, owner=None):
         return None
     except Exception as e:
         try:
-            print(json.dumps({'evt': 'authz_error', 'error': str(e)}))
+            print(json.dumps({'evt': 'authz_error', 'error': type(e).__name__}))
         except Exception:
             pass
-        return None
+        return _forbidden(owner, 'invalid_authorization') if _ENFORCE else None
