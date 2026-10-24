@@ -143,3 +143,22 @@ def test_retry_retains_original_verified_consent_actor(db,runtime):
     invoke(runtime)
     payload=json.loads(get(db,'meal_plan_generation_jobs')['payload'])
     assert payload['user_id']=='requesting-member' and payload['owner']=='a'
+
+
+def test_repair_receives_reason_and_eligible_foods_without_dropping_vegetables():
+    import copy
+    spec=importlib.util.spec_from_file_location('repair_safety',ROOT.parent/'family_brain/recipe_safety.py')
+    safety=importlib.util.module_from_spec(spec);spec.loader.exec_module(safety)
+    _recipe_violates=safety._recipe_violates
+    tree=ast.parse((ROOT/'app.py').read_text())
+    fn=next(n for n in tree.body if isinstance(n,ast.FunctionDef) and n.name=='_slot_repair_input')
+    scope={'_recipe_violates':_recipe_violates}
+    exec(compile(ast.Module(body=[fn],type_ignores=[]),str(ROOT/'app.py'),'exec'),scope)
+    prefs={'diets':['pescatarian','high-protein'],'allergies':['peanut'],'health':[]}
+    before=copy.deepcopy(prefs)
+    kitchen=[{'name':name} for name in ['Chicken breast','Potatoes','Salmon','Peanut butter']]
+    recipes=[{'title':'Chicken dinner','ingredients':['Chicken breast'],'steps':['Cook chicken.']}]
+    result=scope['_slot_repair_input'](kitchen,'fresh',prefs,recipes,[0])
+    assert [item['name'] for item in result['kitchen']]==['Potatoes','Salmon']
+    assert result['rejected'][0]['rejection_reason']=='diet:pescatarian=chicken'
+    assert result['rejected'][0]['index']==0 and result['restrictions']==prefs==before

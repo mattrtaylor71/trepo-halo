@@ -12,3 +12,18 @@ def test_reviewed_variant_preserves_distinct_guard_and_applies_only_repair(monke
 def test_reviewed_variant_overlap_fails_instead_of_overwriting(monkeypatch):
     variant=b'quantity=foreign\n';monkeypatch.setattr(b,'REVIEWED_VARIANTS',{'function':{'module':hashlib.sha256(variant).hexdigest()}})
     with pytest.raises(ValueError,match='variant_merge_conflict'):b.reconcile('function','module',variant,b'quantity=base\n',b'quantity=repair\n')
+
+def test_smoke_extraction_keeps_decoder_executable_and_rejects_escape(tmp_path):
+    import io,zipfile
+    spec=importlib.util.spec_from_file_location('release_smoke',Path(__file__).with_name('smoke.py'))
+    smoke=importlib.util.module_from_spec(spec);spec.loader.exec_module(smoke)
+    data=io.BytesIO()
+    with zipfile.ZipFile(data,'w') as z:
+        info=zipfile.ZipInfo('bin/ffmpeg');info.external_attr=0o100755 << 16
+        z.writestr(info,b'fixture executable')
+    with zipfile.ZipFile(data) as z:smoke.extract_with_modes(z,tmp_path)
+    assert (tmp_path/'bin/ffmpeg').stat().st_mode & 0o777 == 0o755
+    data=io.BytesIO()
+    with zipfile.ZipFile(data,'w') as z:z.writestr('../escape',b'no')
+    with zipfile.ZipFile(data) as z:
+        with pytest.raises(ValueError,match='unsafe_zip_path'):smoke.extract_with_modes(z,tmp_path)

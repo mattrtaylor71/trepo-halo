@@ -4,6 +4,17 @@ Fake environment values only; no invocation of an application handler.
 import argparse,hashlib,json,subprocess,zipfile
 from pathlib import Path
 
+def extract_with_modes(archive, root):
+    if any(not (root/n).resolve().is_relative_to(root.resolve()) for n in archive.namelist()):
+        raise ValueError('unsafe_zip_path')
+    archive.extractall(root)
+    # ZipFile.extractall drops POSIX executable bits. Match Lambda extraction so
+    # bundled media tools are actually exercised instead of failing EACCES.
+    for member in archive.infolist():
+        mode = (member.external_attr >> 16) & 0o777
+        if mode and not member.is_dir():
+            (root/member.filename).chmod(mode)
+
 def main():
     ap=argparse.ArgumentParser();ap.add_argument('manifest');ap.add_argument('--only',nargs='*');args=ap.parse_args()
     manifest=Path(args.manifest);data=json.loads(manifest.read_text());output=manifest.parent/'startup-results.json'
@@ -17,8 +28,7 @@ def main():
         if hashlib.sha256(package.read_bytes()).hexdigest()!=job['package_sha256']:raise ValueError('package_drift')
         root=manifest.parent/'smoke'/job['function'];root.mkdir(parents=True,exist_ok=True)
         with zipfile.ZipFile(package) as z:
-            if any(not (root/n).resolve().is_relative_to(root.resolve()) for n in z.namelist()):raise ValueError('unsafe_zip_path')
-            z.extractall(root)
+            extract_with_modes(z,root)
         module,member=job['handler'].rsplit('.',1)
         runtime=job['runtime'];python=runtime.startswith('python')
         image='public.ecr.aws/lambda/'+('python:'+runtime[6:] if python else 'nodejs:'+runtime.removeprefix('nodejs').removesuffix('.x'))
@@ -26,6 +36,8 @@ def main():
             script=f"import importlib; m=importlib.import_module({module!r}); assert callable(getattr(m,{member!r})); print('handler_import_ok')"
             imports=[c['target'][:-3].replace('/','.') for c in job['changes'] if c['target'].endswith('.py')]
             script+=f'; [importlib.import_module(n) for n in {imports!r}]; print("changed_modules_import_ok")'
+            if (root/'bin'/'ffmpeg').exists():
+                script+='; import subprocess; subprocess.run(["/var/task/bin/ffmpeg","-version"],check=True,stdout=subprocess.DEVNULL,timeout=10); print("media_decoder_executable_ok")'
             command=['python','-c',script]
         else:
             matches=[str(p.relative_to(root)) for p in root.glob(module+'.*') if p.suffix in {'.js','.mjs','.cjs'}]
