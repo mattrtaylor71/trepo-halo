@@ -1,3 +1,11 @@
+import { assistantDeviceID, recordDirectVoice } from "./lib/assistant-activity.mjs";
+import {preserveCapturedAudio} from "./lib/captured-audio.mjs";
+import {historySessionRecap} from './lib/history-client.mjs';
+import {prepareStream as prepareAutoStream,isCallback as isAutoCallback} from './lib/ios-auto-reconnect.mjs';
+import { enabled as reconnectEnabled, isReconnectCallback, reconnectCallback, restoreStreamAuthentication } from './lib/ios-reconnect.mjs';
+import { inputIdentity, verifiedActor, claimOperation, finishOperation, markOperationUnknown, stoppedBody } from './lib/operation-recovery.mjs';
+import { resolvedOperationScope, recoverRequest } from './lib/operation-bridge.mjs';
+import {prepareBrainSession,validateBrain} from './lib/family-brain.mjs';
 import { formatRecipeResponse } from "./lib/recipe-response.mjs";
 /**
  * Streaming voice assistant handler for iOS app.
@@ -81,10 +89,10 @@ function decodeJsonRequest(event) {
   const sessionId = bodySessionId || headerSessionId;
 
   if (transcript) {
-    return { transcript, requestMode: "json_transcript", sessionId: sessionId || null, responseSurface: normalizeResponseSurface(getHeader(event?.headers || {}, "x-client-surface")) };
+    return { transcript, requestMode: "json_transcript", requestMeta: payload, sessionId: sessionId || null, responseSurface: normalizeResponseSurface(getHeader(event?.headers || {}, "x-client-surface")) };
   }
   if (audioBase64) {
-    return { audioBuffer: Buffer.from(audioBase64, "base64"), requestMode: "json_audio_base64", sessionId: sessionId || null, responseSurface: normalizeResponseSurface(getHeader(event?.headers || {}, "x-client-surface")) };
+    return { audioBuffer: Buffer.from(audioBase64, "base64"), requestMode: "json_audio_base64", requestMeta: payload, sessionId: sessionId || null, responseSurface: normalizeResponseSurface(getHeader(event?.headers || {}, "x-client-surface")) };
   }
   const error = new Error("JSON requests must include transcript, message, text, or audio_base64.");
   error.statusCode = 400;
@@ -153,6 +161,7 @@ function applyEntityCapitalization(text, toolEvents = []) {
 
 // Session persistence helpers (same as index.js)
 const READ_ONLY_TOOL_NAMES = new Set([
+  "lookup_household_history",
   "get_shopping_list", "list_store_tabs", "get_kitchen_overview",
   "search_kitchen_item", "get_recent_dishes", "get_dish_detail"
 ]);
@@ -225,7 +234,7 @@ function buildSessionPersistenceMessages({ transcript, resultText, responseType,
     { role: "assistant", content: resultText || "Okay.", kind: "conversation" }
   ];
   const recap = buildHiddenSessionRecap({ transcript, resultText, responseType, toolEvents });
-  if (recap) messages.push({ role: "system", content: recap, kind: "recap" });
+  if (recap) messages.push({ role: "system", content: [recap,historySessionRecap(toolEvents)].filter(Boolean).join('\n'), kind: "recap" });
   return messages;
 }
 
@@ -242,6 +251,22 @@ async function streamHandler(event, responseStream, context) {
   // post-stream cleanup hold the invocation open to the 150s timeout after the
   // handler logic is done — return as soon as the handler promise resolves.
   if (context) context.callbackWaitsForEmptyEventLoop = false;
+  if (isReconnectCallback(event)) {
+    const reply=await reconnectCallback(event,process.env);
+    responseStream=awslambda.HttpResponseStream.from(responseStream,{statusCode:reply.statusCode,headers:reply.headers});
+    responseStream.write(reply.body);responseStream.end();return;
+  }
+  let reconnectError;
+  try { if (!isAutoCallback(event)) event=await restoreStreamAuthentication(event,process.env); }
+  catch (error) { reconnectError=error; }
+  const auto = await prepareAutoStream(event,process.env);
+  if (auto.response) {
+    const reply=auto.response;
+    responseStream=awslambda.HttpResponseStream.from(responseStream,{statusCode:reply.statusCode,headers:reply.headers});
+    responseStream.write(reply.body);responseStream.end();return;
+  }
+  event=auto.event;
+  if (getHeader(event.headers,'authorization')) reconnectError=null;
   const startedAt = Date.now();
   const lambdaDeadline = context?.getRemainingTimeInMillis
     ? Date.now() + context.getRemainingTimeInMillis() - 5000
@@ -254,6 +279,7 @@ async function streamHandler(event, responseStream, context) {
   responseStream = awslambda.HttpResponseStream.from(responseStream, {
     statusCode: 200,
     headers: {
+      ...auto.headers,
       "Content-Type": "application/x-ndjson",
       "Cache-Control": "no-store",
       "Access-Control-Allow-Origin": "*",
@@ -266,16 +292,46 @@ async function streamHandler(event, responseStream, context) {
   let sessionMessages = [];
   let memoryUsed = false;
   let requestClaim = null;
+  let modernIdentity = null, modernProof = null, modernScope = null, modernClaim = null;
 
   try {
     requestInput = decodeAssistantInput(event);
+    modernIdentity = inputIdentity(event,requestInput);
+    if (reconnectError) throw reconnectError;
+    if (modernIdentity) modernProof = await verifiedActor(event,process.env);
     transcript = requestInput.transcript || null;
   } catch (error) {
+    if (error.code === 'sign_in_required' && modernIdentity && reconnectEnabled(process.env) &&
+        getHeader(headers,'x-device-id') === 'ios-app' && !getHeader(headers,'authorization')) {
+      writeLine(responseStream,{type:'text_delta',delta:'Tap “Check result” once to reconnect Thyme, then send a new message. Check your items before repeating an earlier change.'});
+    }
     writeLine(responseStream, { type: "error", message: error.message || "Invalid request" });
     responseStream.end();
     return;
   }
 
+  try {
+    await preserveCapturedAudio(requestInput.audioBuffer, process.env, {owner_id:ownerId,device_id:deviceId,session_id:requestInput?.sessionId,
+      response_surface:requestInput?.responseSurface,sample_rate:requestInput?.audioSampleRate,
+      audio_format:requestInput?.audioFormat,request_id:context?.awsRequestId});
+  } catch (error) {
+    writeLine(responseStream, {type:"error",code:"audio_archive_unavailable",message:error.message});
+    responseStream.end();
+    return;
+  }
+
+  const consent = (await import('/var/task/ai_consent_guard.cjs')).default;
+  let consentActor;
+  try {
+    const signedActor = modernProof?.actor || (getHeader(headers,'authorization') ? await consent.requestActor(event) : null);
+    consentActor = signedActor || (await lookupUserContextByOwnerId(ownerId,{env:process.env})).userId;
+    await consent.requireConsent(consentActor);
+  } catch (error) {
+    writeLine(responseStream, {type:'error',code:error.code === 'ai_consent_required' ? error.code : 'ai_consent_unavailable',
+      message:'Open Trepo > Profile > AI privacy to review AI processing.'});
+    responseStream.end(); return;
+  }
+  return consent.actorContext.run(consentActor, async()=>{
   // Transcribe audio if needed
   if (!transcript && requestInput.audioBuffer) {
     try {
@@ -303,14 +359,35 @@ async function streamHandler(event, responseStream, context) {
   }
 
   // Resolve user context
+  if(String(ownerId).startsWith('family-brain:'))throw new Error('Invalid owner namespace');
   let userContext;
   try {
-    userContext = await lookupUserContextByOwnerId(ownerId, { env: process.env });
+    userContext = await lookupUserContextByOwnerId(modernProof?.actor || ownerId, { env: process.env });
   } catch {
     writeLine(responseStream, { type: "error", message: "I couldn't load this household right now." });
     responseStream.end();
     return;
   }
+
+  const brainSession=await prepareBrainSession({authorization:getHeader(headers,'authorization'),
+    ticket:event.familyBrainTicket,owner:ownerId,surface:requestInput?.responseSurface},process.env);
+  const sessionOwnerId=brainSession?.sessionOwner || userContext.ownerId;
+  const requestOwnerId=brainSession?.requestOwner || sessionOwnerId;
+  if (modernIdentity) {
+    try {
+      modernScope = resolvedOperationScope(modernIdentity,modernProof,userContext,brainSession,event,process.env);
+      modernClaim = await claimOperation(modernScope);
+      if (!modernClaim.claimed) {
+        const replay = modernClaim.body || stoppedBody(modernScope,modernClaim.status);
+        writeLine(responseStream,{type:'done',final_text:replay.text,app_output:replay.app_output || null,operation:replay.operation});
+        responseStream.end();return;
+      }
+    } catch(error) {
+      writeLine(responseStream,{type:'error',message:'Your request could not be started safely. Please try again.',code:error.code || 'recovery_unavailable'});
+      responseStream.end();return;
+    }
+  }
+
 
   // Emit meta event immediately — client knows request is acknowledged
   writeLine(responseStream, { type: "meta", transcript, session_id: requestInput?.sessionId || null });
@@ -319,10 +396,10 @@ async function streamHandler(event, responseStream, context) {
   if (requestInput?.sessionId) {
     try {
       sessionMessages = await loadRecentSessionMessages(
-        userContext.ownerId,
+        sessionOwnerId,
         requestInput.sessionId,
         getSessionMessageLimit(process.env),
-        process.env
+        process.env, {actorId:userContext.userId || ownerId}
       );
       memoryUsed = sessionMessages.length > 0;
     } catch {
@@ -332,6 +409,7 @@ async function streamHandler(event, responseStream, context) {
 
   // Request dedup (same as sync handler)
   const shouldDedup = requestInput?.responseSurface === "app"
+    && !modernIdentity
     && requestInput?.requestMode === "json_transcript"
     && Boolean(requestInput?.sessionId)
     && Boolean(transcript);
@@ -340,7 +418,7 @@ async function streamHandler(event, responseStream, context) {
     try {
       requestClaim = await claimRecentSessionRequest(
         {
-          householdOwnerId: userContext.ownerId,
+          householdOwnerId: requestOwnerId,
           requestOwnerId: ownerId,
           tableOwnerId: userContext.tableOwnerId,
           userId: userContext.userId
@@ -352,6 +430,10 @@ async function streamHandler(event, responseStream, context) {
 
       if (!requestClaim?.claimed) {
         if (requestClaim?.existing?.request_status === "completed" && requestClaim?.existing?.response_body) {
+          if(brainSession && !await validateBrain(brainSession.brain,brainSession.credentials,process.env)) {
+            writeLine(responseStream,{type:'error',message:'Your food preferences changed. Please ask again.'});
+            responseStream.end();return;
+          }
           // Serve cached response as a single done event
           const cached = requestClaim.existing.response_body;
           const text = cached?.app_output?.message?.text || cached?.text || "Done.";
@@ -373,13 +455,15 @@ async function streamHandler(event, responseStream, context) {
   // Run the streaming assistant
   let result;
   try {
+    userContext = { ...userContext, assistantDeviceId: assistantDeviceID(deviceId, requestInput?.responseSurface) };
     const generator = runDeviceAssistantStreaming({
       transcript,
       userContext,
       env: process.env,
       sessionMessages,
       responseSurface: requestInput?.responseSurface || "halo",
-      lambdaDeadline
+      lambdaDeadline,
+      kitchenRequest:{sessionId:requestInput?.sessionId,operationId:getHeader(headers,"x-operation-id") || requestClaim?.claimToken || context?.awsRequestId,authorization:getHeader(headers,"authorization"),brainTicket:event.familyBrainTicket || null,brainOwner:ownerId,preparedBrain:brainSession}
     });
 
     // Forward events from the generator to the response stream
@@ -395,9 +479,10 @@ async function streamHandler(event, responseStream, context) {
     } while (!iterResult.done);
 
   } catch (error) {
+    await markOperationUnknown(modernScope,modernClaim);
     console.error("[ERROR] streaming assistant failed:", error);
     if (requestClaim?.claimed && requestClaim?.entryId) {
-      try { await clearRecentSessionRequest(userContext.ownerId, requestClaim.entryId, process.env); } catch {}
+      try { await clearRecentSessionRequest(requestOwnerId, requestClaim.entryId, process.env); } catch {}
     }
     writeLine(responseStream, { type: "error", message: "I heard you, but I couldn't finish that request." });
     responseStream.end();
@@ -406,6 +491,8 @@ async function streamHandler(event, responseStream, context) {
 
   // Post-stream: entity capitalization, app_output, session persistence
   const toolEvents = result?.toolEvents || [];
+  await recordDirectVoice({env:process.env, owner:ownerId, device:deviceId, surface:requestInput.responseSurface,
+    operation:getHeader(headers,"x-operation-id") || context?.awsRequestId, transcript, result, events:toolEvents});
   const originalResponseText = applyEntityCapitalization(result?.text || "Okay.", toolEvents);
     const responseText = requestInput?.responseSurface === "app"
       ? (formatRecipeResponse(originalResponseText) || originalResponseText) : originalResponseText;
@@ -425,9 +512,23 @@ async function streamHandler(event, responseStream, context) {
     responseSurface: requestInput?.responseSurface || "halo"
   });
 
+  // Persist before the terminal event: a dead connection can still retrieve the answer.
+  let modernReceipt;
+  if (modernScope && modernClaim?.claimed) {
+    try {
+      modernReceipt=await finishOperation(modernScope,modernClaim,{text:responseText,transcript,app_output:appOutput,
+        outcome:result?.outcome || null,quick_items:result?.quickItems || []});
+    } catch {
+      await markOperationUnknown(modernScope,modernClaim);
+      modernReceipt={operation:{id:modernScope.id,status:'receipt_unavailable'}};
+    }
+  }
   // Write the final done event with the complete app_output
   writeLine(responseStream, {
     type: "done",
+    ...(modernReceipt ? {operation:modernReceipt.operation} : {}),
+    outcome: result?.outcome || null,
+    operation_id:getHeader(headers,"x-operation-id") || requestClaim?.claimToken || context?.awsRequestId,
     final_text: responseText,
     app_output: appOutput,
     quick_items: result?.quickItems || [],
@@ -443,7 +544,7 @@ async function streamHandler(event, responseStream, context) {
     postStreamTasks.push(
       appendSessionMessages(
         {
-          householdOwnerId: userContext.ownerId,
+          householdOwnerId: sessionOwnerId,
           requestOwnerId: ownerId,
           tableOwnerId: userContext.tableOwnerId,
           userId: userContext.userId
@@ -468,7 +569,7 @@ async function streamHandler(event, responseStream, context) {
       app_output: appOutput
     };
     postStreamTasks.push(
-      completeRecentSessionRequest(userContext.ownerId, requestClaim.entryId, responseBody, process.env)
+      completeRecentSessionRequest(requestOwnerId, requestClaim.entryId, responseBody, process.env)
         .catch((e) => console.warn("[WARN] dedup complete failed:", e?.message || e))
     );
   }
@@ -488,6 +589,7 @@ async function streamHandler(event, responseStream, context) {
     new Promise((resolve) => { postStreamTimer = setTimeout(resolve, 8000); }),
   ]);
   clearTimeout(postStreamTimer);
+  });
 }
 
 export const handler = awslambda.streamifyResponse(streamHandler);

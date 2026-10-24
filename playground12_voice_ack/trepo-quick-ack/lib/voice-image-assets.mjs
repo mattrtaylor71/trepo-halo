@@ -1,3 +1,4 @@
+import __trepoAIConsent from '/var/task/ai_consent_guard.cjs';
 import OpenAI from "openai";
 import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 
@@ -47,9 +48,9 @@ function getOpenAIClient(env = process.env) {
     if (!env.OPENAI_API_KEY) {
       throw new Error("OPENAI_API_KEY environment variable is required");
     }
-    openaiClient = new OpenAI({
+    openaiClient = new OpenAI(__trepoAIConsent.providerOptions({
       apiKey: env.OPENAI_API_KEY
-    });
+    }));
   }
   return openaiClient;
 }

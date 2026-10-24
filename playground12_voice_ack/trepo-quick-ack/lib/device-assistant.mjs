@@ -1,3 +1,4 @@
+import __trepoAIConsent from '/var/task/ai_consent_guard.cjs';
 import {refreshBrainTurn, completedActionMessage, toolAttemptKey, publishBrainResult} from './brain-turn.mjs';
 import {leftoverFirstToolChoice} from "./leftover-check-in-intent.mjs";
 import {candidateOwner,loadBrain,validateBrain,foodMemoryTool,updateFoodMemory} from './family-brain.mjs';
@@ -201,7 +202,7 @@ async function openAiRequestPrimary(path, { env, method = "POST", headers = {}, 
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
     try {
-      const response = await fetch(`${OPENAI_API_BASE}${path}`, {
+      const response = await __trepoAIConsent.providerFetch(fetch)(`${OPENAI_API_BASE}${path}`, {
         method,
         headers,
         body,

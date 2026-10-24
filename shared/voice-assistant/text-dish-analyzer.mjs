@@ -1,3 +1,4 @@
+import __trepoAIConsent from '/var/task/ai_consent_guard.cjs';
 const OPENAI_API_BASE = "https://api.openai.com/v1";
 
 const ANALYZER_SCHEMA = {
@@ -232,7 +233,7 @@ async function callResponsesApi(requestBody, env) {
     throw new Error("OPENAI_API_KEY is required for dish analysis.");
   }
 
-  const response = await fetch(`${OPENAI_API_BASE}/responses`, {
+  const response = await __trepoAIConsent.providerFetch(fetch)(`${OPENAI_API_BASE}/responses`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${env.OPENAI_API_KEY}`,

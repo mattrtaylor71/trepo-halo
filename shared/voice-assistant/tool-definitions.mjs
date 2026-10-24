@@ -308,11 +308,12 @@ const TOOL_DEFINITIONS = [
   {
     type: "function",
     name: "update_item_details",
-    description: "Update kitchen item details when a user changes multiple properties at once or uses a detail change that does not fit a narrower kitchen tool, such as setting unopened or sealed state.",
+    description: "Correct a kitchen item's name or other explicitly requested details. item_name identifies the existing item; new_name is its replacement name. For a name correction, send only the target and new_name. Preserve quantity, brand, opened state and location unless the user explicitly changes them.",
     parameters: {
       type: "object",
       properties: {
         item_name: { type: "string", description: "The kitchen item to update." },
+        new_name: { type: "string", description: "The exact replacement name explicitly requested by the user. Do not use this to identify the existing item." },
         item_id: { type: "string", description: "Optional exact kitchen row id when resolving a previously ambiguous item." },
         selection_hint: { type: "string", description: "Optional disambiguation hint such as most_recent, oldest, or other." },
         remaining_quantity: { type: "string", description: "Freeform quantity such as 'half full' or '2 eggs left'." },

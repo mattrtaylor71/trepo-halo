@@ -1,3 +1,4 @@
+import {HISTORY_TOOL} from '../../playground12_voice_ack/trepo-quick-ack/lib/history-client.mjs';
 import Ajv from "ajv";
 import {proposalReadArgs,proposalSnapshot,pageData} from "./prepare-actions.mjs";
 import { READ_TOOLS } from "./capabilities.mjs";
@@ -15,6 +16,7 @@ const str = { type: "string" };
 export async function toolDefinitions(gateway) {
   return [
     ...CONVERSATION_TOOLS,
+    ...(gateway.env?.HOUSEHOLD_BRAIN_V2==='1'?[{type:'function',...HISTORY_TOOL.function}]:[]),
     {
       type: "function",
       name: "read_trepo",
@@ -136,7 +138,7 @@ export class ToolGateway {
         .map((t) => [t.name, ajv.compile(t.parameters)]),
     );
   }
-  async call({ actor, session, action }) {
+  async call({ actor, session, action, memoryFence=null }) {
     const validator = this.validators.get(action.name);
     if (!validator || !validator(action.arguments))
       return {
@@ -154,11 +156,12 @@ export class ToolGateway {
           "A tool call changed during recovery.",
           409,
         );
+      if (action.name==='lookup_household_history') return this.perform(actor,session,action,memoryFence);
       return previous.result;
     }
     let result;
     try {
-      result = await this.perform(actor, session, action);
+      result = await this.perform(actor, session, action,memoryFence);
     } catch (e) {
       if (!(e instanceof Fault)) throw e;
       result = { ok: false, error: e.code, message: e.message };
@@ -173,10 +176,11 @@ export class ToolGateway {
     });
     return result;
   }
-  async perform(a, s, call) {
+  async perform(a, s, call,memoryFence=null) {
     const args = structuredClone(call.arguments),
       pk = scope(a),
       tool = call.name;
+    if (tool==='lookup_household_history') return memoryFence ? this.gateway.history(a,args,memoryFence) : {ok:false,error:'history_unavailable',message:'Historical records are unavailable. Do not guess.'};
     if (CONVERSATION_TOOLS.some((t) => t.name === tool)) return conversationTool(this.store, a, s, call);
     if ((tool === "create_recipe" || tool === "edit_recipe" || tool.startsWith("request_")) &&
       (await readConversation(this.store, a, s.id)).pending_question?.requestId === s.activeRequest)

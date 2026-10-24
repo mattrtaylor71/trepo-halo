@@ -10,7 +10,8 @@ export class AgentProvider {
     this.base = base;
   }
   async request(path, body, idem) {
-    const r = await this.fetcher(this.base + path, {
+    const consent = (await import('/var/task/ai_consent_guard.cjs')).default;
+    const r = await consent.providerFetch(this.fetcher, true)(this.base + path, {
       method: body === undefined ? "GET" : "POST",
       headers: {
         Authorization: `Bearer ${this.apiKey}`,

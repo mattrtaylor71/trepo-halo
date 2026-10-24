@@ -1,3 +1,4 @@
+import { assistantActions, assistantDeviceID, recordDirectVoice } from "./lib/assistant-activity.mjs";
 import { formatRecipeResponse } from "./lib/recipe-response.mjs";
 import { buildAppOutput } from "./lib/app-response.mjs";
 import { dispatchVoiceAssetJobs } from "./lib/voice-asset-dispatcher.mjs";
@@ -547,6 +548,20 @@ export async function handler(event, context) {
   let toolTrace = [];
   let toolEvents = [];
 
+  const consent = (await import('/var/task/ai_consent_guard.cjs')).default;
+  let consentActor;
+  try {
+    const signedActor = (getHeader(headers,'authorization') ? await consent.requestActor(event) : null);
+    consentActor = signedActor || (event.aiConsentDelivery
+      ? event.aiConsentDelivery.actor
+      : (await lookupUserContextByOwnerId(ownerId,{env:process.env})).userId);
+    await consent.requireConsent(consentActor);
+  } catch (error) {
+    return jsonResponse(error.code === 'ai_consent_required' ? 428 : 503,
+      {error:error.code === 'ai_consent_required' ? error.code : 'ai_consent_unavailable',
+       text:'Open Trepo > Profile > AI privacy to review AI processing.'});
+  }
+  return consent.actorContext.run(consentActor, async()=>{
   if (!transcript) {
     try {
       transcript = await transcribeAudio(audioBuffer, process.env, {
@@ -716,7 +731,7 @@ export async function handler(event, context) {
         userContext.ownerId,
         requestInput.sessionId,
         getSessionMessageLimit(process.env),
-        process.env
+        process.env, {actorId:userContext.userId || ownerId}
       );
       memoryUsed = sessionMessages.length > 0;
       console.log("[DEBUG] loaded session history:", JSON.stringify({
@@ -795,13 +810,15 @@ export async function handler(event, context) {
   }
 
   try {
+    userContext = { ...userContext, assistantDeviceId: assistantDeviceID(deviceId, requestInput?.responseSurface) };
     const result = await runDeviceAssistant({
       transcript,
       userContext,
       env: process.env,
       sessionMessages,
       responseSurface: requestInput?.responseSurface || "halo",
-      lambdaDeadline
+      lambdaDeadline,
+      kitchenRequest:{sessionId:requestInput?.sessionId,operationId:getHeader(headers,"x-operation-id") || requestClaim?.claimToken || context?.awsRequestId,authorization:getHeader(headers,"authorization")}
     });
 
     toolTrace = result.toolTrace || [];
@@ -869,6 +886,12 @@ export async function handler(event, context) {
         responseSurface: requestInput?.responseSurface || "halo"
       })
     });
+    responseBody.assistant_actions = assistantActions(toolEvents);
+    await recordDirectVoice({env:process.env, owner:ownerId, device:deviceId, surface:requestInput.responseSurface,
+      operation:getHeader(headers,"x-operation-id") || context?.awsRequestId,
+      transcript, result, events:toolEvents});
+    responseBody.outcome=result.outcome || null;
+    responseBody.operation_id=getHeader(headers,"x-operation-id") || requestClaim?.claimToken || context?.awsRequestId;
     if (requestClaim?.claimed && requestClaim?.entryId) {
       try {
         await completeRecentSessionRequest(userContext.ownerId, requestClaim.entryId, responseBody, process.env);
@@ -929,5 +952,5 @@ export async function handler(event, context) {
       })
     }));
   }
+  });
 }
-

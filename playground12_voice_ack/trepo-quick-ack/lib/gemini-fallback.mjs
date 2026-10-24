@@ -1,3 +1,4 @@
+import __trepoAIConsent from '/var/task/ai_consent_guard.cjs';
 // Gemini fallback for when OpenAI is unavailable (429 insufficient_quota, 5xx, timeout).
 // All Trepo voice/chat OpenAI calls funnel through openAiRequest() in device-assistant.mjs;
 // chat + streaming both hit /chat/completions, transcription hits /audio/transcriptions.
@@ -34,7 +35,7 @@ export async function geminiChatFallbackResponse(bodyString, env) {
   try { payload = JSON.parse(bodyString); } catch { payload = {}; }
   payload.model = model;
   // Gemini's compat layer ignores unknown OpenAI-only fields; keep messages/tools/tool_choice/stream.
-  const res = await fetch(`${GEMINI_OPENAI_BASE}/chat/completions`, {
+  const res = await __trepoAIConsent.providerFetch(fetch)(`${GEMINI_OPENAI_BASE}/chat/completions`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${env.GEMINI_API_KEY}`,
@@ -55,7 +56,7 @@ export async function geminiChatFallbackResponse(bodyString, env) {
 export async function geminiTranscribe(wavBuffer, env) {
   const model = env.GEMINI_TRANSCRIBE_MODEL || "gemini-2.5-flash";
   const b64 = Buffer.from(wavBuffer).toString("base64");
-  const res = await fetch(`${GEMINI_NATIVE_BASE}/models/${model}:generateContent`, {
+  const res = await __trepoAIConsent.providerFetch(fetch)(`${GEMINI_NATIVE_BASE}/models/${model}:generateContent`, {
     method: "POST",
     headers: {
       "x-goog-api-key": env.GEMINI_API_KEY,

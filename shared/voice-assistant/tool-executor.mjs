@@ -1,4 +1,5 @@
 import { SUPPORTED_TOOLS } from "./tool-definitions.mjs";
+import { correctionFieldDenial } from "./kitchen-correction-intent.mjs";
 
 const LIST_TOOLS = new Set([
   "get_shopping_list",
@@ -47,6 +48,8 @@ function normalizeBoolean(value) {
 }
 
 function normalizeNumber(value) {
+  if (typeof value !== "number" && typeof value !== "string") return null;
+  if (typeof value === "string" && !/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$/i.test(value.trim())) return null;
   const numeric = Number(value);
   return Number.isFinite(numeric) ? numeric : null;
 }
@@ -141,6 +144,7 @@ function normalizeKitchenArgs(args) {
   return {
     args: {
       ...(itemName ? { item_name: itemName } : {}),
+      ...(trimString(normalizedArgs.new_name) ? { new_name: normalizedArgs.new_name.trim() } : {}),
       ...(itemId ? { item_id: itemId } : {}),
       ...(selectionHint ? { selection_hint: selectionHint } : {}),
       ...(trimString(normalizedArgs.quantity) ? { quantity: normalizedArgs.quantity.trim() } : {}),
@@ -208,6 +212,8 @@ function hasKitchenQuantityUpdate(args) {
 
 function hasKitchenDetailUpdate(args) {
   return Boolean(
+    trimString(args?.new_name)
+    ||
     hasKitchenQuantityUpdate(args)
     || trimString(args?.location)
     || trimString(args?.expiration_date)
@@ -257,6 +263,17 @@ export function validateToolCall(toolName, args) {
       ok: false,
       error: `Tool calls cannot include owner or user scope overrides (${forbiddenScopeOverride.key}). The assistant can only operate on the current request household.`
     };
+  }
+
+  if (toolName === "update_item_details") {
+    const allowed = new Set(['item_name', 'item_id', 'selection_hint', 'new_name', 'quantity',
+      'remaining_quantity', 'quantity_value', 'quantity_unit', 'fill_percent',
+      'expiration_date', 'location', 'is_opened', 'brand', 'category']);
+    if (Object.keys(normalizedArgs).some(key => !allowed.has(key)))
+      return {ok:false, error:"Unsupported kitchen correction field."};
+    if (normalizedArgs.new_name != null && (typeof normalizedArgs.new_name !== 'string'
+        || !normalizedArgs.new_name.trim() || normalizedArgs.new_name.trim().length > 500))
+      return {ok:false, error:"Enter a nonempty item name of at most 500 characters."};
   }
 
   const requiresItemName = new Set([
@@ -429,7 +446,7 @@ export function validateToolCall(toolName, args) {
     return {
       ok: true,
       args: {
-        ...sharedArgs,
+        ...(toolName === "update_item_details" ? {} : sharedArgs),
         ...kitchenArgs,
         ...(toolName === "check_in_many_items" ? { items: kitchenBatchItems } : {})
       }
@@ -952,7 +969,9 @@ export function formatActionSummary(name, args, toolResult = {}) {
       if (toolResult?.item?.discarded) {
         return `Discarded ${itemName} from your kitchen.`;
       }
-      return `Updated details for ${itemName}.`;
+      return args?.new_name && toolResult?.item?.item_name
+        ? `Renamed it to ${toolResult.item.item_name}.`
+        : `Updated details for ${itemName}.`;
     case "discard_item":
       return `Discarded ${itemName} from your kitchen.`;
     case "clear_kitchen_inventory":
@@ -1592,7 +1611,7 @@ export function createToolActionExecutor(actions) {
     }
   }
 
-  return async function executeToolAction({ toolName, args, env, userContext, responseSurface }) {
+  return async function executeToolAction({ toolName, args, env, userContext, responseSurface, sourceTranscript, mutationContext, expectedRevision }) {
     const validation = validateToolCall(toolName, args);
     if (!validation.ok) {
       return {
@@ -1611,6 +1630,11 @@ export function createToolActionExecutor(actions) {
     }
 
     const normalizedArgs = validation.args;
+    // Keep direct/internal callers without a transcript compatible. Both public
+    // assistant entry points always supply the original source transcript.
+    const fieldDenial = sourceTranscript == null ? null : correctionFieldDenial(toolName, normalizedArgs, sourceTranscript);
+    if (fieldDenial) return {ok:false, statusCode:409, toolName, args:normalizedArgs,
+      error:"Please specify that additional item change explicitly.", details:{type:fieldDenial}};
     const actionMode = env?.ACTION_MODE === "real" ? "real" : "mock";
 
     console.log("[DEBUG] tool action start:", JSON.stringify({
@@ -1628,7 +1652,7 @@ export function createToolActionExecutor(actions) {
 
     try {
       const toolResult = actionMode === "real"
-        ? await invokeRealAction(toolName, normalizedArgs, userContext, { env, responseSurface }, actions)
+        ? await invokeRealAction(toolName, normalizedArgs, userContext, { env, responseSurface, sourceTranscript, mutationContext, expectedRevision }, actions)
         : buildMockToolResult(toolName, normalizedArgs);
       const actionSummary = formatActionSummary(toolName, normalizedArgs, toolResult);
       const actionDetails = formatActionDetails(toolName, normalizedArgs, toolResult);

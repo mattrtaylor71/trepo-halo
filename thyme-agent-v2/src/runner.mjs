@@ -31,7 +31,12 @@ export class Runner {
     });
   }
   async run(pk, rid) {
-    let req = await this.store.get(pk, "Q#" + rid);
+    const req = await this.store.get(pk, "Q#" + rid);
+    if (!req) return;
+    const consent = (await import('/var/task/ai_consent_guard.cjs')).default;
+    return consent.actorContext.run(req.actor,()=>this.runWithActor(pk,rid,req));
+  }
+  async runWithActor(pk, rid, req) {
     if (
       !req ||
       ["completed", "failed", "interrupted", "needs_reconciliation"].includes(
@@ -86,6 +91,7 @@ export class Runner {
     );
     const started = this.clock();
     try {
+      await (await import('/var/task/ai_consent_guard.cjs')).default.requireConsent(req.actor);
       if (req.kind === "approval") {
         await this.apply(a, s, req);
         return;
@@ -123,7 +129,8 @@ export class Runner {
       const memoryBoundary=this.gateway.env?.HOUSEHOLD_BRAIN_V2 === '1'
         ? [preferences.memory?.fence?.household,preferences.memory?.fence?.generation,
            preferences.memory?.fence?.revision,{...preferences.memory,fence:undefined,
-             coverage:{...preferences.memory?.coverage,as_of:undefined,history_since:undefined}}] : null;
+             coverage:{...preferences.memory?.coverage,as_of:undefined,history_since:undefined,
+               external_sources:preferences.memory?.coverage?.external_sources?.map(({checked_at,...source})=>source)}}] : null;
       const agentVersion = hash(memoryBoundary ? [INSTRUCTIONS,this.definitions,memoryBoundary] : [INSTRUCTIONS,this.definitions]);
       let conversationHistory;
       // Instructions/tools are immutable at the provider. Upgrade only between
@@ -305,6 +312,7 @@ export class Runner {
           const result = await this.tools.call({
             actor: a,
             session: s,
+            memoryFence: req.memoryFence,
             action,
           });
           await this.provider.result(s.providerId, action, result);
@@ -366,8 +374,8 @@ export class Runner {
       // Never replay an uncertain mutation. Its journal is deliberately left for reconciliation.
       if (fresh?.status === "needs_reconciliation") return;
       const transient =
-        ["provider_error", "timeout", "unavailable"].includes(e.code) ||
-        !(e instanceof Fault);
+        e.code !== "ai_consent_required" && (["provider_error", "timeout", "unavailable"].includes(e.code) ||
+        !(e instanceof Fault));
       if (transient && fresh.attempts < 3) {
         await this.store.put(
           pk,
