@@ -100,14 +100,18 @@ export class Runner {
         await this.apply(a, s, req);
         return;
       }
-      s = await this.progress(pk, s, "running", "Checking your kitchen and shopping list…");
+      s = await this.progress(pk, s, "running", req.runtime==='responses'
+        ? {...activity('household'),label:'Checking your kitchen, list and preferences'}
+        : "Checking your kitchen and shopping list…");
       const [preferences, kitchen, shopping] = await Promise.all([
         this.gateway.read(a, "preferences"),
         this.gateway.read(a, "kitchen"),
         this.gateway.read(a, "shopping"),
       ]);
       const asOf = now();
-      s = await this.progress(pk, s, "running", "Putting your answer together…", [
+      s = await this.progress(pk, s, "running", req.runtime==='responses'
+        ? {...activity('household',{state:'completed'}),label:'Kitchen, list and preferences checked'}
+        : "Putting your answer together…", [
         `Checked ${collection(kitchen).length} kitchen items`,
         `Checked ${collection(shopping).length} shopping items`,
         "Checked food preferences",
@@ -422,9 +426,9 @@ export class Runner {
     }
   }
   async progress(pk, s, status, progress, progressDetails = s.progressDetails || []) {
-    if (s.status === status && s.progress === progress && hash(s.progressDetails || []) === hash(progressDetails)) return s;
-    const event={...activity('thinking'),id:progress,label:progress};
-    return this.store.put(pk, key(s.id), { ...s, status, progress, progressDetails,
+    const event=typeof progress==='string' ? {...activity('thinking'),id:progress,label:progress} : progress;
+    if (s.status === status && s.progress === event.label && hash(s.progressDetails || []) === hash(progressDetails)) return s;
+    return this.store.put(pk, key(s.id), { ...s, status, progress:event.label, progressDetails,
       activity:updateActivities(s.activity,event) }, s.version);
   }
   async saveMessages(pk, s, req, items, dietary) {
@@ -734,7 +738,7 @@ export function compactInventory(kitchen, shopping, asOf) {
   const pick = (row, keys) => Object.fromEntries(keys.filter((k) => row[k] !== undefined && row[k] !== null).map((k) => [k, row[k]]));
   const snapshot = {
     asOf, complete: true,
-    kitchen: collection(kitchen).map((row) => pick(row, ["id", "item_name", "brand", "variant", "category", "quantity_value", "quantity_unit", "fill_percent", "remaining_quantity", "is_opened", "storage_location", "expiration_date", "created_at", "ingredients"])),
+    kitchen: collection(kitchen).map((row) => pick(row, ["id", "item_name", "category", "quantity_value", "quantity_unit", "fill_percent", "remaining_quantity", "is_opened", "storage_location", "expiration_date", "created_at"])),
     shopping: collection(shopping).map((row) => pick(row, ["shopping_id", "household_item_uuid", "item_name", "quantity", "store", "action"])),
   };
   // Never silently truncate a kitchen and call it complete.

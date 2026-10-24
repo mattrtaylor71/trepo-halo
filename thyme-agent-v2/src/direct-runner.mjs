@@ -108,7 +108,7 @@ export async function runDirect(runner,a,initialSession,initialRequest,context,s
       const result=await runner.tools.call({actor:a,session:s,action,memoryFence:req.memoryFence});
       await persist({direct:{...req.direct,cursor:i+1,toolCalls:req.direct.toolCalls+1,input:[...req.direct.input,
         {type:'function_call_output',call_id:call.call_id,output:JSON.stringify(result)}]}});
-      await progress(toolActivity(call.name,{id:call.call_id,state:result.ok?'completed':'failed',requestId:req.id}));
+      await progress(toolActivity(call.name,{id:call.call_id,args,state:result.ok?'completed':'failed',requestId:req.id}));
     }
     await persist({direct:{...req.direct,round:req.direct.round+1,pending:null,cursor:0}});
   }

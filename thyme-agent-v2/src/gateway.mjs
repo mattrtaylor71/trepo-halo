@@ -407,11 +407,11 @@ export class TrepoGateway {
     const resource=READ_TOOLS[name];
     if(!resource) throw new Fault("unknown_tool","That read is unavailable.");
     const data=await this.read(a,resource,args);
-    if(name==="search_kitchen_item") return {items:collection(data).filter(r=>args.item_id?rowID(r)===args.item_id:r.item_name.toLowerCase().includes(String(args.item_name||"").toLowerCase()))};
+    if(name==="search_kitchen_item") return pageData(collection(data).filter(r=>args.item_id?rowID(r)===args.item_id:r.item_name.toLowerCase().includes(String(args.item_name||"").toLowerCase())),args,'kitchen');
     if(name==="get_saved_recipe_detail") return {recipe:exact(collection(data),args.recipe_id,args.recipe_title)};
     if(name==="get_dish_detail") return {dish:exact(collection(data),args.dish_id,args.dish_name,"dish_name")};
     if(name==="get_recipe_detail") return {recipe:exact([...(data.kitchen_only||[]),...(data.need_grocery||[]),...collection(data)],null,args.recipe_title)};
-    if(["get_recent_dishes","get_recent_discards","get_saved_recipes"].includes(name)) return pageData(data,args);
+    if(["get_recent_dishes","get_recent_discards","get_saved_recipes","get_kitchen_overview"].includes(name)) return pageData(data,args,resource);
     if(args.limit && Array.isArray(data)) return data.slice(0,Math.min(100,args.limit));
     return data;
   }

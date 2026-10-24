@@ -11,8 +11,8 @@ actual=hashlib.sha256(a.base.read_bytes()).hexdigest()
 if actual!=a.base_sha256:raise SystemExit('Base archive changed; inspect current serving code before packaging.')
 files=list((root/'shared/thyme-runtime').glob('*.mjs'))
 files += ([root/'playground12_voice_ack/trepo-quick-ack'/p for p in ['index-stream.js','lib/device-assistant.mjs']]
-          if a.target=='legacy' else [root/'thyme-agent-v2/src'/p for p in ['direct-runner.mjs','entry.mjs','native.mjs','runner.mjs','service.mjs']])
-if a.target=='native':files.append(root/'playground12_voice_ack/trepo-quick-ack/lib/action-claims.mjs')
+          if a.target=='legacy' else [root/'thyme-agent-v2/src'/p for p in ['direct-runner.mjs','entry.mjs','native.mjs','runner.mjs','service.mjs','instructions.mjs','tools.mjs','gateway.mjs','prepare-actions.mjs','capabilities.mjs']])
+files.append(root/'playground12_voice_ack/trepo-quick-ack/lib/action-claims.mjs')
 updates={str(p.relative_to(root)):p.read_bytes() for p in files}
 a.out.parent.mkdir(parents=True,exist_ok=True)
 with zipfile.ZipFile(a.base) as source,zipfile.ZipFile(a.out,'w',zipfile.ZIP_DEFLATED) as target:

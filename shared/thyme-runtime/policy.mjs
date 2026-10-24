@@ -14,24 +14,16 @@ export function planTurn(text, history = []) {
   if (/recipe|breakfast|lunch|dinner|cook|meal|snack/.test(context)) { domains.add('recipes'); domains.add('kitchen'); }
   if (/calendar|meal plan|schedule/.test(context)) domains.add('calendar');
   if (/last|history|purchase|receipt|paid|cost|used|ate|dish/.test(context)) domains.add('history');
-  const mode = /https?:\/\/|\b(import|research)\b|\b(?:week|month|[3-9] days|[12][0-9] days)\b/.test(current) ? 'task' : 'quick';
+  const multipleMeals=/\b(?:[2-9]|[12][0-9]|two|three|four|five|six|seven|eight|nine|ten)(?:\s*[-–]\s*\d+)?\s+(?:\w+\s+){0,2}(?:recipes|meals|dinners|lunches|breakfasts)\b/.test(current);
+  const mode = multipleMeals || /https?:\/\/|\b(import|research)\b|\b(?:week|month|[3-9] days|[12][0-9] days)\b/.test(current) ? 'task' : 'quick';
   return {mode, domains: [...domains], model: 'gpt-6.1-sol'};
 }
 
 export function selectTools(definitions, plan, forcedName = null) {
-  return definitions.filter(t => {
-    const name = t.function?.name || t.name;
-    if (!name) return false; // Provider-hosted discovery isn't needed with explicit schemas.
-    if (name === forcedName || !plan.domains.length) return true;
-    if (/read_trepo|clarif|conversation_preferences|food_memory/.test(name)) return true;
-    return plan.domains.some(domain => ({
-      shopping: /shopping|store|recommend_items_to_buy/,
-      kitchen: /kitchen|item|check_in|use_up/,
-      recipes: /recipe/,
-      calendar: /calendar|meal_plan/,
-      history: /history|dish|discard|health/,
-    })[domain].test(name));
-  });
+  // Real requests combine domains and use fragments, corrections and synonyms.
+  // Keyword routing must never remove a supported capability. Authorization is
+  // still enforced by the scoped gateway and the review/apply boundary.
+  return definitions.filter(t => Boolean(t.function?.name || t.name));
 }
 
 export const QUICK_INSTRUCTIONS = `You are Thyme, Trepo's kitchen assistant. Give useful, concise answers and carry out only the user's requested actions through the supplied tools.

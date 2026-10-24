@@ -133,10 +133,26 @@ export function proposalSnapshot(name,args,data) {
   if(name==="save_generated_recipe") return rows.filter(r=>norm(r.title)===norm(args.title));
   return data;
 }
-export function pageData(data,args={}) {
+export function readFields(row,resource,{detail=false}={}) {
+  const fields=resource==='kitchen'
+    ? ['id','item_name','category','quantity_value','quantity_unit','fill_percent','remaining_quantity','is_opened','storage_location','expiration_date','ingredients','nutrition_summary',
+      ...(detail?['brand','variant','barcode','description','created_at','updated_at','reference_amount','state_label','storage_guidance','explanation','harmful_ingredients','healthier_alternatives','upf','estimated_price','country_guess','store_availability']:[])]
+    : resource==='saved_recipes'
+      ? ['id','title','ingredients','servings','status','notes','saved_by','saved_by_name','can_edit',...(detail?['instructions','source_url']:[])] : null;
+  return fields ? Object.fromEntries(fields.filter(k=>row[k]!=null).map(k=>[k,row[k]])) : row;
+}
+export function pageData(data,args={},resource=null) {
   const rows=collection(data),query=norm(args.query);
-  const filtered=query?rows.filter(r=>norm(r.item_name||r.dish_name||r.title).includes(query)):rows;
+  const filtered=query?rows.filter(r=>query.split(/\s+/).every(word=>norm([r.item_name||r.dish_name||r.title,...(Array.isArray(r.ingredients)?r.ingredients:[])].join(' ')).includes(word))):rows;
   const offset=Math.max(0,Math.floor(args.offset||0)),limit=Math.max(1,Math.min(100,Math.floor(args.limit||25)));
   if(!rows.length && !Array.isArray(data)) return data;
-  return {items:filtered.slice(offset,offset+limit),count:filtered.length,next_offset:offset+limit<filtered.length?offset+limit:null};
+  const items=[];let bytes=0;
+  for(const row of filtered.slice(offset,offset+limit)) {
+    const item=readFields(row,resource,{detail:args.detail===true}),size=Buffer.byteLength(JSON.stringify(item));
+    // Keep every page comfortably below request persistence and provider limits.
+    // Never silently drop rows: next_offset is based on what was actually returned.
+    if(items.length && bytes+size>36000)break;
+    items.push(item);bytes+=size;
+  }
+  return {items,count:filtered.length,next_offset:offset+items.length<filtered.length?offset+items.length:null};
 }

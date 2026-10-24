@@ -22,6 +22,8 @@ test('quick route publishes real steps and current household context without a p
  await r.runner.run(pk,'quick-request');const saved=await r.service.session(ACTOR,s.id);
  assert.equal(input.model,'gpt-6.1-sol');assert.ok(input.input.some(x=>x.content.includes('current_inventory')));
  assert.equal(saved.status,'completed');assert.equal(saved.messages.length,2);assert.ok(saved.activity.every(x=>x.state==='completed'));
+ assert.equal(saved.activity.filter(x=>x.stage==='thinking').length,1);
+ assert.equal(saved.activity.find(x=>x.stage==='household').label,'Kitchen, list and preferences checked');
  assert.equal(r.gateway.writes,0);
 });
 test('tool results and encrypted reasoning continue; claims cannot bypass review',async()=>{

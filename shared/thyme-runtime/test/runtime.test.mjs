@@ -43,3 +43,25 @@ test('legacy tool continuation retains opaque reasoning exactly once',()=>{
  const input=chatInput([{role:'assistant',tool_calls:[{id:'first',function:{name:'read',arguments:'{}'}},{id:'second',function:{name:'read',arguments:'{}'}}]},{role:'tool',tool_call_id:'first',content:'ok'}],map);
  assert.deepEqual(input,[...output,{type:'function_call_output',call_id:'first',output:'ok'}]);
 });
+
+test('real mixed-intent and dish-log phrasing cannot hide supported tools',()=>{
+ const tools=['read_trepo','create_recipe','request_log_dish_from_voice','request_discard_item','request_add_to_shopping_list','request_add_generated_recipes_to_meal_calendar'].map(name=>({type:'function',name}));
+ for(const text of ['Log one muffin for breakfast','I threw out the mango yogurt. Add it to my list as well.','Add those to breakfast tomorrow']) {
+   assert.deepEqual(selectTools(tools,planTurn(text)),tools,text);
+ }
+ assert.deepEqual(selectTools([...tools,{type:'tool_search'}],planTurn('List my recipes')),tools);
+});
+
+test('multiple full meals get the task budget even without the word week',()=>{
+ for(const text of ['Plan 3 easy dinners with what we have','Help me come up with 5 dinners','Give me three recipes','Gimme 2-4 recipes'])assert.equal(planTurn(text).mode,'task',text);
+ assert.equal(planTurn('A recipe for 3 people').mode,'quick');
+});
+
+test('completed read stages retain the actual source and unfinished tools are not marked checked',()=>{
+ const event=toolActivity('read_trepo',{id:'read',args:{resource:'saved_recipes'},state:'completed'});
+ assert.equal(event.label,'Saved recipes checked');assert.equal(event.category,'recipes');
+ assert.equal(toolActivity('read_trepo',{args:{resource:'preferences'},state:'completed'}).label,'Food preferences checked');
+ assert.equal(toolActivity('get_conversation_recipes',{state:'completed'}).label,'Chat recipes checked');
+ const steps=updateActivities([toolActivity('read_trepo',{id:'read',args:{resource:'saved_recipes'}})],activity('recovering'));
+ assert.equal(steps[0].state,'running');
+});

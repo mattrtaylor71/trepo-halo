@@ -35,8 +35,17 @@ export function toolActivity(name, {id = name, state = 'running', requestId = nu
   else if (/dish/.test(n)) { label = 'Working on your dish log'; category = 'history'; }
   if (proposal) label = 'Preparing changes for your review';
   // A completed tool stage is not permission to claim a committed account change.
-  if (state === 'completed') label = proposal ? 'Changes prepared for review' :
-    /^(get_|read_|search_|list_|lookup_)/.test(n) ? 'Information checked' : 'Step checked';
+  if (state === 'completed') {
+    if(proposal)label='Changes prepared for review';
+    else if(name==='create_recipe'||name==='edit_recipe')label='Recipe ready';
+    else if(/clarif/.test(n))label='Question ready';
+    else if(/conversation_preferences/.test(n))label='Your choices noted for this chat';
+    else if(/preferences|memory/.test(n) || (name==='read_trepo' && args?.resource==='preferences'))label='Food preferences checked';
+    else if(name==='get_conversation_recipes')label='Chat recipes checked';
+    else if(name==='search_web_recipes')label='Recipe search checked';
+    else label=({kitchen:'Kitchen checked',shopping:'Shopping list checked',recipes:'Saved recipes checked',
+      calendar:'Meal plan checked',history:'History checked'})[category] || 'Step checked';
+  }
   if (state === 'failed') label = 'This step needs attention';
   return {type: 'progress', version: 1, id, stage: 'tool', label, category, state,
     ...(requestId ? {request_id: requestId} : {})};
@@ -44,7 +53,7 @@ export function toolActivity(name, {id = name, state = 'running', requestId = nu
 
 export function updateActivities(previous = [], event) {
   if (!event || event.type !== 'progress' || event.version !== 1) return previous;
-  const steps = previous.map(step => step.state === 'running' && step.id !== event.id
+  const steps = previous.map(step => step.state === 'running' && step.stage !== 'tool' && step.id !== event.id
     ? {...step, state: 'completed'} : step);
   const index = steps.findIndex(step => step.id === event.id);
   const publicStep = Object.fromEntries(['id', 'stage', 'label', 'category', 'state'].map(k => [k, event[k]]));

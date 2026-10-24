@@ -122,6 +122,11 @@ export const ACTION_CLAIM_RULES = [
 
 const COMPLETED = /\b(?:sorted|organized|organised|assigned|grouped|categorized|categorised|added|saved|logged|recorded|noted|put|checked|removed|discarded|tossed|taken|took|threw|thrown|got|gotten|used|scheduled|planned|booked|slotted|penciled|pencilled|moved|rescheduled|shifted|bumped|cleared|deleted|unscheduled|updated|changed|reduced|adjusted|renamed)\b/i;
 
+function negatedCompletion(prefix) {
+  return /\b(?:rather\s+than|instead\s+of)\s*$/i.test(prefix)
+    || /\b(?:nothing|none|no\s+(?:items?|recipes?|meals?|changes?))\s+(?:(?:has|have|had|is|are|was|were)\s+)?(?:been\s+)?(?:(?:just|already|now|successfully)\s+)*$/i.test(prefix.trim()+' ');
+}
+
 function claimClauses(text) {
   return String(text || "")
     .replace(/```[\s\S]*?```/g, " ")
@@ -150,13 +155,17 @@ function isCurrentAction(clause) {
   return true;
 }
 
-function hasCurrentActionPredicate(clause) {
+function hasCurrentActionPredicate(clause, start=0, end=clause.length) {
   // Memory replies contain participles as adjectives and descriptions of the
   // user's past actions. Require a completed-action predicate, not merely the
   // words "saved" + "recipe" somewhere in an explanatory sentence.
   for (const match of clause.matchAll(new RegExp(COMPLETED.source,'ig'))) {
+    // Bind the predicate to the action pattern that matched. In "of the saved
+    // recipes I checked", "I checked" must not turn adjectival "saved" into a save.
+    if(match.index<start || match.index>=end)continue;
     const prefix=clause.slice(0,match.index).trim();
     const suffix=clause.slice(match.index+match[0].length);
+    if(negatedCompletion(prefix))continue;
     if(/\b(?:I|we)(?:['’]ve|\s+have|\s+had)?\s+(?:(?:just|already|now|successfully)\s+)*$/i.test(prefix+' '))return true;
     if(/\b(?:is|are|was|were|(?:has|have|had)\s+(?:(?:just|already|now)\s+)?been)\s+(?:(?:just|already|now|successfully)\s+)*$/i.test(prefix+' '))return true;
     const bare=/^(?:[-*]\s*)?(?:(?:ok(?:ay)?|done|great|sure|perfect|got\s*it|all\s*set|no\s*problem|there|alright)[\s,!.—-]+)*(?:(?:just|now|successfully|already)\s*)*$/i.test(prefix);
@@ -179,7 +188,13 @@ export function detectActionClaims(text, {memoryContext=false}={}) {
     // Explicit destination beats the generic sentence-initial dish fallback.
     const ordered = [...ACTION_CLAIM_RULES.filter(r => r.domain !== "dishes"), ...ACTION_CLAIM_RULES.filter(r => r.domain === "dishes")];
     const matchText=memoryContext ? clause.replace(/\brecipes\b/gi,'recipe').replace(/\bdishes\b/gi,'dish') : clause;
-    const rule = ordered.find(r => r.patterns.some(pattern => pattern.test(matchText)));
+    const rule = ordered.find(r => r.patterns.some(pattern => {
+      const match=pattern.exec(matchText);
+      if(!match)return false;
+      const predicates=[...match[0].matchAll(new RegExp(COMPLETED.source,'ig'))];
+      if(predicates.length && predicates.every(p=>negatedCompletion(matchText.slice(0,match.index+p.index))))return false;
+      return !memoryContext || hasCurrentActionPredicate(matchText,match.index,match.index+match[0].length);
+    }));
     if (rule) claims.push({ ...rule, clause });
   }
   return claims;

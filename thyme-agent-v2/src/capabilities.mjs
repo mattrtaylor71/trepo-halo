@@ -48,9 +48,9 @@ export function catalog(raw, actions) {
       t.parameters.required=(t.parameters.required||[]).filter(k=>k!==label);
       t.parameters.anyOf=[{required:[idField]},{required:[label]}];
     }
-    if(["get_recent_dishes","get_recent_discards","get_saved_recipes"].includes(t.name)) {
+    if(["get_recent_dishes","get_recent_discards","get_saved_recipes","get_kitchen_overview","search_kitchen_item"].includes(t.name)) {
       Object.assign(t.parameters.properties,{query:str,limit:{type:"integer",minimum:1,maximum:100},offset:{type:"integer",minimum:0,maximum:100000}});
-      t.description+=" Returns a page with count and next_offset; use offset to read remaining results. Use query to find a named entry.";
+      t.description+=" Returns a bounded page with count and next_offset; use offset to read remaining results. Query searches the title/name and ingredient text. For full kitchen item details use read_trepo with resource:kitchen, detail:true and a specific query. Saved-recipe lists contain summaries; use get_saved_recipe_detail for the exact method before presenting or editing a complete recipe.";
     }
     if(t.name==="update_many_shopping_item_stores") {
       const item=t.parameters.properties.items.items;item.properties.item_id=str;
