@@ -23,18 +23,23 @@ def claim_generation(conn, members, focus, debounce_seconds, dispatch=None):
                     (owner, owner),
                 )
             canonical_owners = set()
+            active = False
             for owner in owners:
                 cur.execute(
-                    "SELECT owner_id, status, TIMESTAMPDIFF(SECOND, _updatedDate, NOW()) AS age_seconds "
+                    "SELECT owner_id, status, focus, TIMESTAMPDIFF(SECOND, _updatedDate, NOW()) AS age_seconds "
                     "FROM shared_meal_plan WHERE owner_id=%s FOR UPDATE", (owner,),
                 )
                 row = cur.fetchone()
                 canonical_owners.add(row['owner_id'])
                 if row['status'] == 'regenerating' and row['age_seconds'] is not None and row['age_seconds'] < debounce_seconds:
-                    # Includes any newly inserted placeholder: a duplicate request
-                    # must not leave a partial household generation behind.
-                    conn.rollback()
-                    return False
+                    active = True
+            if active:
+                # Preserve a focus change; the running worker checks it before
+                # publication and queues a fresh bounded attempt. No new dispatch.
+                for owner in sorted(canonical_owners):
+                    cur.execute('UPDATE shared_meal_plan SET focus=%s WHERE owner_id=%s', (focus,owner))
+                conn.commit()
+                return False
             for owner in sorted(canonical_owners):
                 cur.execute(
                     "UPDATE shared_meal_plan SET status='regenerating', focus=%s, error_message=NULL, "

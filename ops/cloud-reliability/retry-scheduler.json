@@ -1,0 +1,185 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "Durable meal-plan retry dispatcher. Apply the queue migration and worker patch first. No model access.",
+  "Parameters": {
+    "CodeBucket": {
+      "Type": "String"
+    },
+    "CodeKey": {
+      "Type": "String"
+    },
+    "GeneratorArn": {
+      "Type": "String"
+    },
+    "DBHost": {
+      "Type": "String"
+    },
+    "DBPort": {
+      "Type": "String",
+      "Default": "3306"
+    },
+    "DBUser": {
+      "Type": "String"
+    },
+    "DBPass": {
+      "Type": "String",
+      "NoEcho": true
+    },
+    "DBName": {
+      "Type": "String"
+    },
+    "SubnetIds": {
+      "Type": "List<AWS::EC2::Subnet::Id>"
+    },
+    "SecurityGroupIds": {
+      "Type": "List<AWS::EC2::SecurityGroup::Id>"
+    },
+    "ScheduleState": {
+      "Type": "String",
+      "AllowedValues": [
+        "ENABLED",
+        "DISABLED"
+      ],
+      "Default": "DISABLED"
+    }
+  },
+  "Resources": {
+    "Role": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "lambda.amazonaws.com"
+              },
+              "Action": "sts:AssumeRole"
+            }
+          ]
+        },
+        "ManagedPolicyArns": [
+          "arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole"
+        ],
+        "Policies": [
+          {
+            "PolicyName": "invoke-current-generator",
+            "PolicyDocument": {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Effect": "Allow",
+                  "Action": "lambda:InvokeFunction",
+                  "Resource": {
+                    "Ref": "GeneratorArn"
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "Dispatcher": {
+      "Type": "AWS::Lambda::Function",
+      "Properties": {
+        "Code": {
+          "S3Bucket": {
+            "Ref": "CodeBucket"
+          },
+          "S3Key": {
+            "Ref": "CodeKey"
+          }
+        },
+        "Runtime": "python3.12",
+        "Handler": "retry_dispatcher.handler",
+        "Role": {
+          "Fn::GetAtt": [
+            "Role",
+            "Arn"
+          ]
+        },
+        "Timeout": 60,
+        "MemorySize": 256,
+        "ReservedConcurrentExecutions": 1,
+        "VpcConfig": {
+          "SubnetIds": {
+            "Ref": "SubnetIds"
+          },
+          "SecurityGroupIds": {
+            "Ref": "SecurityGroupIds"
+          }
+        },
+        "Environment": {
+          "Variables": {
+            "DB_HOST": {
+              "Ref": "DBHost"
+            },
+            "DB_PORT": {
+              "Ref": "DBPort"
+            },
+            "DB_USER": {
+              "Ref": "DBUser"
+            },
+            "DB_PASS": {
+              "Ref": "DBPass"
+            },
+            "DB_NAME": {
+              "Ref": "DBName"
+            },
+            "MEAL_PLAN_GENERATOR_ARN": {
+              "Ref": "GeneratorArn"
+            }
+          }
+        }
+      }
+    },
+    "Schedule": {
+      "Type": "AWS::Events::Rule",
+      "Properties": {
+        "ScheduleExpression": "rate(1 minute)",
+        "State": {
+          "Ref": "ScheduleState"
+        },
+        "Targets": [
+          {
+            "Arn": {
+              "Fn::GetAtt": [
+                "Dispatcher",
+                "Arn"
+              ]
+            },
+            "Id": "meal-plan-retry"
+          }
+        ]
+      }
+    },
+    "InvokePermission": {
+      "Type": "AWS::Lambda::Permission",
+      "Properties": {
+        "Action": "lambda:InvokeFunction",
+        "FunctionName": {
+          "Ref": "Dispatcher"
+        },
+        "Principal": "events.amazonaws.com",
+        "SourceArn": {
+          "Fn::GetAtt": [
+            "Schedule",
+            "Arn"
+          ]
+        }
+      }
+    }
+  },
+  "Outputs": {
+    "DispatcherArn": {
+      "Value": {
+        "Fn::GetAtt": [
+          "Dispatcher",
+          "Arn"
+        ]
+      }
+    }
+  }
+}

@@ -274,6 +274,14 @@ def _get_meal_plan(owner):
         if row.get('status') == 'regenerating' and age_seconds is not None and age_seconds > 1800:
             row['status'] = 'failed'
             row['error_message'] = row.get('error_message') or 'This meal plan did not finish. Please try again.'
+        from plan_visibility import visible_plan
+        original_plan = row.get('plan')
+        row['plan'] = visible_plan(conn,owner,original_plan)
+        if original_plan and not row['plan']:
+            # Preserve the original row; do not serve a plan with unverifiable
+            # household/restriction provenance after a transfer or preference edit.
+            row['status'] = 'regenerating' if row.get('status') == 'regenerating' else 'failed'
+            row['error_message'] = 'Your meal plan needs an update for your current household and food preferences.'
         out = {k: json_serial(v) for k, v in row.items()}
         out['owner'] = owner  # response uses 'owner' for API consistency
         if out.get('plan') is None:

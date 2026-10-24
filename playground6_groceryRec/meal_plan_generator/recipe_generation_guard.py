@@ -54,7 +54,7 @@ def _inventory(cur, table, members):
     # Some legacy writers do not advance owner_kitchen_state. Read the actual
     # inputs too, and hold their row/range locks until the recipe write commits.
     return digest([{key: str(value) if isinstance(value, Decimal) else value
-                    for key, value in row.items()} for row in rows])
+                    for key, value in row.items() if key not in ('analysis_stage', 'analysis_status')} for row in rows])
 
 
 def _dependencies(conn, owner, with_brain, inventory_table=None):
@@ -104,7 +104,7 @@ def _dependencies(conn, owner, with_brain, inventory_table=None):
                 versions=versions, inventory=inventory, controls=controls)
 
 
-def capture(conn, *, owner, recipients, dietary, memory=None, inventory_table=None):
+def capture(conn, *, owner, recipients, dietary, memory=None, inventory_table=None, max_seconds=480):
     conn.begin()
     try:
         # Validate freshness ONCE, before any expensive model work. A cached
@@ -127,7 +127,7 @@ def capture(conn, *, owner, recipients, dietary, memory=None, inventory_table=No
             raise GenerationInputsChanged('dietary_preferences_changed')
         conn.commit()
         return dict(data, owner=owner, with_brain=with_brain, inventory_table=inventory_table,
-                    deadline=time.monotonic()+480,
+                    deadline=time.monotonic()+max(1, min(480, max_seconds)),
                     legacy_memory=memory if memory and not with_brain else None)
     except BaseException:
         conn.rollback()

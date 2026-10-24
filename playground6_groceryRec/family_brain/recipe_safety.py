@@ -256,13 +256,15 @@ _SERVING_SUGGESTION_RE = re.compile(
 
 def _instructions_blob(recipe):
     """Instruction text only, with serving suggestions removed."""
-    v = recipe.get('instructions')
-    if isinstance(v, list):
-        steps = [str(x) for x in v]
-    elif isinstance(v, str):
-        steps = [v]
-    else:
-        return ''
+    # Meal plans emit `steps`; saved recipes emit `instructions`. Validate both
+    # when present so an empty legacy field cannot hide newer generated steps.
+    steps = []
+    for key in ('instructions', 'steps'):
+        value = recipe.get(key)
+        if isinstance(value, list):
+            steps.extend(str(step) for step in value)
+        elif isinstance(value, str):
+            steps.append(value)
     return ' \n '.join(_SERVING_SUGGESTION_RE.sub(' ', s) for s in steps).lower()
 
 def _instruction_only_hit(detector, recipe):
