@@ -42,6 +42,8 @@ function makeConn(rows) {
       const norm = String(sql).replace(/\s+/g, " ").trim();
       calls.push({ sql: norm, params });
       const u = norm.toUpperCase();
+      if (norm.startsWith('SELECT user_id,owner_id FROM new_users')) return [[{user_id:'ownerA',owner_id:'ownerA'}]];
+      if (norm.startsWith('SELECT user_id FROM new_users')) return [['ownerA'].map(user_id=>({user_id}))];
       if (u.includes("INFORMATION_SCHEMA.TABLES")) return [[{ count: 1 }]];
       if (u.includes("INFORMATION_SCHEMA.COLUMNS")) return [[]];
       if (u.startsWith("CREATE") || u.startsWith("ALTER")) return [{}];
@@ -55,6 +57,7 @@ function makeConn(rows) {
         // Only kitchen reads (against shared_kitchen here) return inventory.
         const isKitchen = /SHARED_KITCHEN|`?SHARED_KITCHEN`?/i.test(norm) || /FROM `shared_kitchen`/i.test(norm);
         if (!isKitchen) return [[]];
+        if (norm.includes("WHERE k._id=?")) return [rows.filter(row=>row._id===params[0])];
         const isExact = /LOWER\(TRIM\(PRODUCT_NAME\)\)\s*=\s*\?/i.test(norm);
         const isLike = /LIKE\s*\?/i.test(norm);
         if (isExact) {
@@ -77,12 +80,14 @@ function makeConn(rows) {
       }
       return [[]];
     },
+    async beginTransaction() {}, async commit() {}, async rollback() {},
     release() {},
   };
   return conn;
 }
 
 let da;
+let LAST_EDIT;
 let CONN;
 before(async () => {
   process.env.WRITE_SHARED_ONLY = "true";
@@ -97,6 +102,12 @@ before(async () => {
       withDbConnection: async (cb) => cb(CONN),
     },
   });
+  const editPath = path.join(LIB, 'kitchen-edit-client.mjs');
+  const realEdit = await import(editPath);
+  mock.module(editPath,{namedExports:{...realEdit,
+    prepareKitchenEdit:async (context,reference,updates,options,resolve)=>resolve(),
+    saveKitchenEdit:async (context,row,fields)=>{ LAST_EDIT=fields; return {...row,...fields}; }
+  }});
   da = await import(DATA_ACCESS);
 });
 

@@ -1,3 +1,4 @@
+import { withHouseholdKitchenMutation, findHouseholdKitchenRows, updateHouseholdKitchenRow } from "./household-kitchen-mutation.mjs";
 // DO NOT deploy this stack from a stale bundle. template.yaml uses CodeUri:
 // .sam-src, so `sam build/deploy` ships .sam-src/…/lib/*.mjs — NOT this repo lib/.
 // Keep .sam-src/ (and any .aws-sam/build/) copies of the lib/ files IN SYNC with
@@ -2712,19 +2713,32 @@ function isZeroQuantityTarget(quantityInput) {
 async function resolveKitchenRowsByReference(connection, context, reference) {
   const resolved = normalizeKitchenReference(reference);
   const tableOwnerId = resolveTableOwnerId(context);
+  const householdRows = WRITE_SHARED_ONLY ? await findHouseholdKitchenRows(connection, context) : null;
 
   if (resolved.item_id) {
-    const rowById = await findKitchenRowById(connection, tableOwnerId, resolved.item_id);
+    const rowById = householdRows ? householdRows.find(row => String(row._id) === resolved.item_id)
+      : await findKitchenRowById(connection, tableOwnerId, resolved.item_id);
     if (rowById?.action === "IN") {
       return [rowById];
     }
+    // An explicit stale/foreign/deleted ID must never select a different item.
+    return [];
   }
 
   if (!resolved.item_name) {
     return [];
   }
 
-  const rows = await findKitchenRowsByName(connection, tableOwnerId, resolved.item_name, 5);
+  let rows;
+  if (householdRows) {
+    rows = householdRows.filter(row => normalizeName(row.product_name) === normalizeName(resolved.item_name));
+    if (!rows.length) {
+      const ranked = rankKitchenRowMatches(householdRows, resolved.item_name);
+      rows = ranked.filter(match => match.score >= KITCHEN_FUZZY_THRESHOLD
+        && ranked[0].score - match.score < KITCHEN_FUZZY_AMBIGUITY_DELTA).map(match => match.row);
+    }
+    rows = rows.slice(0, 5);
+  } else rows = await findKitchenRowsByName(connection, tableOwnerId, resolved.item_name, 5);
   console.log("[DEBUG] kitchen item resolution:", JSON.stringify({
     ownerId: context?.ownerId || null,
     userId: context?.userId || null,
@@ -2766,34 +2780,7 @@ async function resolveKitchenRowByReference(connection, context, reference) {
 
 async function updateKitchenRowAcrossHousehold(connection, context, rowId, fields) {
   if (WRITE_SHARED_ONLY) {
-    const assignments = [];
-    const values = [];
-    for (const [key, value] of Object.entries(fields)) {
-      assignments.push(`\`${key}\` = ?`);
-      values.push(value);
-    }
-    assignments.push("`_updatedDate` = NOW()");
-    values.push(rowId);
-    // Scope the write to this household's owners so a bare _id can't mutate
-    // another household's shared_kitchen row (defensive; matches the read scoping).
-    const memberIds = getTableHouseholdMemberIds(context);
-    let ownerClause = "";
-    if (memberIds.length) {
-      ownerClause = ` AND \`owner_id\` IN (${memberIds.map(() => "?").join(",")})`;
-      values.push(...memberIds);
-    }
-    const [updateResult] = await connection.execute(
-      `UPDATE \`${SHARED_KITCHEN_TABLE}\` SET ${assignments.join(", ")} WHERE _id = ?${ownerClause}`,
-      values
-    );
-    // Phantom-write guard: `_updatedDate = NOW()` is always in the SET, so a
-    // matched row ALWAYS reports affectedRows >= 1. Zero rows means the target
-    // wasn't there — fail loudly instead of letting a no-op masquerade as success
-    // (the removal-path lesson: a silent 0-row flip read back as "removed").
-    if ((updateResult?.affectedRows ?? 0) < 1) {
-      throw new Error(`kitchen row update matched 0 rows (id=${rowId}) — item not found`);
-    }
-    return;
+    return updateHouseholdKitchenRow(connection, context, rowId, fields);
   }
 
   const memberIds = getTableHouseholdMemberIds(context);
@@ -3159,7 +3146,7 @@ async function insertDiscardRowAcrossHousehold(connection, context, kitchenRow, 
     // columns), so buildStatement inspects each member table's columns per-member.
     await dualWriteAcrossHousehold(connection, {
       memberIds: getTableHouseholdMemberIds(context), context, op: "insert", reportEvt: "discard_peruser_write_miss",
-      tableFn: discardTableName, ensureFn: ensureDiscardTable,
+      tableFn: discardTableName, ensureFn: context.kitchenMutationLocked ? null : ensureDiscardTable,
       buildStatement: async (tableName, memberId) => {
         const columns = await getTableColumns(connection, tableName);
         const fieldNames = ["_id", "_owner", "_device", "_createdDate", "product_name", "brand", "category", "images", "action", "product_expiration", "job_id", "user_id"];
@@ -3990,6 +3977,7 @@ export async function markKitchenItemOpened(context, itemReference, options = {}
 
 export async function updateKitchenItemQuantity(context, itemReference, quantityInput, options = {}) {
   const result = await withDbConnection(async (connection) => {
+    const mutate = async (context) => {
     const resolvedReference = normalizeKitchenReference(itemReference);
 
     const structuredState = typeof quantityInput === "object" && quantityInput !== null
@@ -4035,6 +4023,10 @@ export async function updateKitchenItemQuantity(context, itemReference, quantity
     return updatedItems.length > 1
       ? { ...primaryItem, affected_count: updatedItems.length }
       : primaryItem;
+    };
+    return WRITE_SHARED_ONLY
+      ? withHouseholdKitchenMutation(connection, context, mutate)
+      : mutate(context);
   }, options);
 
   if (!options?.skipKitchenDependentGeneration) {
@@ -4133,6 +4125,7 @@ export async function updateKitchenItemDetails(context, itemReference, updates, 
 
 export async function discardKitchenItem(context, itemReference, reason, options = {}) {
   const result = await withDbConnection(async (connection) => {
+    const mutate = async (context) => {
     const resolvedReference = normalizeKitchenReference(itemReference);
     const rows = await resolveKitchenRowsByReference(connection, context, resolvedReference);
     if (rows.length === 0) {
@@ -4166,6 +4159,12 @@ export async function discardKitchenItem(context, itemReference, reason, options
       reason: reason || null
     }));
     return result;
+    };
+    return WRITE_SHARED_ONLY
+      ? withHouseholdKitchenMutation(connection, context, mutate, async scope => {
+        for (const member of scope.householdMemberIds) await ensureDiscardTable(connection, discardTableName(member));
+      })
+      : mutate(context);
   }, options);
 
   if (!options?.skipKitchenDependentGeneration) {
@@ -5536,6 +5535,12 @@ export async function addShoppingItem(context, itemName, requestedStore = null, 
       },
     });
 
+    if (!primaryInsertId || primaryInsertId === "0") {
+      const [saved] = await connection.execute(`SELECT _id FROM \`${shoppingListTableName(shoppingOwnerId)}\` WHERE household_item_uuid=? LIMIT 2`, [householdItemUuid]);
+      if (saved.length !== 1) throw new Error("Shopping item saved but its receipt could not be confirmed.");
+      primaryInsertId = String(saved[0]._id);
+    }
+
     const result = {
       shopping_id: primaryInsertId,
       household_item_uuid: householdItemUuid,
@@ -5608,6 +5613,12 @@ export async function addManyShoppingItems(context, batchItems, options = {}) {
           }
         },
       });
+
+      if (!primaryInsertId || primaryInsertId === "0") {
+        const [saved] = await connection.execute(`SELECT _id FROM \`${shoppingListTableName(shoppingOwnerId)}\` WHERE household_item_uuid=? LIMIT 2`, [householdItemUuid]);
+        if (saved.length !== 1) throw new Error("Shopping item saved but its receipt could not be confirmed.");
+        primaryInsertId = String(saved[0]._id);
+      }
 
       items.push({
         shopping_id: primaryInsertId,

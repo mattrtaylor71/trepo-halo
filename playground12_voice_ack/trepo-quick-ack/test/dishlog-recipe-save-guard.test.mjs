@@ -182,7 +182,7 @@ before(async () => {
       executeToolAction: async ({ toolName, args }) => {
         TOOL_CALLS.push({ toolName, args });
         // Every tool "succeeds" and echoes its args, so the trace carries item/title names.
-        return { ok: true, statusCode: 200, toolName, args, actionSummary: `did ${toolName}`, toolResult: { ok: true } };
+        return { ok: true, statusCode: 200, toolName, args, actionSummary: `did ${toolName}`, toolResult: { ok: true, recipe: { id: `saved-${TOOL_CALLS.length}`, title: args.title } } };
       },
     },
   });

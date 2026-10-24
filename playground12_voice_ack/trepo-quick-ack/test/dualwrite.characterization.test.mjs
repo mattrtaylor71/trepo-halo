@@ -43,6 +43,8 @@ function makeConn({ columns = ALL_COLUMNS, selectRows = [], countRow = { count: 
       const norm = String(sql).replace(/\s+/g, " ").trim();
       calls.push({ sql: norm, params });
       const u = norm.toUpperCase();
+      if (norm.startsWith('SELECT user_id,owner_id FROM new_users')) return [[{user_id:'ownerA',owner_id:'ownerA'}]];
+      if (norm.startsWith('SELECT user_id FROM new_users')) return [['ownerA','memberB'].map(user_id=>({user_id}))];
       if (u.includes("INFORMATION_SCHEMA.TABLES")) return [[{ count: 1 }]];
       if (u.includes("INFORMATION_SCHEMA.COLUMNS")) return [columns.map((c) => ({ column_name: c }))];
       if (u.startsWith("INSERT")) return [{ insertId: 101, affectedRows: 1 }];
@@ -54,6 +56,7 @@ function makeConn({ columns = ALL_COLUMNS, selectRows = [], countRow = { count: 
       }
       return [[]];
     },
+    async beginTransaction() {}, async commit() {}, async rollback() {},
     release() {},
   };
   return conn;
@@ -87,6 +90,7 @@ const wroteShared = (conn) => allWriteTargets(conn).some((t) => t.startsWith("sh
 
 // ---- module mock + import ----------------------------------------------------
 let da;
+let LAST_EDIT;
 let CONN = makeConn();
 before(async () => {
   process.env.WRITE_SHARED_ONLY = "true"; // exercise shared insert + per-user fall-through
@@ -112,6 +116,12 @@ before(async () => {
       }),
     },
   });
+  const editPath = path.join(LIB, 'kitchen-edit-client.mjs');
+  const realEdit = await import(editPath);
+  mock.module(editPath,{namedExports:{...realEdit,
+    prepareKitchenEdit:async (context,reference,updates,options,resolve)=>resolve(),
+    saveKitchenEdit:async (context,row,fields)=>{ LAST_EDIT=fields; return {...row,...fields}; }
+  }});
   da = await import(DATA_ACCESS);
 });
 
@@ -178,14 +188,14 @@ test("clearRecentDiscards clears shared + both members (household scope)", async
 // item-4 helper must PRESERVE this shared-only scope, not enable the legacy loop).
 test("checkInKitchenItem writes shared_kitchen ONLY (no per-member fan-out)", async () => {
   CONN = makeConn();
-  await da.checkInKitchenItem(householdCtx(), { product_name: "Yogurt", category: "dairy" });
+  await da.checkInKitchenItem(householdCtx(), { product_name: "Yogurt", category: "dairy" }, {skipKitchenDependentGeneration:true});
   assert.ok(targets(CONN, "INSERT").includes("shared_kitchen"), "shared_kitchen insert missing");
   assert.ok(!wroteForMember(CONN, "memberB"), "kitchen must NOT fan out to member tables (shared-only model)");
 });
 
 test("setKitchenItemProductImage updates shared_kitchen ONLY (no per-member fan-out)", async () => {
   CONN = makeConn({ selectRows: [targetRow()] });
-  await da.setKitchenItemProductImage(householdCtx(), "row-1", { product_image_url: "http://img" });
+  await da.setKitchenItemProductImage(householdCtx(), "row-1", { product_image_url: "http://img" }, {skipKitchenDependentGeneration:true});
   assert.ok(targets(CONN, "UPDATE").includes("shared_kitchen"), "shared_kitchen update missing");
   assert.ok(!wroteForMember(CONN, "memberB"), "kitchen must NOT fan out to member tables (shared-only model)");
 });
@@ -193,7 +203,7 @@ test("setKitchenItemProductImage updates shared_kitchen ONLY (no per-member fan-
 // DISCARDS (household)
 test("discardKitchenItem inserts discard into shared + BOTH members (household)", async () => {
   CONN = makeConn({ selectRows: [targetRow()] });
-  await da.discardKitchenItem(householdCtx(), "Bananas", "spoiled");
+  await da.discardKitchenItem(householdCtx(), "Bananas", "spoiled", {skipKitchenDependentGeneration:true});
   assert.ok(wroteForMember(CONN, "ownerA") && wroteForMember(CONN, "memberB"), "discard insert must fan out to both members");
   // VALUES preserved: member discard row is _owner=memberB (a plain string, not a
   // function — guards the dynamic-column buildStatement wrapper).
@@ -278,7 +288,7 @@ test("normalizeKitchenCategory: unknown free-text defaults to prepared_other (ne
 });
 test("checkInKitchenItem persists a NON-NULL enum category (null guess -> normalized)", async () => {
   CONN = makeConn();
-  await da.checkInKitchenItem(householdCtx(), { product_name: "Mixed Berry Yogurt Bites", category: null, location: "snacks" });
+  await da.checkInKitchenItem(householdCtx(), { product_name: "Mixed Berry Yogurt Bites", category: null, location: "snacks" }, {skipKitchenDependentGeneration:true});
   const params = insertParamsFor(CONN, "shared_kitchen");
   assert.ok(params, "shared_kitchen INSERT missing");
   // category is the 6th INSERT param (rowId, owner, device, name, brand, category, ...)
@@ -288,7 +298,7 @@ test("checkInKitchenItem persists a NON-NULL enum category (null guess -> normal
 });
 test("checkInKitchenItem normalizes a free-text category guess (Condiment -> pantry)", async () => {
   CONN = makeConn();
-  await da.checkInKitchenItem(householdCtx(), { product_name: "Ketchup", category: "Condiment" });
+  await da.checkInKitchenItem(householdCtx(), { product_name: "Ketchup", category: "Condiment" }, {skipKitchenDependentGeneration:true});
   const category = insertParamsFor(CONN, "shared_kitchen")[5];
   assert.equal(category, "pantry");
 });
@@ -335,8 +345,6 @@ test("normalizeKitchenCategory: explicit enum/category guess wins over name", ()
 });
 test("updateKitchenItemDetails clamps a free-text category onto the enum", async () => {
   CONN = makeConn({ selectRows: [targetRow({ product_name: "Cajun Seasoning" })] });
-  await da.updateKitchenItemDetails(householdCtx(), "row-1", { category: "Seasoning" }, { skipKitchenDependentGeneration: true });
-  const up = mutateParamsFor(CONN, "UPDATE", "shared_kitchen");
-  assert.ok(up && up.includes("spices"), "a seasoning should normalize to 'spices' in the UPDATE");
-  assert.ok(!up.includes("Seasoning"), "raw free-text 'Seasoning' must not be persisted");
+  await da.updateKitchenItemDetails(householdCtx(), {item_id:"row-1"}, { category: "Seasoning" }, { skipKitchenDependentGeneration: true });
+  assert.equal(LAST_EDIT.category,"spices","canonical API receives the normalized category");
 });
