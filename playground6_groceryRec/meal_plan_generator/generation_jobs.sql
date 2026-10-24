@@ -18,5 +18,6 @@ CREATE TABLE IF NOT EXISTS meal_plan_publications (
   household_id VARCHAR(64) NOT NULL,
   members_hash CHAR(64) NOT NULL,
   dietary_hash CHAR(64) NOT NULL,
+  plan_hash CHAR(64) NOT NULL,
   published_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

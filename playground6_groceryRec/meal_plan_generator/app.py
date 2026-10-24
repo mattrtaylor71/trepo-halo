@@ -643,10 +643,13 @@ def _locked_members(conn, owner, scope):
 def _record_publication(conn, snapshot):
     with conn.cursor() as cur:
         for member in snapshot['members']:
-            cur.execute('INSERT INTO meal_plan_publications (owner_id,household_id,members_hash,dietary_hash) '
-                        'VALUES (%s,%s,%s,%s) ON DUPLICATE KEY UPDATE household_id=VALUES(household_id),'
-                        'members_hash=VALUES(members_hash),dietary_hash=VALUES(dietary_hash),published_at=CURRENT_TIMESTAMP(6)',
-                        [member,snapshot['household'],recipe_generation_guard.digest(snapshot['members']),snapshot['dietary']])
+            cur.execute('SELECT plan FROM shared_meal_plan WHERE owner_id=%s FOR UPDATE',[member])
+            plan=cur.fetchone()['plan']
+            if isinstance(plan,str):plan=json.loads(plan)
+            cur.execute('INSERT INTO meal_plan_publications (owner_id,household_id,members_hash,dietary_hash,plan_hash) '
+                        'VALUES (%s,%s,%s,%s,%s) ON DUPLICATE KEY UPDATE household_id=VALUES(household_id),'
+                        'members_hash=VALUES(members_hash),dietary_hash=VALUES(dietary_hash),plan_hash=VALUES(plan_hash),published_at=CURRENT_TIMESTAMP(6)',
+                        [member,snapshot['household'],recipe_generation_guard.digest(snapshot['members']),snapshot['dietary'],recipe_generation_guard.digest(plan)])
 
 def _validate_generated_recipes(recipes):
     if not isinstance(recipes, list) or len(recipes) < 12:

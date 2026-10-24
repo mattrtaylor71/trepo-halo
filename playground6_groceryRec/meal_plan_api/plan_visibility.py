@@ -1,5 +1,12 @@
-"""Read-only validation of the saved plan's household and restriction provenance."""
-import json
+"""Validate new publication provenance; retain legacy owner reads during migration.
+
+Legacy rows have no provable historical household stamp. Do not manufacture one
+or hide every existing plan during rollout. They retain their previous owner-only
+read contract, with current dietary validation. New publications always require
+their exact content, household and restrictions to match. Full legacy enforcement
+can be enabled only after legacy reconciliation is complete.
+"""
+import json,os
 from family_brain import store as brain_store
 from family_brain.recipe_safety import _recipe_violates
 from household_brain.core import digest
@@ -30,8 +37,11 @@ def visible_plan(conn, owner, plan):
             publication=cur.fetchone()
         prefs=brain_store.dietary_preferences(conn,owner,current=True)
         normalized={key:[s.strip() for s in prefs.get(key,[]) if s.strip()] for key in ('allergies','diets','religious','health','custom')}
-        valid=bool(publication and publication['household_id']==household and
-                   publication['members_hash']==digest(members) and publication['dietary_hash']==digest(normalized))
+        if publication:
+            valid=bool(publication['household_id']==household and publication['members_hash']==digest(members)
+                       and publication['dietary_hash']==digest(normalized) and publication.get('plan_hash')==digest(plan))
+        else:
+            valid=os.getenv('MEAL_PLAN_REQUIRE_LEGACY_PROVENANCE','false').lower()!='true'
         valid=valid and isinstance(plan,list) and all(isinstance(slot,dict) and isinstance(slot.get('recipe'),dict)
                    and not _recipe_violates(slot['recipe'],prefs) for slot in plan)
         conn.commit()

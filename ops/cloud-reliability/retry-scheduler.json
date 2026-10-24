@@ -29,10 +29,12 @@
       "Type": "String"
     },
     "SubnetIds": {
-      "Type": "List<AWS::EC2::Subnet::Id>"
+      "Type": "CommaDelimitedList",
+      "Default": ""
     },
     "SecurityGroupIds": {
-      "Type": "List<AWS::EC2::SecurityGroup::Id>"
+      "Type": "CommaDelimitedList",
+      "Default": ""
     },
     "ScheduleState": {
       "Type": "String",
@@ -104,12 +106,20 @@
         "MemorySize": 256,
         "ReservedConcurrentExecutions": 1,
         "VpcConfig": {
-          "SubnetIds": {
-            "Ref": "SubnetIds"
-          },
-          "SecurityGroupIds": {
-            "Ref": "SecurityGroupIds"
-          }
+          "Fn::If": [
+            "HasVpc",
+            {
+              "SubnetIds": {
+                "Ref": "SubnetIds"
+              },
+              "SecurityGroupIds": {
+                "Ref": "SecurityGroupIds"
+              }
+            },
+            {
+              "Ref": "AWS::NoValue"
+            }
+          ]
         },
         "Environment": {
           "Variables": {
@@ -180,6 +190,25 @@
           "Arn"
         ]
       }
+    }
+  },
+  "Conditions": {
+    "HasVpc": {
+      "Fn::Not": [
+        {
+          "Fn::Equals": [
+            {
+              "Fn::Join": [
+                "",
+                {
+                  "Ref": "SubnetIds"
+                }
+              ]
+            },
+            ""
+          ]
+        }
+      ]
     }
   }
 }

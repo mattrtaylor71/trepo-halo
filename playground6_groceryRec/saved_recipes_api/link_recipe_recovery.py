@@ -24,7 +24,7 @@ import urllib3
 import recipe_work_budget as work
 from recovery_web import public_target, fetch_page
 
-VERSION = 'link-recovery-v4.6'
+VERSION = 'link-recovery-v4.8'
 MODEL = 'gpt-4.1-2025-04-14'
 MAX_BYTES = 48_000_000
 MAX_SECONDS = 300
@@ -33,7 +33,8 @@ MAX_TEXT = 18000
 MAX_IMAGES = 4
 MAX_SLIDES = 12
 CORRECTABLE_GUARDS = frozenset({'omitted_source_temperature', 'unquoted_instruction_fact',
-    'unsupported_instruction_number', 'unsupported_instruction_action', 'invalid_evidence_reference'})
+    'unsupported_instruction_number', 'unsupported_instruction_action', 'invalid_evidence_reference',
+    'unverified_ingredient_amount'})
 
 
 class VideoDecodeUnavailable(ValueError):
@@ -547,6 +548,11 @@ Do not repeat ingredient amounts in directions; quantities belong only in ingred
 A phrase like 'four ingredient recipe' is an ingredient count, NEVER an egg quantity.
 For textual ingredients, keep name and amount verbatim from the original ingredient
 line; put the entire literal line in amount_quote. Do not add parenthetical qualifiers.
+Keep the ingredient name a contiguous phrase from that line. For '2 cups corn or
+240g kernels', use name 'corn', not the reconstructed phrase 'corn kernels'. Put
+the quantity in amount; when alternative measurements interleave the food name,
+the full literal ingredient line may be used as amount. Do not list a heading such
+as 'Seasonings' as an extra ingredient when its actual spices are listed below it.
 A multi-recipe compilation is NOT one recipe. Return is_recipe false instead of mixing
 unrelated recipes together. Components explicitly served together are ONE recipe even
 when each has its own heading or ingredient list. For example: salad plus its dressing
@@ -716,9 +722,33 @@ def verified_recipe(candidate, review, texts, frame_ids, diagnostics=None):
                      and reviews[index].get('amount_supported') is True
                      and any(evidence_contains(quote, t['text']) for t in texts
                              if t['id'] in row['evidence_ids']))
-        # A model may include the same quantity in both fields. Keep it once.
+        # A literal source line may interleave its food name and alternatives:
+        # "1 cup dry rice (185g)" / "2 cups corn or 240g kernels". The model's
+        # separated fields are not contiguous, but every token must still occur
+        # in the same verified short quote. Display that ORIGINAL quote, never
+        # the reconstructed measurement or food name. Missing/invented tokens
+        # still fail and request a bounded correction.
+        if amount and not amount_ok and quote and len(str(quote)) <= 300:
+            tokens = re.findall(r'[\w¼-¾]+(?:[./-][\w¼-¾]+)*', str(amount)+' '+quote_name)
+            literal_ok = (tokens and reviews[index].get('amount_supported') is True
+                and all(evidence_contains(token, quote) for token in tokens)
+                and any(evidence_contains(quote, t['text']) for t in texts if t['id'] in row['evidence_ids']))
+            if literal_ok:
+                component = name[len(quote_name):] if name.startswith(quote_name) else ''
+                ing.append(str(quote).strip() + component)
+                continue
+        # A stated quantity that failed verification needs a bounded correction,
+        # not a successful recipe silently stripped of its measurement.
+        if amount and not amount_ok:
+            return reject('unverified_ingredient_amount')
+        # Alternate measures can contain the complete ingredient line. Keep its
+        # original wording once rather than appending the food name again.
         already_prefixed = amount_ok and bool(re.match(re.escape(normalize(amount)) + r'(?:$|[\s,;(])', normalize(name)))
-        ing.append((str(amount).strip()+' ' if amount_ok and not already_prefixed else '') + name)
+        if amount_ok and evidence_contains(quote_name, str(amount)):
+            component = name[len(quote_name):] if name.startswith(quote_name) else ''
+            ing.append(str(amount).strip() + component)
+        else:
+            ing.append((str(amount).strip()+' ' if amount_ok and not already_prefixed else '') + name)
         if not amount_ok:
             unknown.append(name)
     instructions = [str(row.get('instruction') or '').strip() for row in steps]

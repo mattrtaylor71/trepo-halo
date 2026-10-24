@@ -57,6 +57,17 @@ def test_halo_partial_success_uses_saved_tool_outcome(monkeypatch):
         'outcome':{'actions':'partial'}}])
     assert m.check_halo_voice_outcomes()[0]==1
 
+def test_fixed_pre_assistant_no_speech_branch_is_not_missing_write_coverage(monkeypatch):
+    row={'job_id':'one','status':'completed','transcript':None,'assistant_actions':[],
+         'response_type':'info_answer','response_text':'No speech detected.','last_error':None}
+    monkeypatch.setattr(m,'_scan_all',lambda *a,**kw:[row])
+    assert m.check_halo_voice_outcomes()==(0,[])
+    for field,value in [('transcript','add milk'),('assistant_actions',[{'tool':'add_item'}]),
+                        ('last_error','provider_error'),('response_text','Done!')]:
+        changed={**row,field:value}
+        monkeypatch.setattr(m,'_scan_all',lambda *a,**kw:[changed])
+        with pytest.raises(ValueError,match='coverage_missing'):m.check_halo_voice_outcomes()
+
 def test_missing_media_and_late_arrival_are_reconciled_without_writes(monkeypatch):
     from botocore.exceptions import ClientError
     monkeypatch.setenv('HALO_MEDIA_BUCKETS','["images","discards"]')
@@ -68,4 +79,11 @@ def test_missing_media_and_late_arrival_are_reconciled_without_writes(monkeypatc
     client.head_object.side_effect=None;client.head_object.return_value={'ContentLength':2000}
     assert m.check_missing_halo_media()[0]==0
     client.head_object.side_effect=ClientError({'Error':{'Code':'403'}},'HeadObject')
+    client.list_objects_v2.return_value={'Contents':[]}
+    assert m.check_missing_halo_media()[0]==1
+    client.list_objects_v2.return_value={'Contents':[{'Key':'images/a/halo-one/one.jpg.extra','Size':2000}]}
+    assert m.check_missing_halo_media()[0]==1
+    client.list_objects_v2.return_value={'Contents':[{'Key':'images/a/halo-one/one.jpg','Size':2000}]}
+    assert m.check_missing_halo_media()[0]==0
+    client.list_objects_v2.side_effect=ClientError({'Error':{'Code':'403'}},'ListObjectsV2')
     with pytest.raises(ClientError):m.check_missing_halo_media()

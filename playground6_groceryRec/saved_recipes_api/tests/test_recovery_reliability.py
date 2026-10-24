@@ -70,6 +70,38 @@ def test_unsupported_temperature_is_still_rejected():
     result=r.verified_recipe(candidate,REVIEW,[{'id':'source_text','text':TEXT}],set(),{})
     assert result is None
 
+@pytest.mark.parametrize('name,amount,expected',[
+    ('yogurt','1 cup yogurt','1 cup yogurt'),
+    ('yogurt','1 cup or 150g yogurt','1 cup or 150g yogurt'),
+    ('yogurt (for topping)','1 cup yogurt','1 cup yogurt (for topping)'),
+    ('1 cup yogurt','1 cup','1 cup yogurt'),
+    ('corn','2 cups corn or 240g kernels','2 cups corn or 240g kernels'),
+])
+def test_quoted_measurement_is_preserved_without_duplicate_food(name,amount,expected):
+    candidate=copy.deepcopy(CANDIDATE)
+    quote=amount if 'yogurt' in amount or 'corn' in amount else amount+' yogurt'
+    candidate['ingredients'][0].update(name=name,amount=amount,amount_quote=quote)
+    text=TEXT+'\n'+quote
+    result=r.verified_recipe(candidate,REVIEW,[{'id':'source_text','text':text}],set(),{})
+    assert result['ingredients'][0]==expected
+
+def test_interleaved_measurement_uses_literal_source_line_not_reconstructed_fields():
+    candidate=copy.deepcopy(CANDIDATE)
+    candidate['ingredients'][0].update(name='corn kernels',amount='2 cups corn or 240g kernels',amount_quote='2 cups corn or 240g kernels')
+    result=r.verified_recipe(candidate,REVIEW,[{'id':'source_text','text':TEXT+'\n2 cups corn or 240g kernels'}],set(),{})
+    assert result['ingredients'][0]=='2 cups corn or 240g kernels'
+    candidate['ingredients'][0].update(name='dry jasmine rice',amount='1 cup (185g)',amount_quote='1 cup dry jasmine rice (185g)')
+    result=r.verified_recipe(candidate,REVIEW,[{'id':'source_text','text':TEXT+'\n1 cup dry jasmine rice (185g)'}],set(),{})
+    assert result['ingredients'][0]=='1 cup dry jasmine rice (185g)'
+
+def test_invented_measurement_requires_correction_not_silent_omission():
+    candidate=copy.deepcopy(CANDIDATE)
+    candidate['ingredients'][0]['amount']='3 cups'
+    diagnostic={}
+    assert r.verified_recipe(candidate,REVIEW,[{'id':'source_text','text':TEXT}],set(),diagnostic) is None
+    assert diagnostic['rejection_code']=='unverified_ingredient_amount'
+    assert diagnostic['rejection_code'] in r.CORRECTABLE_GUARDS
+
 @pytest.mark.parametrize('url',['https://tiktok.com/@x/video/1','https://instagram.com/p/1','https://example.org/recipe'])
 def test_retained_evidence_precedes_network_for_all_sources(monkeypatch,url):
     table=Table();app=SimpleNamespace(_jobs_table=lambda:table,_resolved_url_hash=lambda u:u,_log_event=Mock())

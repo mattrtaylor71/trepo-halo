@@ -254,6 +254,14 @@ def check_halo_voice_outcomes():
         if row.get('status')=='completed':
             outcome=row.get('outcome') or {}
             if not outcome:
+                # Legacy index.js returns this fixed result BEFORE running the
+                # assistant when transcription is empty. It is an explicit
+                # no-action terminal branch, not model prose proving a write.
+                if (row.get('transcript') is None and row.get('assistant_actions')==[]
+                    and row.get('response_type')=='info_answer'
+                    and row.get('response_text')=='No speech detected.'
+                    and row.get('last_error') is None):
+                    continue
                 raise ValueError('halo_voice_outcome_coverage_missing')
             if outcome.get('actions') in ('partial','failed','unconfirmed'):
                 failures.append({'job_id':row['job_id'],'actions':outcome['actions']})
@@ -284,7 +292,16 @@ def check_missing_halo_media():
                 if result['ContentLength']>0:exists=True;break
             except Exception as exc:
                 code=getattr(exc,'response',{}).get('Error',{}).get('Code')
-                if code not in ('404','NoSuchKey','NotFound'):raise
+                if code in ('403','AccessDenied'):
+                    # S3 hides absence as 403 without unrestricted ListBucket.
+                    # An exact-prefix list uses the separately scoped listing
+                    # grant; a denied list remains unknown coverage, not absence.
+                    listing=client.list_objects_v2(Bucket=bucket,Prefix=key,MaxKeys=1)
+                    if any(item.get('Key')==key and item.get('Size',0)>0
+                           for item in listing.get('Contents',[])):
+                        exists=True
+                        break
+                elif code not in ('404','NoSuchKey','NotFound'):raise
         if not exists:missing.append({'job_id':row['job_id'],'reason':'upload_not_received'})
     return len(missing),missing
 
