@@ -26,6 +26,10 @@ before(async()=>{
  globalThis.fetch=async(url,opt)=>{
    assert.match(String(url),/api.openai.com/);const body=JSON.parse(opt.body);requests.push(body);
    let m=queue.shift() || msg([],'All done.');if(typeof m==='function')m=m();
+   if(String(url).endsWith('/responses'))return new Response(JSON.stringify({status:'completed',output:[
+     ...(m.content?[{type:'message',role:'assistant',content:[{type:'output_text',text:m.content}]}]:[]),
+     ...m.tool_calls.map(c=>({type:'function_call',call_id:c.id,name:c.function.name,arguments:c.function.arguments})),
+   ]}),{status:200,headers:{'content-type':'application/json'}});
    if(body.stream){const delta=m.tool_calls.length?{tool_calls:m.tool_calls.map((x,index)=>({...x,index}))}:{content:m.content};
      return new Response('data: '+JSON.stringify({choices:[{delta}]})+'\n\ndata: [DONE]\n\n',{status:200});}
    return new Response(JSON.stringify({choices:[{message:m}]}),{status:200,headers:{'content-type':'application/json'}});
@@ -76,4 +80,21 @@ test('shopping list receipt survives the same activity revision change',async()=
  reset();queue=[msg([tool('add_to_shopping_list',{item_name:'Bananas'})]),msg([],'Added bananas.')];
  const i=input();i.transcript='Add bananas to my shopping list';const r=await run(false,i);
  assert.match(r.text,/Bananas/);assert.equal(r.outcome.actions,'confirmed');assert.equal(executed.length,1);
+});
+test('opted-in Responses stream publishes safe stages and only the validated answer',async()=>{
+ reset();queue=[msg([],'You have Dijon mustard in your kitchen.')];
+ const i=input();i.transcript='What condiments do I have?';i.env.THYME_RUNTIME_V1='1';i.env.THYME_RUNTIME_ACTORS='["test-actor"]';
+ const events=[];const iterator=da.runDeviceAssistantStreaming(i);let step;
+ do{step=await iterator.next();if(!step.done)events.push(step.value);}while(!step.done);
+ assert.equal(requests[0].model,'gpt-6.1-sol');assert.equal(requests[0].store,false);assert.ok(requests[0].input);
+ assert.deepEqual(events.filter(e=>e.type==='progress').map(e=>e.stage),['household','thinking','validating']);
+ assert.equal(events.filter(e=>e.type==='text_delta').map(e=>e.delta).join(''),step.value.text);
+ assert.match(step.value.text,/Dijon mustard/);assert.equal(executed.length,0);
+});
+test('opted-in Responses preserves the existing receipt and freshness checks after a write',async()=>{
+ reset();queue=[msg([tool('add_to_shopping_list',{item_name:'Bananas'})]),msg([],'Added bananas to your shopping list.')];
+ const i=input();i.transcript='Add bananas to my shopping list';i.env.THYME_RUNTIME_V1='1';i.env.THYME_RUNTIME_ACTORS='["test-actor"]';
+ const result=await run(true,i);
+ assert.match(result.text,/Bananas/);assert.equal(result.outcome.actions,'confirmed');assert.equal(executed.length,1);
+ assert.ok(requests.every(r=>r.model==='gpt-6.1-sol' && r.store===false));
 });

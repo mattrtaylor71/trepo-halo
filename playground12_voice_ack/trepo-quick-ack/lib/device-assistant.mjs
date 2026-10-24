@@ -1,3 +1,6 @@
+import {activity,toolActivity} from '../../../shared/thyme-runtime/progress.mjs';
+import {runtimeEnabled,planTurn,selectTools,QUICK_INSTRUCTIONS} from '../../../shared/thyme-runtime/policy.mjs';
+import {ResponsesClient,chatInput,completionMessage} from '../../../shared/thyme-runtime/responses.mjs';
 import __trepoAIConsent from '/var/task/ai_consent_guard.cjs';
 import {refreshBrainTurn, completedActionMessage, toolAttemptKey, publishBrainResult} from './brain-turn.mjs';
 import {leftoverFirstToolChoice} from "./leftover-check-in-intent.mjs";
@@ -905,7 +908,31 @@ function normalizeSessionMessages(sessionMessages) {
     .filter(Boolean);
 }
 
+async function runtimeCompletion(messages, env, {deadline,toolChoice}) {
+  const plan=env.THYME_TURN_PLAN;
+  const tools=selectTools(buildChatTools(env),plan,toolChoice?.function?.name);
+  const response=await new ResponsesClient(env.OPENAI_API_KEY,{fetcher:__trepoAIConsent.providerFetch(fetch)}).complete({model:plan.model,
+    input:chatInput(messages,env.THYME_RESPONSE_OUTPUTS),tools,toolChoice,deadline:Math.min(deadline || Infinity,env.THYME_TURN_DEADLINE),
+    requestId:env.THYME_REQUEST_ID ? `${env.THYME_REQUEST_ID}:model:${env.THYME_MODEL_ROUND++}` : undefined});
+  for(const item of response.output)if(item.type==='function_call')env.THYME_RESPONSE_OUTPUTS.set(item.call_id,response.output);
+  console.log(JSON.stringify({evt:'thyme_stage',stage:'model',request_id:env.THYME_REQUEST_ID,
+    model:plan.model,elapsed_ms:response.elapsedMs,tools:tools.length,input_tokens:response.usage?.input_tokens,
+    output_tokens:response.usage?.output_tokens}));
+  return {choices:[{message:completionMessage(response)}]};
+}
+function runtimeEnvironment(input,env) {
+  if(input.responseSurface!=='app' || !env.FAMILY_BRAIN_REQUEST || !runtimeEnabled(env,input.userContext?.userId))return env;
+  const plan=planTurn(input.transcript,input.sessionMessages);
+  // Legacy long jobs retain their existing recovery and reasoning continuity.
+  if(plan.mode!=='quick')return env;
+  return {...env,THYME_RESPONSE_OUTPUTS:new Map(),THYME_TURN_DEADLINE:Date.now()+45000,THYME_TURN_PLAN:plan,THYME_REQUEST_ID:input.kitchenRequest?.operationId,THYME_MODEL_ROUND:0};
+}
+function turnPrompt(userContext,options,env) {
+  return env.THYME_TURN_PLAN ? `${QUICK_INSTRUCTIONS}\nCurrent date: ${new Date().toISOString()}.\n${options.dietaryBlock}`
+    : buildSystemPrompt(userContext,options);
+}
 async function createChatCompletion(messages, env, { deadline = null, toolChoice = "auto" } = {}) {
+  if(env.THYME_TURN_PLAN)return runtimeCompletion(messages,env,{deadline,toolChoice});
   return openAiRequest("/chat/completions", {
     env,
     headers: getOpenAiHeaders(env),
@@ -1319,6 +1346,12 @@ function looksLikeHallucinatedAction(text) {
 }
 
 async function* createChatCompletionStream(messages, env, { deadline = null, toolChoice = "auto" } = {}) {
+  if(env.THYME_TURN_PLAN) {
+    const {choices}=await runtimeCompletion(messages,env,{deadline,toolChoice});
+    const m=choices[0].message;
+    yield {choices:[{delta:{content:m.content,tool_calls:m.tool_calls.map((c,index)=>({...c,index}))}}]};
+    return;
+  }
   const response = await openAiRequest("/chat/completions", {
     env,
     headers: getOpenAiHeaders(env),
@@ -1425,8 +1458,8 @@ async function freshTurnMessages({transcript,userContext,env,kitchenTask,normali
   // failure / no prefs yields an empty block = unchanged behavior.
   const dietaryBlock = formatDietaryPreferencesBlock(await getDietaryPreferences(userContext, { env, strict:Boolean(env.FAMILY_BRAIN_REQUIRE_DIETARY) }));
   const messages = [
-    { role: "system", content: buildSystemPrompt(userContext, { responseSurface: normalizedResponseSurface, dietaryBlock }) },
-    ...getAppGuideMessages(),
+    { role: "system", content: turnPrompt(userContext, { responseSurface: normalizedResponseSurface, dietaryBlock },env) },
+    ...(env.THYME_TURN_PLAN ? [] : getAppGuideMessages()),
     ...(env?.FAMILY_BRAIN_REQUEST?.brain?.prompt ? [{role:'system',content:env.FAMILY_BRAIN_REQUEST.brain.prompt}] : []),
     ...(kitchenTaskMessage(kitchenTask) ? [kitchenTaskMessage(kitchenTask)] : []),
     ...(shoppingGroundingMessage ? [{ role: "system", content: shoppingGroundingMessage }] : []),
@@ -1474,8 +1507,8 @@ async function* runDeviceAssistantStreamingImpl({ transcript, userContext, env, 
   // failure / no prefs yields an empty block = unchanged behavior.
   const dietaryBlock = formatDietaryPreferencesBlock(await getDietaryPreferences(userContext, { env, strict:Boolean(env.FAMILY_BRAIN_REQUIRE_DIETARY) }));
   const messages = [
-    { role: "system", content: buildSystemPrompt(userContext, { responseSurface: normalizedResponseSurface, dietaryBlock }) },
-    ...getAppGuideMessages(),
+    { role: "system", content: turnPrompt(userContext, { responseSurface: normalizedResponseSurface, dietaryBlock },env) },
+    ...(env.THYME_TURN_PLAN ? [] : getAppGuideMessages()),
     ...(env?.FAMILY_BRAIN_REQUEST?.brain?.prompt ? [{role:'system',content:env.FAMILY_BRAIN_REQUEST.brain.prompt}] : []),
     ...(kitchenTaskMessage(kitchenTask) ? [kitchenTaskMessage(kitchenTask)] : []),
     ...(shoppingGroundingMessage ? [{ role: "system", content: shoppingGroundingMessage }] : []),
@@ -1502,7 +1535,7 @@ async function* runDeviceAssistantStreamingImpl({ transcript, userContext, env, 
   // whole completion loop. Model is the OpenAI chat model actually requested.
   const aiOpStart = Date.now();
   const aiOp = normalizedResponseSurface === "app" ? "chat_app" : "chat_halo";
-  const aiModel = env.OPENAI_MODEL || "gpt-5.4-2026-03-05";
+  const aiModel = env.THYME_TURN_PLAN?.model || env.OPENAI_MODEL || "gpt-5.4-2026-03-05";
   let falseConfirmCorrections = 0;
   let correctiveAllowedTool = null;
   let falseConfirmRecovered = false;
@@ -1516,6 +1549,7 @@ async function* runDeviceAssistantStreamingImpl({ transcript, userContext, env, 
 
   try {
   for (let turn = 0; turn < 6; turn += 1) {
+    yield activity('thinking',{id:`answer-${turn}`,requestId:kitchenRequest?.operationId});
     if (env.FAMILY_BRAIN_REQUEST?.refreshNeeded) {
       if (!await refreshBrainTurn(env.FAMILY_BRAIN_REQUEST,env)) break;
       const fresh=await freshTurnMessages({transcript,userContext,env,kitchenTask,normalizedResponseSurface});
@@ -1883,8 +1917,8 @@ async function runDeviceAssistantImpl({ transcript, userContext, env, sessionMes
   // failure / no prefs yields an empty block = unchanged behavior.
   const dietaryBlock = formatDietaryPreferencesBlock(await getDietaryPreferences(userContext, { env, strict:Boolean(env.FAMILY_BRAIN_REQUIRE_DIETARY) }));
   const messages = [
-    { role: "system", content: buildSystemPrompt(userContext, { responseSurface: normalizedResponseSurface, dietaryBlock }) },
-    ...getAppGuideMessages(),
+    { role: "system", content: turnPrompt(userContext, { responseSurface: normalizedResponseSurface, dietaryBlock },env) },
+    ...(env.THYME_TURN_PLAN ? [] : getAppGuideMessages()),
     ...(env?.FAMILY_BRAIN_REQUEST?.brain?.prompt ? [{role:'system',content:env.FAMILY_BRAIN_REQUEST.brain.prompt}] : []),
     ...(kitchenTaskMessage(kitchenTask) ? [kitchenTaskMessage(kitchenTask)] : []),
     ...(shoppingGroundingMessage ? [{ role: "system", content: shoppingGroundingMessage }] : []),
@@ -1911,7 +1945,7 @@ async function runDeviceAssistantImpl({ transcript, userContext, env, sessionMes
   // OpenAI chat model actually requested.
   const aiOpStart = Date.now();
   const aiOp = normalizedResponseSurface === "app" ? "chat_app" : "chat_halo";
-  const aiModel = env.OPENAI_MODEL || "gpt-5.4-2026-03-05";
+  const aiModel = env.THYME_TURN_PLAN?.model || env.OPENAI_MODEL || "gpt-5.4-2026-03-05";
   let falseConfirmCorrections = 0;
   let correctiveAllowedTool = null;
   let falseConfirmRecovered = false;
@@ -2149,7 +2183,7 @@ export async function runDeviceAssistant(input) {
   const prepared=await brainRequest(input);
   if(!prepared)return runDeviceAssistantImpl({...input,env:{...input.env,FAMILY_BRAIN_REQUIRE_DIETARY:Boolean(input.kitchenRequest?.brainTicket || candidateOwner(input.kitchenRequest?.authorization,input.env))}});
   const memory=startBrainTurn(prepared);
-  const env={...input.env,FAMILY_BRAIN_REQUEST:memory,FAMILY_BRAIN_REQUIRE_DIETARY:true};
+  const env=runtimeEnvironment(input,{...input.env,FAMILY_BRAIN_REQUEST:memory,FAMILY_BRAIN_REQUIRE_DIETARY:true});
   try {
     const raw=await runDeviceAssistantImpl({...input,env});
     const result=await publishBrainResult(raw,memory,env,input.responseSurface);
@@ -2158,15 +2192,30 @@ export async function runDeviceAssistant(input) {
   } catch(error) { if(memory.marker)emitAiOp(memory.marker);throw error; }
 }
 export async function* runDeviceAssistantStreaming(input) {
+  const requestId=input.kitchenRequest?.operationId;
+  yield activity('household',{requestId});
   const prepared=await brainRequest(input);
   if(!prepared)return yield* runDeviceAssistantStreamingImpl({...input,env:{...input.env,FAMILY_BRAIN_REQUIRE_DIETARY:Boolean(input.kitchenRequest?.brainTicket || candidateOwner(input.kitchenRequest?.authorization,input.env))}});
   const memory=startBrainTurn(prepared);
-  const env={...input.env,FAMILY_BRAIN_REQUEST:memory,FAMILY_BRAIN_REQUIRE_DIETARY:true};
+  const env=runtimeEnvironment(input,{...input.env,FAMILY_BRAIN_REQUEST:memory,FAMILY_BRAIN_REQUIRE_DIETARY:true});
   // Keep every draft private. Publish exactly the validated final text, including
   // receipt reconciliation; old deltas may contain stale context or false claims.
   try {
     const iterator=runDeviceAssistantStreamingImpl({...input,env});
-    let step; do {step=await iterator.next();}while(!step.done);
+    let step,activeTool=null,ordinal=0;
+    do {
+      step=await iterator.next();
+      // Only server-owned activity crosses the validation boundary. Never forward
+      // raw model drafts, tool arguments, result summaries or internal reasoning.
+      if(!step.done && step.value?.type==='tool_start') {
+        activeTool={id:`tool-${++ordinal}`,name:step.value.tool_name,args:step.value.args};
+        yield toolActivity(activeTool.name,{...activeTool,requestId});
+      } else if(!step.done && step.value?.type==='tool_end' && activeTool) {
+        yield toolActivity(activeTool.name,{id:activeTool.id,state:step.value.ok?'completed':'failed',requestId});
+        activeTool=null;
+      } else if(!step.done && step.value?.type==='progress')yield step.value;
+    }while(!step.done);
+    yield activity('validating',{requestId});
     const result=await publishBrainResult(step.value,memory,env,input.responseSurface);
     recordPublishedResult(memory,result);
     yield {type:'text_delta',delta:result.text};

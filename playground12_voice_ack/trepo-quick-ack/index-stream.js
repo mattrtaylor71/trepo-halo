@@ -1,3 +1,4 @@
+import {activity} from '../../shared/thyme-runtime/progress.mjs';
 import { assistantDeviceID, recordDirectVoice } from "./lib/assistant-activity.mjs";
 import {preserveCapturedAudio} from "./lib/captured-audio.mjs";
 import {historySessionRecap} from './lib/history-client.mjs';
@@ -300,6 +301,8 @@ async function streamHandler(event, responseStream, context) {
     if (reconnectError) throw reconnectError;
     if (modernIdentity) modernProof = await verifiedActor(event,process.env);
     transcript = requestInput.transcript || null;
+    writeLine(responseStream,activity('received',{requestId:getHeader(headers,'x-operation-id')}));
+    console.log(JSON.stringify({evt:'thyme_stage',stage:'accepted',request_id:getHeader(headers,'x-operation-id'),elapsed_ms:Date.now()-startedAt}));
   } catch (error) {
     if (error.code === 'sign_in_required' && modernIdentity && reconnectEnabled(process.env) &&
         getHeader(headers,'x-device-id') === 'ios-app' && !getHeader(headers,'authorization')) {
@@ -335,6 +338,7 @@ async function streamHandler(event, responseStream, context) {
   // Transcribe audio if needed
   if (!transcript && requestInput.audioBuffer) {
     try {
+      writeLine(responseStream,activity('transcribing',{requestId:getHeader(headers,'x-operation-id')}));
       transcript = await transcribeAudio(requestInput.audioBuffer, process.env, {
         sampleRate: requestInput?.audioSampleRate,
         audioFormat: requestInput?.audioFormat
@@ -358,6 +362,7 @@ async function streamHandler(event, responseStream, context) {
     return;
   }
 
+  console.log(JSON.stringify({evt:'thyme_stage',stage:'input_ready',request_id:getHeader(headers,'x-operation-id'),elapsed_ms:Date.now()-startedAt}));
   // Resolve user context
   if(String(ownerId).startsWith('family-brain:'))throw new Error('Invalid owner namespace');
   let userContext;
@@ -371,6 +376,7 @@ async function streamHandler(event, responseStream, context) {
 
   const brainSession=await prepareBrainSession({authorization:getHeader(headers,'authorization'),
     ticket:event.familyBrainTicket,owner:ownerId,surface:requestInput?.responseSurface},process.env);
+  console.log(JSON.stringify({evt:'thyme_stage',stage:'context_ready',request_id:getHeader(headers,'x-operation-id'),elapsed_ms:Date.now()-startedAt}));
   const sessionOwnerId=brainSession?.sessionOwner || userContext.ownerId;
   const requestOwnerId=brainSession?.requestOwner || sessionOwnerId;
   if (modernIdentity) {
@@ -523,6 +529,7 @@ async function streamHandler(event, responseStream, context) {
       modernReceipt={operation:{id:modernScope.id,status:'receipt_unavailable'}};
     }
   }
+  console.log(JSON.stringify({evt:'thyme_stage',stage:'published',request_id:getHeader(headers,'x-operation-id'),elapsed_ms:Date.now()-startedAt}));
   // Write the final done event with the complete app_output
   writeLine(responseStream, {
     type: "done",

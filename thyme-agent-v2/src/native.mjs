@@ -26,7 +26,7 @@ export function voiceBytes(value){
 }
 
 export function nativeSession(s){
- return Object.fromEntries(['id','title','status','model','messages','recipes','proposals','progress','progressDetails','error','metrics'].filter(k=>s[k]!==undefined).map(k=>[k,s[k]]));
+ return Object.fromEntries(['id','title','status','model','messages','recipes','proposals','progress','progressDetails','activity','executionMode','error','metrics'].filter(k=>s[k]!==undefined).map(k=>[k,s[k]]));
 }
 
 export function createNativeHandler({verifyActor=verify,runtime=getRuntime,transcribeAudio=transcribe,env=process.env,clock=Date.now}={}){

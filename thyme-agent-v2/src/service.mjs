@@ -1,3 +1,4 @@
+import {runtimeEnabled,planTurn} from '../../shared/thyme-runtime/policy.mjs';
 import {proposalSnapshot} from "./prepare-actions.mjs";
 import {
   Fault,
@@ -148,7 +149,9 @@ export class Service {
         "Please check the uncertain change before starting more work.",
         409,
       );
-    const model = s?.model || input.model || MODELS[0];
+    const runtime=runtimeEnabled(this.gateway.env,a.actor)?'responses':null;
+    const turnPlan=planTurn(text);
+    const model = runtime ? (input.model || s?.modelPreference || turnPlan.model) : (s?.model || input.model || MODELS[0]);
     if (!MODELS.includes(model))
       throw new Fault("model", "Choose one of the available thinking styles.");
     const day = new Date(this.clock()).toISOString().slice(0, 10),
@@ -168,6 +171,10 @@ export class Service {
         household: a.household,
         title: s?.title || text.slice(0, 65),
         model,
+        runtime:runtime || 'agents',
+        requiresProviderRebuild: Boolean(s?.requiresProviderRebuild || (!runtime && s?.runtime==='responses')),
+        activity:[],
+        ...(runtime ? {runtime,executionMode:turnPlan.mode,activity:[],modelPreference:input.model || s?.modelPreference || null} : {}),
         status: "queued",
         activeRequest: rid,
         progress: "Request saved. Thyme is getting started…",
@@ -182,6 +189,7 @@ export class Service {
       actor: a.actor,
       household: a.household,
       kind: "message",
+      runtime,
       text,
       model,
       intent,

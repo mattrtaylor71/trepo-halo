@@ -1,3 +1,5 @@
+import {runDirect} from './direct-runner.mjs';
+import {activity,updateActivities} from '../../shared/thyme-runtime/progress.mjs';
 import {proposalSnapshot} from "./prepare-actions.mjs";
 import { Fault, key, scope, hash, now, publicError } from "./core.mjs";
 import { record } from "./store.mjs";
@@ -13,6 +15,7 @@ export class Runner {
     store,
     gateway,
     provider,
+    responses,
     tools,
     definitions,
     clock = Date.now,
@@ -23,6 +26,7 @@ export class Runner {
       store,
       gateway,
       provider,
+      responses,
       tools,
       definitions,
       clock,
@@ -121,6 +125,10 @@ export class Runner {
         // request must not validate newly read memory against an older model answer.
         req=await this.store.put(pk,'Q#'+rid,{...req,memoryFence:preferences.memory?.fence || null},req.version);
       }
+      if(req.runtime==='responses') {
+        await runDirect(this,a,s,req,{preferences,kitchen,shopping,inventory:compactInventory(kitchen,shopping,asOf)},started);
+        return;
+      }
       const proposals = await this.store.list(pk, key(s.id, "P") + "#");
       const receipts = proposals
         .filter((x) => x.status === "applied")
@@ -136,8 +144,8 @@ export class Runner {
       // Instructions/tools are immutable at the provider. Upgrade only between
       // turns, preserving app history, recipes, approvals and explicit preferences.
       // Never rotate a submitted/in-flight request: it must reconcile first.
-      if (s.providerId && s.agentVersion !== agentVersion && !req.submitted && !req.baselineTurns) {
-        const oldTurns = await this.provider.turns(s.providerId);
+      if ((s.requiresProviderRebuild || (s.providerId && s.agentVersion !== agentVersion)) && !req.submitted && !req.baselineTurns) {
+        const oldTurns = s.providerId ? await this.provider.turns(s.providerId) : [];
         if (oldTurns.some((t) => !["completed", "failed", "cancelled"].includes(t.status)))
           throw new Fault("previous_turn_active", "The earlier answer is still finishing. Resume it before continuing.", 409);
         const messages = (await this.store.list(pk, key(s.id, "M") + "#"))
@@ -148,7 +156,7 @@ export class Runner {
         if (Buffer.byteLength(JSON.stringify(conversationHistory)) > 180000)
           throw new Fault("history_too_large", "This long chat is saved. Start a new conversation to use Thyme’s latest improvements.", 409);
         req = await this.store.put(pk, "Q#" + rid, { ...req, upgradeHistory: conversationHistory }, req.version);
-        s = await this.store.put(pk, key(s.id), { ...s, previousProviderId: s.providerId, providerId: null }, s.version);
+        s = await this.store.put(pk, key(s.id), { ...s, previousProviderId: s.providerId || null, providerId: null, requiresProviderRebuild:false }, s.version);
       }
       const input = JSON.stringify({
         conversation_preferences: await readConversation(this.store, a, s.id),
@@ -369,8 +377,12 @@ export class Runner {
         504,
       );
     } catch (e) {
-      const fresh = await this.store.get(pk, "Q#" + rid),
-        state = await this.store.get(pk, key(s.id));
+      const fresh = await this.store.get(pk, "Q#" + rid);
+      let state = await this.store.get(pk, key(s.id));
+      if(state?.activity?.some(x=>x.state==='running')) {
+        state=await this.store.put(pk,key(s.id),{...state,activity:state.activity.map(x=>x.state==='running'
+          ? {...x,state:'failed',label:'This step needs attention'}:x)},state.version);
+      }
       // Never replay an uncertain mutation. Its journal is deliberately left for reconciliation.
       if (fresh?.status === "needs_reconciliation") return;
       const transient =
@@ -411,7 +423,9 @@ export class Runner {
   }
   async progress(pk, s, status, progress, progressDetails = s.progressDetails || []) {
     if (s.status === status && s.progress === progress && hash(s.progressDetails || []) === hash(progressDetails)) return s;
-    return this.store.put(pk, key(s.id), { ...s, status, progress, progressDetails }, s.version);
+    const event={...activity('thinking'),id:progress,label:progress};
+    return this.store.put(pk, key(s.id), { ...s, status, progress, progressDetails,
+      activity:updateActivities(s.activity,event) }, s.version);
   }
   async saveMessages(pk, s, req, items, dietary) {
     let n = 0;
@@ -495,6 +509,8 @@ export class Runner {
   }
   async finish(pk, s, req, patch) {
     const status = patch.status || "completed";
+    patch={...patch,activity:(patch.activity || s.activity || []).map(x=>x.state==='running'
+      ? {...x,state:status==='completed'?'completed':'failed',...(status==='completed'?{}:{label:'This step needs attention'})}:x)};
     await this.store.transaction([
       {
         item: record(

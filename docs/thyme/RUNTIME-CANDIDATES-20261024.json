@@ -1,0 +1,23 @@
+[
+  {
+    "target": "trepo-quick-ack-stream-dev",
+    "sha256": "7e4f6591e1208313411e17ae26bc75dc15feb26f447d2970c2d87065430588df",
+    "files": 5,
+    "import": "passed",
+    "test_consent_fixture": "excluded"
+  },
+  {
+    "target": "trepo-thyme-agent-v2-pilot-worker",
+    "sha256": "9b9361e76b2c42daa1d98a6f0eef13948740fd87ed411f6dcd2a5a55e4df30ff",
+    "files": 9,
+    "import": "passed",
+    "test_consent_fixture": "excluded"
+  },
+  {
+    "target": "trepo-thyme-agent-v2-pilot-native",
+    "sha256": "397d5d5bf2f869a5ea440059b09145b1c0fb83656317db0e5ce8cadc56471f5f",
+    "files": 9,
+    "import": "passed",
+    "test_consent_fixture": "excluded"
+  }
+]
