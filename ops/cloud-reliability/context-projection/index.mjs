@@ -5286,7 +5286,7 @@ function mergeContext(current, historical) {
 }
 function createHandler({ config, invoke, readState, readCache = async () => null, writeCache = async () => {
 }, project = shoppingProjection, clock = Date.now }) {
-  return async (event) => {
+  return async (event, execution = {}) => {
     const started = clock();
     try {
       const c = config();
@@ -5294,22 +5294,51 @@ function createHandler({ config, invoke, readState, readCache = async () => null
         const state = await readState();
         let refreshed = 0, failed = 0;
         for (const [owner2, seed] of Object.entries(state.entries)) {
-          try {
-            const raw2 = await invoke({ operation: "snapshot", owner: owner2, token: c.token });
-            if (raw2.statusCode !== 200 || raw2.owner !== owner2 || raw2.bundle?.snapshot.ownerId !== seed.userId || raw2.brain.fence?.household !== seed.householdId) throw Error("source");
-            const mayProject = raw2.brain.context?.coverage?.learning_paused === false && seed.anchor === privacyKey(raw2.brain);
-            const shopping = mayProject ? await project(raw2, seed, clock()) : null;
-            const value2 = shopping ? projectContext(shopping, owner2, raw2.context.scope, clock()) : raw2.context;
-            const checked2 = await invoke({ operation: "validate", owner: owner2, token: c.token, fence: raw2.brain.fence ?? null, dietary: raw2.dietary });
-            if (checked2.statusCode !== 200 || checked2.current !== true) throw Error("changed");
-            await writeCache(owner2, { owner: owner2, at: clock(), anchor: privacyKey(raw2.brain), context: value2 });
-            refreshed++;
-          } catch {
+          let failure = null;
+          for (let attempt = 1; attempt <= 2; attempt++) {
+            try {
+              if (execution.getRemainingTimeInMillis && execution.getRemainingTimeInMillis() < 32000) {
+                throw Object.assign(Error('deadline'), { code: 'DEADLINE_RESERVE' });
+              }
+              const raw2 = await invoke({ operation: "snapshot", owner: owner2, token: c.token });
+              if (raw2.statusCode !== 200) throw Object.assign(Error('source'), { code: raw2.code, status: raw2.statusCode });
+              if (raw2.owner !== owner2 || raw2.bundle?.snapshot.ownerId !== seed.userId || raw2.brain?.fence?.household !== seed.householdId) {
+                throw Object.assign(Error('scope'), { code: 'SCOPE_CHANGED' });
+              }
+              const mayProject = raw2.brain.context?.coverage?.learning_paused === false && seed.anchor === privacyKey(raw2.brain);
+              const shopping = mayProject ? await project(raw2, seed, clock()) : null;
+              const value2 = shopping ? projectContext(shopping, owner2, raw2.context.scope, clock()) : raw2.context;
+              const checked2 = await invoke({ operation: "validate", owner: owner2, token: c.token, fence: raw2.brain.fence ?? null, dietary: raw2.dietary });
+              if (checked2.statusCode !== 200 || checked2.current !== true) {
+                throw Object.assign(Error('changed'), { code: checked2.code ?? 'CONTEXT_CHANGED', status: checked2.statusCode });
+              }
+              await writeCache(owner2, { owner: owner2, at: clock(), anchor: privacyKey(raw2.brain), context: value2 });
+              refreshed++;
+              failure = null;
+              break;
+            } catch (error) {
+              const allowed = new Set(['BRAIN_UNAVAILABLE', 'CONTEXT_UNAVAILABLE', 'CONTEXT_CHANGED',
+                'UNAUTHORIZED', 'FORBIDDEN', 'SCOPE_CHANGED', 'DEADLINE_RESERVE']);
+              failure = allowed.has(error.code) ? error.code : 'REFRESH_UNAVAILABLE';
+              const transient = ['BRAIN_UNAVAILABLE', 'CONTEXT_UNAVAILABLE', 'CONTEXT_CHANGED'].includes(failure)
+                && ![401, 403, 404, 428].includes(error.status);
+              // A fresh snapshot is required: never reuse a failed validation fence.
+              if (!transient || attempt === 2) break;
+            }
+          }
+          if (failure) {
             failed++;
+            console.warn(JSON.stringify({event: 'trepo_context_owner_refresh_failed', owner: owner2, code: failure}));
           }
         }
-        console.info(JSON.stringify({ event: "trepo_context_refresh", refreshed, failed, milliseconds: clock() - started }));
-        if (failed) throw Error("refresh");
+        // A per-owner failure is observable without making Lambda replay every
+        // successful owner. Scheduled refreshes retry failed owners next run.
+        console.info(JSON.stringify({
+          _aws: {Timestamp: clock(), CloudWatchMetrics: [{Namespace: 'Trepo/UX', Dimensions: [[]],
+            Metrics: [{Name: 'ContextProjectionOwnersFailed', Unit: 'Count'}]}]},
+          ContextProjectionOwnersFailed: failed, event: "trepo_context_refresh", refreshed, failed,
+          milliseconds: clock() - started
+        }));
         return { refreshed, failed };
       }
       const given = Buffer.from(event.headers?.authorization ?? ""), expected = Buffer.from("Bearer " + c.token);
@@ -5361,5 +5390,5 @@ var handler = createHandler({
   }
 });
 export {
-  handler
+  handler, createHandler, privacyKey
 };

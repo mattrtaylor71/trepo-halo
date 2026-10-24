@@ -1,35 +1,12 @@
-"""trepo-ux-failure-monitor — outcome-based UX-failure monitor.
+"""Outcome monitoring with explicit coverage reporting.
 
-Replaces ~20 noisy CloudWatch error-signal alarms (fire on ANY error string /
-5xx / Lambda-error, all self-healing) with 4 OUTCOME checks: only surface a
-failure when a user actually did NOT get a result AND it persists.
-
-Runs on an EventBridge rate(10 minutes) schedule. Every run computes 4 counts
-and emits them as CloudWatch metrics in namespace `Trepo/UX` (via put_metric_data)
-so a CloudWatch alarm (EvaluationPeriods=2, Period=600 -> must persist ~20 min)
-pages only on a real, sustained user-facing failure.
-
-The 4 metrics (mirror the team's 10-min health-check logic):
-  1. RecipesNotGenerated      -- owners with >=5 kitchen items but recipes failed/empty/stuck
-  2. ItemsStuckInEnrichment   -- kitchen rows that never got an analysis_stage (recent window)
-  3. CaptureNotAnalyzed       -- fridge/pantry/receipt/dish capture jobs stuck pending/processing
-  4. RecipesNotAnalyzed       -- saved-recipe extraction jobs stuck PENDING/RUNNING
-
-Design notes (why the windows exist):
-  - shared_kitchen has ~84 ANCIENT rows (Mar-May 2026, real product names) with a
-    NULL analysis_stage from a pre-`analysis_stage`-column code path. They are NOT
-    stuck enrichment. So check #2 is bounded to a RECENT window (STUCK_ENRICH_MAX_AGE_HOURS,
-    default 6h): a genuinely-stuck item is recent; a 100-day-old null-stage row is a fossil.
-  - grocery-identifier-dev-jobs has exactly 5 April-2026 'pending' fossils. Check #3
-    excludes created_at LIKE '2026-04%' (per spec) AND applies the same recent-window filter.
-  - TrepoJobs-dev has a handful of zombie saved_recipe_batch jobs left in RUNNING
-    (their async worker died without writing a terminal state), ages 14h..3mo. Check #4
-    is bounded to SAVED_RECIPE_MAX_AGE_HOURS (default 6h) so it pages on actionable recent
-    stalls, not long-dead zombies.
-
-Never crashes the whole run: each check is isolated. On success it emits the count
-(0 when clean, so "no data" != "no failure"). On error it emits NOTHING for that
-metric (alarm TreatMissingData=notBreaching) and bumps `MonitorCheckErrors` + logs.
+Runs every ten minutes. Existing capture/enrichment checks are joined by failed
+meal-plan households, terminal recipe failures, durable generation retries,
+partial voice actions, missing original uploads and pre-execution throttles.
+Each check is isolated: failed reads omit that outcome count and emit
+CoverageComplete=0 plus MonitorCheckErrors. Zero means a completed clean check,
+never an unavailable source. A metric delivery failure fails the invocation.
+See ops/cloud-reliability/outcome-alarms.json for sustained-impact thresholds.
 """
 import os
 import json
@@ -210,65 +187,161 @@ def check_recipes_not_analyzed():
 # ---------------------------------------------------------------------------
 # handler
 # ---------------------------------------------------------------------------
+def check_meal_plan_failures(conn):
+    rows = _q(conn, """SELECT p.owner_id,p.status,p.plan,p._updatedDate,
+        COALESCE(NULLIF(u.owner_id,''),u.user_id) AS household
+        FROM shared_meal_plan p JOIN new_users u ON u.user_id=p.owner_id
+        WHERE p._id='current' AND (p.status='failed' OR
+          (p.status='regenerating' AND p._updatedDate<UTC_TIMESTAMP()-INTERVAL 30 MINUTE))""")
+    failures={}
+    for row in rows:
+        if str(row['owner_id']).startswith(('idemtest','synthverify','demo-','test-')):
+            continue
+        key=row['household']
+        value=row.get('plan')
+        if isinstance(value,str):
+            value=json.loads(value)
+        entry=failures.setdefault(key,{'household':key,'without_plan':True})
+        entry['without_plan'] &= not bool(value)
+    return len(failures),list(failures.values())
+
+
+def check_terminal_imports(conn):
+    # Count actual retained failed records, not every failed provider attempt.
+    rows=_q(conn,"""SELECT owner_id,_id AS recipe_id,status,_updatedDate
+        FROM shared_saved_recipes WHERE status='failed'
+        AND _updatedDate > UTC_TIMESTAMP()-INTERVAL 72 HOUR""")
+    rows=[r for r in rows if not str(r['owner_id']).startswith(('idemtest','synthverify','demo-','test-'))]
+    return len({(r['owner_id'],r['recipe_id']) for r in rows}),[
+        {'owner_id':r['owner_id'],'recipe_id':r['recipe_id']} for r in rows]
+
+
+def check_meal_retry_failures(conn):
+    rows=_q(conn,"""SELECT scope_id,state,last_error FROM meal_plan_generation_jobs
+        WHERE state IN ('failed','blocked') OR (state='running' AND lease_until<UTC_TIMESTAMP()-INTERVAL 5 MINUTE)
+        OR (state='pending' AND due_at<UTC_TIMESTAMP()-INTERVAL 5 MINUTE)""")
+    return len(rows),rows
+
+
+def check_partial_actions():
+    # Durable app operation receipts use verified tool outcomes, not response prose.
+    # Older Halo sessions without this protocol remain a separate coverage gap.
+    table=os.environ['VOICE_OPERATION_TABLE']
+    from boto3.dynamodb.conditions import Attr
+    now=datetime.datetime.now(datetime.timezone.utc).timestamp()
+    rows=_scan_all(table,FilterExpression=Attr('request_status').eq('completed') &
+                   Attr('operation_expires_at').gte(int(now)-2*86400))
+    failed=[];unsupported=0
+    for row in rows:
+        body=row.get('response_body') or {}
+        outcome=body.get('outcome') or {}
+        if not outcome:
+            unsupported+=1
+        elif outcome.get('actions') in ('partial','failed','unconfirmed'):
+            failed.append({'operation_id':row.get('operation_id'),'actions':outcome['actions']})
+    if unsupported:
+        raise ValueError('operation_receipts_missing_structured_outcome:'+str(unsupported))
+    return len(failed),failed
+
+
+
+def check_halo_voice_outcomes():
+    from boto3.dynamodb.conditions import Attr
+    rows=_scan_all(os.getenv('HALO_VOICE_JOBS_TABLE','trepo-quick-ack-voice-jobs-dev'),
+                   FilterExpression=Attr('accepted_at').gte(_iso_ago(hours=72)))
+    failures=[]
+    for row in rows:
+        if row.get('status')=='completed':
+            outcome=row.get('outcome') or {}
+            if not outcome:
+                raise ValueError('halo_voice_outcome_coverage_missing')
+            if outcome.get('actions') in ('partial','failed','unconfirmed'):
+                failures.append({'job_id':row['job_id'],'actions':outcome['actions']})
+        elif row.get('status') not in ('cancelled',) and str(row.get('updated_at') or row.get('accepted_at') or '')<_iso_ago(minutes=15):
+            failures.append({'job_id':row['job_id'],'status':row.get('status')})
+    return len(failures),failures
+
+
+def check_missing_halo_media():
+    from boto3.dynamodb.conditions import Attr
+    import re
+    buckets=json.loads(os.environ['HALO_MEDIA_BUCKETS'])
+    if not buckets or not isinstance(buckets,list):raise ValueError('halo_media_buckets_missing')
+    rows=_scan_all(SAVED_RECIPE_JOBS_TABLE,FilterExpression=Attr('status').eq('PENDING') &
+        Attr('created_at').gte(_iso_ago(hours=72)))
+    client=boto3.client('s3');missing=[]
+    for row in rows:
+        if not str(row.get('device_id','')).startswith('halo-') or row.get('type') not in ('grocery','dish','discard'):
+            continue
+        if str(row.get('created_at') or '')>=_iso_ago(minutes=15):continue
+        expected='images/'+str(row.get('owner'))+'/'+str(row.get('device_id'))+'/'
+        key=str(row.get('s3_key') or '')
+        if not key.startswith(expected):raise ValueError('halo_media_path_coverage_missing')
+        exists=False
+        for bucket in buckets:
+            try:
+                result=client.head_object(Bucket=bucket,Key=key)
+                if result['ContentLength']>0:exists=True;break
+            except Exception as exc:
+                code=getattr(exc,'response',{}).get('Error',{}).get('Code')
+                if code not in ('404','NoSuchKey','NotFound'):raise
+        if not exists:missing.append({'job_id':row['job_id'],'reason':'upload_not_received'})
+    return len(missing),missing
+
+def check_capacity_rejections():
+    functions=json.loads(os.environ['MONITORED_LAMBDAS'])
+    if not functions or not isinstance(functions,list):
+        raise ValueError('monitored_functions_not_configured')
+    cloud=boto3.client('cloudwatch')
+    end=datetime.datetime.now(datetime.timezone.utc)
+    total=0
+    for function in functions:
+        for metric in ('Throttles','AsyncEventsDropped'):
+            response=cloud.get_metric_statistics(Namespace='AWS/Lambda',MetricName=metric,
+                Dimensions=[{'Name':'FunctionName','Value':function}],StartTime=end-datetime.timedelta(minutes=10),
+                EndTime=end,Period=600,Statistics=['Sum'])
+            total+=sum(float(p['Sum']) for p in response.get('Datapoints',[]))
+    return total
+
+
 def handler(event, context):
-    metrics = {}          # metric_name -> value (only for checks that SUCCEEDED)
-    details = {}
-    check_errors = 0
-
-    conn = None
-    # DB-backed checks (1 & 2) share one connection.
+    metrics, details, failures = {}, {}, []
+    db_checks={'RecipesNotGenerated':check_recipes_not_generated,
+        'ItemsStuckInEnrichment':check_items_stuck_in_enrichment,
+        'MealPlanFailures':check_meal_plan_failures,'TerminalRecipeImports':check_terminal_imports,
+        'MealPlanRetryFailures':check_meal_retry_failures}
+    other_checks={'CaptureNotAnalyzed':check_capture_not_analyzed,
+        'RecipesNotAnalyzed':check_recipes_not_analyzed,'PartialActions':check_partial_actions,
+        'CapacityRejections':check_capacity_rejections,'HaloVoiceFailures':check_halo_voice_outcomes,
+        'MissingHaloMedia':check_missing_halo_media}
+    def run(name,check,*args):
+        try:
+            result=check(*args)
+            if isinstance(result,tuple):
+                metrics[name],detail=result
+                details[name]=detail[:25]
+                if name=='MealPlanFailures':
+                    metrics['MealPlansWithoutFallback']=sum(bool(r['without_plan']) for r in detail)
+            else:
+                metrics[name]=result
+        except Exception as exc:
+            failures.append(name)
+            print(json.dumps({'evt':'ux_check_error','check':name,'error_type':type(exc).__name__}))
+    conn=None
     try:
-        conn = _conn()
-    except Exception as e:
-        conn = None
-        check_errors += 2
-        print(json.dumps({'evt': 'ux_check_error', 'check': 'db_connect', 'error': str(e)}))
-
-    if conn is not None:
+        conn=_conn()
+    except Exception:
+        failures.extend(db_checks)
+    if conn:
         try:
-            n, failed = check_recipes_not_generated(conn)
-            metrics['RecipesNotGenerated'] = n
-            details['RecipesNotGenerated'] = failed[:25]
-        except Exception as e:
-            check_errors += 1
-            print(json.dumps({'evt': 'ux_check_error', 'check': 'RecipesNotGenerated', 'error': str(e)}))
-        try:
-            metrics['ItemsStuckInEnrichment'] = check_items_stuck_in_enrichment(conn)
-        except Exception as e:
-            check_errors += 1
-            print(json.dumps({'evt': 'ux_check_error', 'check': 'ItemsStuckInEnrichment', 'error': str(e)}))
-        try:
+            for name,check in db_checks.items():run(name,check,conn)
+        finally:
             conn.close()
-        except Exception:
-            pass
-
-    try:
-        n, stuck = check_capture_not_analyzed()
-        metrics['CaptureNotAnalyzed'] = n
-        details['CaptureNotAnalyzed'] = stuck[:25]
-    except Exception as e:
-        check_errors += 1
-        print(json.dumps({'evt': 'ux_check_error', 'check': 'CaptureNotAnalyzed', 'error': str(e)}))
-
-    try:
-        n, stuck = check_recipes_not_analyzed()
-        metrics['RecipesNotAnalyzed'] = n
-        details['RecipesNotAnalyzed'] = stuck[:25]
-    except Exception as e:
-        check_errors += 1
-        print(json.dumps({'evt': 'ux_check_error', 'check': 'RecipesNotAnalyzed', 'error': str(e)}))
-
-    # Emit to CloudWatch. Only emit metrics whose check succeeded (a missing metric
-    # + TreatMissingData=notBreaching means "did not run" != "clean"). Always emit
-    # MonitorCheckErrors so a broken monitor is itself observable.
-    data = [{'MetricName': name, 'Value': float(val), 'Unit': 'Count'}
-            for name, val in metrics.items()]
-    data.append({'MetricName': 'MonitorCheckErrors', 'Value': float(check_errors), 'Unit': 'Count'})
-    try:
-        boto3.client('cloudwatch').put_metric_data(Namespace=NAMESPACE, MetricData=data)
-    except Exception as e:
-        print(json.dumps({'evt': 'ux_putmetric_error', 'error': str(e)}))
-
-    print(json.dumps({'evt': 'ux_failure_scan', 'metrics': metrics,
-                      'check_errors': check_errors, 'details': details}))
-    return {'metrics': metrics, 'check_errors': check_errors}
+    for name,check in other_checks.items():run(name,check)
+    metrics['MonitorCheckErrors']=len(failures)
+    metrics['CoverageComplete']=int(not failures)
+    data=[{'MetricName':name,'Value':float(value),'Unit':'Count'} for name,value in metrics.items()]
+    # A failed metric publication is a failed invocation, never a healthy report.
+    boto3.client('cloudwatch').put_metric_data(Namespace=NAMESPACE,MetricData=data)
+    print(json.dumps({'evt':'ux_failure_scan','metrics':metrics,'failed_checks':failures,'details':details},default=str))
+    return {'metrics':metrics,'failed_checks':failures,'check_errors':len(failures)}

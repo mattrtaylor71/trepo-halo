@@ -1,0 +1,159 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "Outcome and monitoring coverage alarms; attach existing approved routing during rollout.",
+  "Resources": {
+    "CoverageCompleteAlarm": {
+      "Type": "AWS::CloudWatch::Alarm",
+      "Properties": {
+        "Namespace": "Trepo/UX",
+        "MetricName": "CoverageComplete",
+        "Statistic": "Minimum",
+        "Period": 600,
+        "EvaluationPeriods": 2,
+        "DatapointsToAlarm": 2,
+        "Threshold": 1,
+        "ComparisonOperator": "LessThanThreshold",
+        "TreatMissingData": "breaching"
+      }
+    },
+    "MonitorCheckErrorsAlarm": {
+      "Type": "AWS::CloudWatch::Alarm",
+      "Properties": {
+        "Namespace": "Trepo/UX",
+        "MetricName": "MonitorCheckErrors",
+        "Statistic": "Maximum",
+        "Period": 600,
+        "EvaluationPeriods": 2,
+        "DatapointsToAlarm": 2,
+        "Threshold": 0,
+        "ComparisonOperator": "GreaterThanThreshold",
+        "TreatMissingData": "breaching"
+      }
+    },
+    "MealPlanFailuresAlarm": {
+      "Type": "AWS::CloudWatch::Alarm",
+      "Properties": {
+        "Namespace": "Trepo/UX",
+        "MetricName": "MealPlanFailures",
+        "Statistic": "Maximum",
+        "Period": 600,
+        "EvaluationPeriods": 2,
+        "DatapointsToAlarm": 2,
+        "Threshold": 0,
+        "ComparisonOperator": "GreaterThanThreshold",
+        "TreatMissingData": "missing"
+      }
+    },
+    "MealPlansWithoutFallbackAlarm": {
+      "Type": "AWS::CloudWatch::Alarm",
+      "Properties": {
+        "Namespace": "Trepo/UX",
+        "MetricName": "MealPlansWithoutFallback",
+        "Statistic": "Maximum",
+        "Period": 600,
+        "EvaluationPeriods": 2,
+        "DatapointsToAlarm": 2,
+        "Threshold": 0,
+        "ComparisonOperator": "GreaterThanThreshold",
+        "TreatMissingData": "missing"
+      }
+    },
+    "TerminalRecipeImportsAlarm": {
+      "Type": "AWS::CloudWatch::Alarm",
+      "Properties": {
+        "Namespace": "Trepo/UX",
+        "MetricName": "TerminalRecipeImports",
+        "Statistic": "Maximum",
+        "Period": 600,
+        "EvaluationPeriods": 2,
+        "DatapointsToAlarm": 2,
+        "Threshold": 0,
+        "ComparisonOperator": "GreaterThanThreshold",
+        "TreatMissingData": "missing"
+      }
+    },
+    "PartialActionsAlarm": {
+      "Type": "AWS::CloudWatch::Alarm",
+      "Properties": {
+        "Namespace": "Trepo/UX",
+        "MetricName": "PartialActions",
+        "Statistic": "Maximum",
+        "Period": 600,
+        "EvaluationPeriods": 2,
+        "DatapointsToAlarm": 2,
+        "Threshold": 0,
+        "ComparisonOperator": "GreaterThanThreshold",
+        "TreatMissingData": "missing"
+      }
+    },
+    "HaloVoiceFailuresAlarm": {
+      "Type": "AWS::CloudWatch::Alarm",
+      "Properties": {
+        "Namespace": "Trepo/UX",
+        "MetricName": "HaloVoiceFailures",
+        "Statistic": "Maximum",
+        "Period": 600,
+        "EvaluationPeriods": 2,
+        "DatapointsToAlarm": 2,
+        "Threshold": 0,
+        "ComparisonOperator": "GreaterThanThreshold",
+        "TreatMissingData": "missing"
+      }
+    },
+    "MissingHaloMediaAlarm": {
+      "Type": "AWS::CloudWatch::Alarm",
+      "Properties": {
+        "Namespace": "Trepo/UX",
+        "MetricName": "MissingHaloMedia",
+        "Statistic": "Maximum",
+        "Period": 600,
+        "EvaluationPeriods": 2,
+        "DatapointsToAlarm": 2,
+        "Threshold": 0,
+        "ComparisonOperator": "GreaterThanThreshold",
+        "TreatMissingData": "missing"
+      }
+    },
+    "MealPlanRetryFailuresAlarm": {
+      "Type": "AWS::CloudWatch::Alarm",
+      "Properties": {
+        "Namespace": "Trepo/UX",
+        "MetricName": "MealPlanRetryFailures",
+        "Statistic": "Maximum",
+        "Period": 600,
+        "EvaluationPeriods": 2,
+        "DatapointsToAlarm": 2,
+        "Threshold": 0,
+        "ComparisonOperator": "GreaterThanThreshold",
+        "TreatMissingData": "missing"
+      }
+    },
+    "CapacityRejectionsAlarm": {
+      "Type": "AWS::CloudWatch::Alarm",
+      "Properties": {
+        "Namespace": "Trepo/UX",
+        "MetricName": "CapacityRejections",
+        "Statistic": "Maximum",
+        "Period": 600,
+        "EvaluationPeriods": 2,
+        "DatapointsToAlarm": 2,
+        "Threshold": 0,
+        "ComparisonOperator": "GreaterThanThreshold",
+        "TreatMissingData": "missing"
+      }
+    },
+    "ContextProjectionOwnersFailed": {
+      "Type": "AWS::CloudWatch::Alarm",
+      "Properties": {
+        "Namespace": "Trepo/UX",
+        "MetricName": "ContextProjectionOwnersFailed",
+        "Statistic": "Maximum",
+        "Period": 600,
+        "EvaluationPeriods": 2,
+        "Threshold": 0,
+        "ComparisonOperator": "GreaterThanThreshold",
+        "TreatMissingData": "missing"
+      }
+    }
+  }
+}
