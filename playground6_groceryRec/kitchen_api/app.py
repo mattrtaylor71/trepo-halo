@@ -211,8 +211,9 @@ def _refresh_shelf_life_cache(owner):
 def _shared_kitchen_insert(conn, owner, payload):
     """Insert a row into shared_kitchen. On failure emit a backend_error marker so a
     silently-lost kitchen write pages instead of vanishing (KitchenBackendError alarm)."""
-    origin = None
-    try:
+    from sql_retry import transaction
+    def write():
+        origin = None
         with conn.cursor() as cur:
             # Add owner_id to payload
             row = dict(payload)
@@ -225,8 +226,6 @@ def _shared_kitchen_insert(conn, owner, payload):
                               'observed_at': datetime.utcnow().isoformat() + '+00:00'}
                 except (TypeError, ValueError):
                     pass  # Keep existing validation behavior; never invent origin.
-            if origin:
-                conn.begin()
 
             # Filter to columns that exist in shared_kitchen
             # Use a broad set — extra columns are harmlessly ignored
@@ -245,10 +244,9 @@ def _shared_kitchen_insert(conn, owner, payload):
             if origin and cur.rowcount == 1:
                 cur.execute('INSERT IGNORE INTO kitchen_item_edits(item_id,overrides) VALUES(%s,%s)',
                             (row['_id'], json.dumps({'__expiration_provenance': origin})))
-            conn.commit()
+    try:
+        transaction(conn, write)
     except Exception as exc:
-        if origin:
-            conn.rollback()
         _report_backend_error('shared_kitchen_insert', owner_id=owner,
                               code='write_failed', error=exc,
                               job_id=(payload or {}).get('_id'))
