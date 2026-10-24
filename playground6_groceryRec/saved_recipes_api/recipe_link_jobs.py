@@ -139,7 +139,8 @@ def _run_scoped(api, job_id):
         except Exception as exc:
             mode = mode or bool(getattr(exc, 'force_media', False))
             correction = getattr(exc, 'correction', None) or correction
-            reason = type(exc).__name__
+            safe_reasons={'pending','running','failed','media_continuation','budget_exhausted','model_transient','evidence_insufficient','source_unavailable'}
+            reason = str(exc) if str(exc) in safe_reasons else type(exc).__name__
             retry = not isinstance(exc, api._ai_consent.AIConsentRequired) and attempt < MAX_ATTEMPTS
             if not retry:
                 reason = finish_recipe(api, job)

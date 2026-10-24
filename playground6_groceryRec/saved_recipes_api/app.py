@@ -5448,7 +5448,7 @@ def _repair_saved_recipe(owner, recipe_id, url, request_id=None, expected_revisi
                 options = {'attempt': recovery_attempt, 'force_media': force_media} if recovery_attempt != 1 or force_media else {}
                 if recovery_correction:
                     options['correction'] = recovery_correction
-                if row.get('extraction_source') == 'pdf_text' and row.get('raw_content'):
+                if row.get('raw_content'):
                     options['retained_document'] = row['raw_content']
                 recovered = link_recipe_recovery.recover(SimpleNamespace(**globals()), owner, url, request_id, **options)
                 if recovered.get('pending') or recovered.get('retryable'):
@@ -7164,44 +7164,31 @@ def _enqueue_saved_recipe_url_job(owner, url, request_id=None, event=None):
 
 
 def _fetch_saved_recipe_batch_results(conn, owner, job, request_id=None):
-    result_entries = list((job or {}).get('results') or [])
-    recipes = []
-    results = []
-    overlay_rows = []
+    """Poll persisted results only. Optional enrichment belongs to personalization.
+
+    Re-read current owner rows so edits and deletions beat an old job receipt.
+    No schema DDL, image/provider calls, kitchen matching or cache writes here.
+    """
+    recipes, results = [], []
     partial_errors = list((job or {}).get('partial_errors') or [])
-    _ensure_recipe_personalization_tables(conn)
-    kitchen_context = _build_kitchen_match_context(conn, owner)
-    serialized_rows = []
-    for entry in result_entries:
+    seen = set()
+    for entry in (job or {}).get('results') or []:
         recipe_id = _safe_text((entry or {}).get('recipe_id'))
-        if not recipe_id:
+        if not recipe_id or recipe_id in seen:
             continue
-        row = _fetch_saved_recipe_by_id(conn, owner, recipe_id)
+        seen.add(recipe_id)
+        try:
+            row = _fetch_saved_recipe_by_id(conn, owner, recipe_id)
+        except pymysql.err.ProgrammingError as exc:
+            if not exc.args or exc.args[0] != 1146:
+                raise
+            row = None  # An owner table removed with an account is not a poll failure.
         if not row:
             continue
-        row = _ensure_owned_saved_recipe_image(conn, owner, row, request_id=request_id)
-        serialized_rows.append((entry, row, _serialize_row(row)))
-    availability_map = _compute_saved_recipe_availability_batch(
-        [serialized for _, _, serialized in serialized_rows],
-        kitchen_context,
-        request_id=request_id,
-    )
-    for entry, row, serialized in serialized_rows:
-        recipe, overlay_row = _serialize_saved_recipe_with_availability(
-            conn,
-            owner,
-            row,
-            kitchen_context=kitchen_context,
-            availability=availability_map.get((serialized or {}).get('id')),
-            request_id=request_id,
-        )
+        recipe = _serialize_row(row)
+        recipe['availability_status'] = 'pending'
         recipes.append(recipe)
-        overlay_rows.append(overlay_row)
-        results.append({
-            'recipe': recipe,
-            'deduped': bool((entry or {}).get('deduped')),
-        })
-    _persist_saved_availability_response(conn, recipes, overlay_rows)
+        results.append({'recipe': recipe, 'deduped': bool((entry or {}).get('deduped'))})
     return recipes, results, partial_errors
 
 
@@ -7431,7 +7418,6 @@ def _get_saved_recipe_batch_job_status(owner, job_id, event=None, request_id=Non
         )
     conn = _mysql_conn()
     try:
-        _ensure_saved_recipes_table(conn, owner)
         recipes, results, partial_errors = _fetch_saved_recipe_batch_results(conn, owner, job, request_id=request_id)
         return _build_saved_recipe_batch_job_response(
             owner,

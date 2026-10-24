@@ -24,7 +24,7 @@ import urllib3
 import recipe_work_budget as work
 from recovery_web import public_target, fetch_page
 
-VERSION = 'link-recovery-v4.5'
+VERSION = 'link-recovery-v4.6'
 MODEL = 'gpt-4.1-2025-04-14'
 MAX_BYTES = 48_000_000
 MAX_SECONDS = 300
@@ -930,6 +930,48 @@ def direct_audio_text(url, root, budget, app=None):
         return ' '.join(s.get('text','') for s in values if float(s.get('no_speech_prob',0)) <= .6)[:MAX_TEXT]
 
 
+
+def has_written_method(source):
+    text = str(source.get('content') or '')
+    if len(text.strip()) < 80:
+        return False
+    ingredients = bool(re.search(r'\bingredients?\b|材料',text,re.I))
+    heading = bool(re.search(r'\binstructions?\b|\bdirections?\b|\bmethod\b|\bhow\s+to\s+make\b|步驟|做法',text,re.I))
+    numbered = len(re.findall(r'(?:^|\n)\s*\d+[.)]\s*(?:mix|add|cook|heat|bake|stir|blend|combine|pour|serve|chop|place)\b',text,re.I)) >= 2
+    return bool(source.get('native_transcript')) or (ingredients and (heading or numbered))
+
+
+class ExtractionCheckpoint:
+    """Owner-scoped candidates are only hints; every reuse runs verification.
+
+    Evidence bytes + extractor/verifier version + correction bind reuse. No
+    recipe mutation or ready status is performed by this cache.
+    """
+    def __init__(self, table, owner, source_key):
+        self.table, self.owner, self.source_key = table, owner, source_key
+
+    def key(self, parts, correction):
+        evidence = json.dumps([VERSION,parts,correction],sort_keys=True,separators=(',',':'))
+        return self.source_key+':extraction:'+hashlib.sha256(evidence.encode()).hexdigest()
+
+    def load(self, key):
+        item = self.table.get_item(Key={'job_id':key},ConsistentRead=True).get('Item') or {}
+        if item.get('owner') == self.owner and int(item.get('expires_epoch',0)) > time.time():
+            try:
+                return json.loads(item['candidate_json'])
+            except (KeyError,TypeError,ValueError):
+                pass
+        return None
+
+    def save(self, key, candidate):
+        encoded = json.dumps(candidate,ensure_ascii=False)
+        # Leave generous headroom below DynamoDB's 400 KB item limit.
+        if len(encoded.encode()) > 200000:
+            return
+        self.table.put_item(Item={'job_id':key,'owner':self.owner,'type':'recipe_extraction_checkpoint',
+            'candidate_json':encoded,'validator_version':VERSION,'expires_epoch':int(time.time())+86400,
+            'ttl':int(time.time())+86400})
+
 def extract_source(source, root, budget, app=None, force_media=False, correction=None):
     direct = structured_source_recipe(source)
     if direct:
@@ -937,9 +979,9 @@ def extract_source(source, root, budget, app=None, force_media=False, correction
     texts = [{'id':'source_text', 'text':str(source.get('content') or '')[:MAX_TEXT]}]
     frames, duration = [], None
     written = texts[0]['text']
-    has_written_method = len(written) >= 500 and (source.get('native_transcript') or (bool(re.search(r'ingredients|材料', written, re.I)) and bool(re.search(r'instructions|directions|method|步驟|做法', written, re.I))))
+    written_method = has_written_method(source)
     caption_failure = None
-    if has_written_method and not force_media:
+    if written_method and not force_media:
         result, caption_failure = extract_evidence(texts, [], budget, **({'correction': correction} if correction else {}))
         if result:
             return result, caption_failure
@@ -1018,7 +1060,7 @@ def extract_source(source, root, budget, app=None, force_media=False, correction
         except Exception as exc:
             if app:
                 event(app,None,'audio_unavailable',failure_type=type(exc).__name__)
-    if not frames and (not has_written_method or caption_failure or force_media):
+    if not frames and (not written_method or caption_failure or force_media):
         # Covers recipe cards and image posts from any public publisher, without
         # attempting to invent a method from a finished-food thumbnail.
         from PIL import Image
@@ -1078,8 +1120,14 @@ def extract_evidence(texts, frames, budget, duration=None, correction=None):
             '(written number words may stay words). Use exact contiguous quotations; '
             'split steps when one quote cannot support all their facts. Use only the '
             'provided evidence IDs. Do not invent absent facts.')
-    candidate = remove_unstated_defaults(
-        budget.call(extraction_prompt, parts, RECIPE_SCHEMA, 'recipe_extraction'), texts)
+    checkpoint = getattr(budget,'checkpoint',None)
+    checkpoint_key = checkpoint.key(parts,correction) if checkpoint else None
+    candidate = checkpoint.load(checkpoint_key) if checkpoint else None
+    if candidate is None:
+        candidate = remove_unstated_defaults(
+            budget.call(extraction_prompt, parts, RECIPE_SCHEMA, 'recipe_extraction'), texts)
+        if checkpoint and candidate.get('ingredients') and candidate.get('steps'):
+            checkpoint.save(checkpoint_key,candidate)
     if not candidate.get('ingredients') or not candidate.get('steps'):
         return None, {'reason':'incomplete_source', 'frame_count':len(frames)}
     # Exact cardinality and explicit indices prevent the checker from silently
@@ -1119,12 +1167,25 @@ def recover(app, owner, url, request_id=None, attempt=1, force_media=False, reta
     started = time.monotonic()
     result = {'recipe':None, 'pending':False, 'reason':'unavailable'}
     try:
-        source = ({'content': retained_document, 'title': 'Recipe', 'video_url': '', 'image_urls': []}
-                  if retained_document and urlsplit(url).path.lower().endswith('.pdf') else source_for(app, url, request_id))
-        source = prefer_linked_publisher(app, source)
         budget = ModelBudget()
+        budget.checkpoint = ExtractionCheckpoint(table,owner,key_for(owner, app._resolved_url_hash(url)))
         with tempfile.TemporaryDirectory(prefix='recipe-recovery-') as directory:
-            structured, metrics = extract_source(source, Path(directory), budget, app=app, force_media=force_media, correction=correction)
+            root = Path(directory)
+            retained = {'content':str(retained_document or '')[:MAX_TEXT],'title':'Recipe',
+                        'video_url':'','image_urls':[],'source':'retained_text'}
+            structured, metrics = None, {'reason':'insufficient_source'}
+            # Reuse the actual saved evidence before refetching expiring social
+            # links. A heading only chooses a route; verification still applies.
+            if retained_document and not force_media and (has_written_method(retained) or urlsplit(url).path.lower().endswith('.pdf')):
+                structured, metrics = extract_evidence([{'id':'source_text','text':retained['content']}],[],budget,correction=correction)
+            if not structured:
+                # An explicit fact rejection is not evidence that a fresh model
+                # should invent replacements. The existing bounded repair ladder
+                # handles correctable rejections in a subsequent attempt.
+                rejected = metrics.get('rejection_code')
+                if not rejected or rejected not in CORRECTABLE_GUARDS:
+                    source = prefer_linked_publisher(app, source_for(app, url, request_id))
+                    structured, metrics = extract_source(source,root,budget,app=app,force_media=force_media,correction=correction)
         result = {'recipe':structured, 'pending':False, 'reason':metrics['reason'], 'rejection_code':metrics.get('rejection_code')}
         if not structured and not correction and attempt < 3 and metrics.get('rejection_code') in CORRECTABLE_GUARDS:
             result.update(retryable=True, correction=metrics['rejection_code'],
@@ -1138,7 +1199,7 @@ def recover(app, owner, url, request_id=None, attempt=1, force_media=False, reta
             'ConnectTimeout', 'ReadTimeout', 'TimeoutError', 'ProtocolError') or getattr(exc, 'status_code', 0) in (429, 500, 502, 503, 504)
         result.update(reason='media_continuation' if isinstance(exc, MediaContinuation) else
             'budget_exhausted' if isinstance(exc, work.WorkLimit) else
-            'model_transient' if transient else 'source_unavailable', retryable=transient,
+            'model_transient' if transient else 'evidence_insufficient' if str(exc)=='insufficient_source' else 'source_unavailable', retryable=transient,
             force_media=force_media or isinstance(exc, MediaContinuation))
         event(app, request_id, 'failed', failure_type=type(exc).__name__, reason=result['reason'],
               failure_code=str(exc) if re.fullmatch(r'pdf_parser_[A-Za-z_0-9-]+|invalid_pdf|pdf_text_unavailable|media_unavailable', str(exc)) else None)
