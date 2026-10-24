@@ -1,0 +1,146 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "Cache only immutable generic icons ahead of the existing hash-validating origin. No S3 public access.",
+  "Parameters": {
+    "OriginApiHost": {
+      "Type": "String",
+      "AllowedPattern": "[a-z0-9]+\\.execute-api\\.[a-z0-9-]+\\.amazonaws\\.com"
+    }
+  },
+  "Resources": {
+    "Guard": {
+      "Type": "AWS::CloudFront::Function",
+      "Properties": {
+        "Name": {
+          "Fn::Sub": "${AWS::StackName}-guard"
+        },
+        "AutoPublish": true,
+        "FunctionConfig": {
+          "Comment": "Restrict cache to generic immutable artwork",
+          "Runtime": "cloudfront-js-2.0"
+        },
+        "FunctionCode": "// Only immutable generic artwork is admitted to this public cache.\nfunction handler(event) {\n  var request = event.request;\n  var valid = /^\\/icons\\/(trepo-grocery-v1|trepo-bold-outline-pilot-v1|trepo-app-bold-outline-v1)\\/[0-9a-f]{64}\\/[0-9a-f]{64}\\.png$/;\n  if ((request.method !== 'GET' && request.method !== 'HEAD') || !valid.test(request.uri) || Object.keys(request.querystring || {}).length) {\n    return {statusCode:404,statusDescription:'Not Found',headers:{'cache-control':{value:'no-store'}}};\n  }\n  return request;\n}\n"
+      }
+    },
+    "Cache": {
+      "Type": "AWS::CloudFront::CachePolicy",
+      "Properties": {
+        "CachePolicyConfig": {
+          "Name": {
+            "Fn::Sub": "${AWS::StackName}-immutable"
+          },
+          "DefaultTTL": 0,
+          "MaxTTL": 31536000,
+          "MinTTL": 0,
+          "ParametersInCacheKeyAndForwardedToOrigin": {
+            "EnableAcceptEncodingGzip": false,
+            "EnableAcceptEncodingBrotli": false,
+            "CookiesConfig": {
+              "CookieBehavior": "none"
+            },
+            "HeadersConfig": {
+              "HeaderBehavior": "none"
+            },
+            "QueryStringsConfig": {
+              "QueryStringBehavior": "none"
+            }
+          }
+        }
+      }
+    },
+    "Distribution": {
+      "Type": "AWS::CloudFront::Distribution",
+      "Properties": {
+        "DistributionConfig": {
+          "Enabled": true,
+          "Comment": "Trepo immutable generic icon cache",
+          "HttpVersion": "http2and3",
+          "PriceClass": "PriceClass_100",
+          "Origins": [
+            {
+              "Id": "validated-icons",
+              "DomainName": {
+                "Ref": "OriginApiHost"
+              },
+              "CustomOriginConfig": {
+                "OriginProtocolPolicy": "https-only",
+                "OriginSSLProtocols": [
+                  "TLSv1.2"
+                ]
+              }
+            }
+          ],
+          "DefaultCacheBehavior": {
+            "TargetOriginId": "validated-icons",
+            "ViewerProtocolPolicy": "https-only",
+            "AllowedMethods": [
+              "GET",
+              "HEAD"
+            ],
+            "CachedMethods": [
+              "GET",
+              "HEAD"
+            ],
+            "CachePolicyId": {
+              "Ref": "Cache"
+            },
+            "FunctionAssociations": [
+              {
+                "EventType": "viewer-request",
+                "FunctionARN": {
+                  "Fn::GetAtt": [
+                    "Guard",
+                    "FunctionARN"
+                  ]
+                }
+              }
+            ]
+          },
+          "CustomErrorResponses": [
+            {
+              "ErrorCode": 400,
+              "ErrorCachingMinTTL": 0
+            },
+            {
+              "ErrorCode": 403,
+              "ErrorCachingMinTTL": 0
+            },
+            {
+              "ErrorCode": 404,
+              "ErrorCachingMinTTL": 0
+            },
+            {
+              "ErrorCode": 500,
+              "ErrorCachingMinTTL": 0
+            },
+            {
+              "ErrorCode": 502,
+              "ErrorCachingMinTTL": 0
+            },
+            {
+              "ErrorCode": 503,
+              "ErrorCachingMinTTL": 0
+            },
+            {
+              "ErrorCode": 504,
+              "ErrorCachingMinTTL": 0
+            }
+          ],
+          "ViewerCertificate": {
+            "CloudFrontDefaultCertificate": true
+          }
+        }
+      }
+    }
+  },
+  "Outputs": {
+    "IconCdnHost": {
+      "Value": {
+        "Fn::GetAtt": [
+          "Distribution",
+          "DomainName"
+        ]
+      }
+    }
+  }
+}

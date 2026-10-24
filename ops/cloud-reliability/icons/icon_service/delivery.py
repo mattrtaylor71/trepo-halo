@@ -1,5 +1,6 @@
 """Stable display contract. Renderer recipes and queues remain server concerns."""
 import re
+import os
 from urllib.parse import urlsplit, urlunsplit
 from .catalog import APP_STYLE, STYLE, ALIASES, key, term, validate_style
 
@@ -13,6 +14,11 @@ def transport_url(url, requested_style):
     match = PATH.fullmatch(parsed.path)
     if parsed.scheme != 'https' or not parsed.netloc or parsed.query or parsed.fragment or not match:
         raise ValueError('Invalid catalog asset URL')
+    cdn = os.getenv('ICON_CDN_HOST','').strip()
+    if cdn:
+        if not re.fullmatch(r'd[a-z0-9]+\.cloudfront\.net',cdn):
+            raise ValueError('Invalid icon CDN host')
+        parsed = parsed._replace(netloc=cdn)
     return urlunsplit(parsed._replace(path='/icons/' + requested_style + '/' + match[2] + '/' + match[3] + '.png'))
 
 
