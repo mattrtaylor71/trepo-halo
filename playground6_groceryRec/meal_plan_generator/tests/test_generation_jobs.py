@@ -108,3 +108,58 @@ def test_busy_requests_do_not_reset_retry_budget(db):
         jobs.supersede_pending(db,'home',{'owner':'a'})
         claim=jobs.begin(db,'home',{'owner':'a'},row(db)['run_token']);jobs.bind_inputs(db,claim,'a'*64)
     assert not pending(db,claim)
+
+
+@pytest.mark.parametrize('first_operation', ['begin', 'supersede'])
+def test_simultaneous_admissions_do_not_upgrade_shared_locks(db, first_operation):
+    """Two duplicate INSERT IGNOREs hold S locks and deadlock on FOR UPDATE.
+
+    Synchronize after that statement to reproduce the production race. An
+    exclusive upsert serializes at admission and must not wait at this barrier.
+    Both connections are real InnoDB transactions in the disposable schema.
+    """
+    import concurrent.futures
+    import threading
+    old = jobs.begin(db, 'home', {'owner': 'a', 'focus': 'old'})
+    jobs.bind_inputs(db, old, 'a' * 64)
+    with db.cursor() as cur:
+        cur.execute('SELECT DATABASE() AS name')
+        database = cur.fetchone()['name']
+    start = threading.Barrier(2)
+    after_shared_insert = threading.Barrier(2)
+
+    class AdmissionCursor(pymysql.cursors.DictCursor):
+        def execute(self, query, args=None):
+            result = super().execute(query, args)
+            if query.startswith('INSERT IGNORE INTO ' + jobs.TABLE):
+                after_shared_insert.wait(timeout=5)
+            return result
+
+    def admit(index):
+        conn = pymysql.connect(host='127.0.0.1', port=int(os.environ['RELIABILITY_MYSQL_PORT']),
+            user='root', database=database, autocommit=True, cursorclass=AdmissionCursor,
+            read_timeout=10, write_timeout=10)
+        try:
+            start.wait(timeout=5)
+            if index == 0 and first_operation == 'begin':
+                return jobs.begin(conn, 'home', {'owner': 'a', 'focus': 'worker'})
+            jobs.supersede_pending(conn, 'home', {'owner': 'a', 'focus': 'new-' + str(index)})
+        finally:
+            conn.close()
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+        futures = [pool.submit(admit, index) for index in range(2)]
+        results = [future.result(timeout=15) for future in futures]
+    current = row(db)
+    assert current['input_hash'] == 'a' * 64
+    assert current['attempts'] == (2 if first_operation == 'begin' else 1)
+    assert current['run_token'] != old['token']
+    assert current['state'] in ('pending', 'running')
+    db.begin()
+    with pytest.raises(jobs.Superseded):
+        jobs.finish(db, old)
+    db.rollback()
+    if current['state'] == 'running':
+        assert current['run_token'] == results[0]['token']
+    else:
+        assert json.loads(current['payload'])['focus'].startswith('new-')

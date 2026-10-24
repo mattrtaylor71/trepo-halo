@@ -21,11 +21,19 @@ def _get(conn, scope):
         cur.execute('SELECT * FROM '+TABLE+' WHERE scope_id=%s FOR UPDATE', [scope])
         return cur.fetchone()
 
+def _ensure_exclusive_row(conn, scope):
+    # INSERT IGNORE takes a shared lock on an existing unique key. Concurrent
+    # admissions then deadlock when both upgrade it with SELECT FOR UPDATE.
+    # A no-op duplicate UPDATE obtains the exclusive lock from the outset and
+    # preserves the existing token, input hash and bounded attempt count.
+    with conn.cursor() as cur:
+        cur.execute('INSERT INTO '+TABLE+" (scope_id,state,attempts) VALUES (%s,'idle',0) "
+                    'ON DUPLICATE KEY UPDATE scope_id=scope_id', [scope])
+
 def begin(conn, scope, payload, retry_token=None, lease_seconds=360):
     conn.begin()
     try:
-        with conn.cursor() as cur:
-            cur.execute('INSERT IGNORE INTO '+TABLE+' (scope_id,state,attempts) VALUES (%s,\'idle\',0)', [scope])
+        _ensure_exclusive_row(conn, scope)
         old = _get(conn, scope)
         if retry_token and (old['run_token'] != retry_token or old['state'] not in ('pending','running')):
             conn.rollback()
@@ -94,9 +102,7 @@ def supersede_pending(conn, scope, payload):
     """A request arriving under an active named lock must survive that worker."""
     conn.begin()
     try:
-        with conn.cursor() as cur:
-            cur.execute('INSERT IGNORE INTO '+TABLE+" (scope_id,state,attempts) VALUES (%s,'idle',0)", [scope])
-        row = _get(conn, scope)
+        _ensure_exclusive_row(conn, scope)
         with conn.cursor() as cur:
             cur.execute('UPDATE '+TABLE+" SET run_token=%s,state='pending',payload=%s,"
                         'due_at=DATE_ADD(UTC_TIMESTAMP(),INTERVAL 15 SECOND),lease_until=NULL WHERE scope_id=%s',

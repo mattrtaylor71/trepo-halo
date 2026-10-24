@@ -21,14 +21,11 @@ from urllib.parse import urljoin, urlparse, urlunparse, parse_qs, unquote, quote
 
 import boto3
 import requests
-from bs4 import BeautifulSoup
-from openai import OpenAI
 try:
     import pymysql
 except ImportError as exc:
     pymysql = None
     _PYMYSQL_IMPORT_ERROR = exc
-import yt_dlp
 
 USE_SHARED_TABLES = os.getenv('USE_SHARED_TABLES', 'false').lower() == 'true'
 
@@ -47,7 +44,8 @@ _LAYER_PYTHON = Path(__file__).resolve().parents[1] / 'recipe_inventory_layer' /
 if _LAYER_PYTHON.exists() and str(_LAYER_PYTHON) not in sys.path:
     sys.path.insert(0, str(_LAYER_PYTHON))
 
-import recipe_inventory_llm
+# Status reads do not need HTML, media decoding or AI matching. Import those
+# libraries only inside their original operations to avoid cold-start polling tax.
 
 
 _DB_ENV_VARS = ['DB_HOST', 'DB_USER', 'DB_PASS', 'DB_NAME']
@@ -1396,6 +1394,7 @@ def _log_inventory_match_event(request_id, event_name, **kwargs):
 
 
 def _compute_recipe_availability(recipe_ingredients, kitchen_context, request_id=None, recipe=None):
+    import recipe_inventory_llm
     recipe_payload = {
         'id': _safe_text(((recipe or {}).get('id') or 'inline-recipe')),
         'title': _safe_text((recipe or {}).get('title')),
@@ -1419,6 +1418,7 @@ def _compute_recipe_availability(recipe_ingredients, kitchen_context, request_id
 
 def _ingredient_form_compatible(ingredient, candidate):
     """Do not mistake a prepared food for one of its named ingredients."""
+    import recipe_inventory_llm
     recipe_tokens = set(recipe_inventory_llm.ingredient_tokens(ingredient))
     item_tokens = set(recipe_inventory_llm.ingredient_tokens(candidate.get('display_name')))
     # Keep this narrow: 'cake flour' and 'sandwich bread' are ingredients.
@@ -1474,6 +1474,7 @@ def _enforce_status_food_identity(availability, kitchen_context):
 
 def _local_deterministic_merge(availability, kitchen_context):
     """Safety-net merge: if deterministic matching finds a 'have' that the LLM missed, upgrade it."""
+    import recipe_inventory_llm
     ingredient_matches = availability.get('ingredient_matches') or []
     kitchen_candidates = (kitchen_context or {}).get('kitchen_candidates') or []
     changed = False
@@ -1505,6 +1506,7 @@ def _local_deterministic_merge(availability, kitchen_context):
 
 
 def _compute_saved_recipe_availability_batch(recipes, kitchen_context, request_id=None):
+    import recipe_inventory_llm
     recipe_payloads = []
     for recipe in recipes or []:
         recipe_id = _safe_text((recipe or {}).get('id'))
@@ -2129,6 +2131,7 @@ def _prepare_saved_recipe_image_fields(owner, recipe_id, extraction, request_id=
 
 
 def _openai_client():
+    from openai import OpenAI
     if not os.getenv('OPENAI_API_KEY'):
         raise ServiceError('OPENAI_API_KEY is not set.', status_code=500)
     return recipe_batch_checkpoint.bounded_client(OpenAI(
@@ -3410,6 +3413,7 @@ def _normalize_image_values(value, base_url=None):
 
 
 def _fetch_html_soup(url, request_id=None):
+    from bs4 import BeautifulSoup
     # Uses the same layered fetch as _resolve_url so the extraction re-fetch also
     # gets past bot walls (a site that blocks resolve would otherwise block here).
     result = _fetch_page(url, request_id=request_id)
@@ -3550,6 +3554,7 @@ def _extract_tiktok_oembed(resolved_url):
 
 
 def _extract_ytdlp_info(resolved_url, download=False, outtmpl=None):
+    import yt_dlp
     options = {
         'quiet': True,
         'no_warnings': True,
@@ -4523,6 +4528,7 @@ def _download_media_to(temp_dir, media_url):
 
 
 def _transcribe_audio_from_url(resolved_url, request_id=None, source_context=None):
+    from openai import OpenAI
     if not os.getenv('OPENAI_API_KEY'):
         raise RuntimeError('OPENAI_API_KEY is not set.')
 

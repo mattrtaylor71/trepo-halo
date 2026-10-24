@@ -1,13 +1,14 @@
 {
   "status": "deployed-verified-with-documented-recovery-holds",
   "tests": {
-    "python": 120,
+    "python": 123,
     "voice": 153,
     "edge": 3,
     "context_projection": 7,
     "additional_python_subtests": 6,
     "assembled_sam_mysql_tests": 8,
-    "total": 283
+    "total": 286,
+    "final_followup_log": "/Users/MattTaylor/Documents/Codex/2026-10-23/halo-cloud-audit/rollout/final-regression-queue-followup.log"
   },
   "lambda_import_checks": [
     {
@@ -103,9 +104,11 @@
     "Seven actual Swift parser contracts passed; no native device UI or background/kill/reopen test is claimed.",
     "Icon CDN blocked by AWS CloudFront permissions; origin capacity mitigation passed 40-request exact-byte burst.",
     "Missing original media and recipes without sufficient source evidence are not fabricated.",
-    "The historical media rerun completed 101/105 candidates. Four hit local disk exhaustion and an unresponsive Docker daemon; one was separately recovered from an exact matching reviewed source and three remain unchanged. Production qualification completed before this host failure."
+    "Native Mac recovery reruns completed the three host-blocked cases; this does not claim Linux runtime qualification.",
+    "The meal-plan queue admission deadlock follow-up is tested but not deployed.",
+    "Native lifecycle checks were queued with APP DEVELOPER (STUDIO); no native results yet."
   ],
-  "updated_at": "2026-10-24T04:10:31.703631+00:00",
+  "updated_at": "2026-10-24T04:27:35.391713+00:00",
   "app_builds": [
     "124",
     "126",
@@ -127,7 +130,7 @@
   },
   "backfills": {
     "meal_plans_api_verified": 51,
-    "recipes_api_verified": 60,
+    "recipes_api_verified": 65,
     "partial_discard_api_verified": 1,
     "already_recovered_kitchen_batches": 2,
     "already_recovered_selected_items": 36
@@ -163,9 +166,9 @@
     },
     {
       "function": "trepo-grocery-backend-dev-SavedRecipeStatus",
-      "completed_at": "2026-10-24T03:13:41.896837+00:00",
-      "after_sha": "N2VrwZOsPZkVuXKhb+9Rn+0B8l1AG9g7vuqD1JtmMhk=",
-      "after_revision": "1f0b15f6-5cda-4087-8349-89d11606eaa3",
+      "completed_at": "2026-10-24T04:21:23.160677+00:00",
+      "after_sha": "w6MR64CI4M34qDF3W/4FVeLfiQAJkS1jUVmER9GCfcM=",
+      "after_revision": "8c5e3228-2d36-41e9-b743-3890ffbc4165",
       "state": "verified"
     },
     {
@@ -213,28 +216,29 @@
     "lambda_errors": 0.0,
     "lambda_throttles": 0.0,
     "coverage_read_errors": 0,
-    "new_live_instagram_import": "HTTP 202 accepted in 209ms; initial downloader blocked, source fallback succeeded, guarded recovery became ready; separately confirmed populated recipe through HTTP 200 app-serving read."
+    "new_live_instagram_import": "HTTP 202 accepted in 209ms; initial downloader blocked, source fallback succeeded, guarded recovery became ready; separately confirmed populated recipe through HTTP 200 app-serving read.",
+    "superseded_by_later_check": true
   },
   "recovery_audit": {
     "candidate_count": 157,
     "dispositions": {
-      "held_unrecovered": 92,
-      "backfilled": 60,
+      "held_unrecovered": 87,
+      "backfilled": 65,
       "preserved_partial": 5
     },
-    "backfills_currently_verified": 60,
+    "backfills_currently_verified": 65,
     "recovery_results": {
-      "verification_rejected": 83,
+      "verification_rejected": 86,
       "source_unavailable": 7,
       "evidence_insufficient": 4,
-      "verified": 35,
-      "incomplete_source": 12,
-      "budget_exhausted": 9,
+      "verified": 36,
+      "incomplete_source": 10,
+      "budget_exhausted": 7,
       "model_transient": 7
     },
     "original_sources_preserved": 157,
-    "held_records_unchanged": 97,
-    "last_verified_at": "2026-10-24T04:10:01.181812+00:00"
+    "held_records_unchanged": 92,
+    "last_verified_at": "2026-10-24T04:23:26.357777+00:00"
   },
   "app_version_observation": {
     "window_days": 7,
@@ -258,6 +262,52 @@
     },
     "host_execution_failures": 4,
     "recovered_from_exact_matching_reviewed_source": 1,
-    "still_held_after_host_failure": 3
+    "still_held_after_host_failure": 2,
+    "native_reruns_completed": 3,
+    "still_blocked_by_host": 0,
+    "native_followup_total_reruns": 13,
+    "native_followup_additional_backfills": 5
+  },
+  "status_cold_start_followup": {
+    "deployed": true,
+    "qualification": [
+      {
+        "function": "trepo-grocery-backend-dev-SavedRecipeStatus",
+        "package_sha256": "c3a311eb8088e0cdf8a831775bfe0555e2df890009912d6351598447d1827dc3",
+        "exit_code": 0,
+        "runtime": "python3.9",
+        "qualification": "exact candidate in isolated AWS Lambda; five current-result reads equal production, owner/method/input/missing guards passed",
+        "canary_function": "trepo-reliability-status-cold-canary-20261024"
+      }
+    ],
+    "live_reads": {
+      "started_at": "2026-10-24T04:21:59.637385+00:00",
+      "verified": 20,
+      "p50_seconds": 0.41923612501705065,
+      "p95_seconds": 1.6204547920497134,
+      "concurrency": 5
+    },
+    "previous_p95_seconds": 4.3012,
+    "cold_init_ms_range": [
+      470.1,
+      594.06
+    ],
+    "canary_deleted": true
+  },
+  "queue_admission_followup": {
+    "status": "tested-not-deployed-offline-stopping-point",
+    "observed_production_deadlocks": 2,
+    "reproduced_mysql_cases": 2,
+    "targeted_mysql_tests_passed": 36,
+    "additional_subtests": 6,
+    "fix": "Exclusive no-op upsert instead of duplicate INSERT IGNORE shared-lock upgrade",
+    "native_runtime_check_pending": true
+  },
+  "latest_production_check": {
+    "checked_at": "2026-10-24T04:22:59.563390+00:00",
+    "all_active_successful_code_unchanged": true,
+    "lambda_errors": 2.0,
+    "lambda_throttles": 0.0,
+    "new_errors": "Two meal-plan admission deadlocks; fix tested but not deployed."
   }
 }

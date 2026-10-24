@@ -10,6 +10,7 @@ cd "$(dirname "$0")/../.."
  playground6_groceryRec/meal_plan_api/tests/test_plan_visibility.py \
  playground6_groceryRec/family_brain/test_recipe_safety_schema.py \
  playground6_groceryRec/tests/test_recipe_status_readonly.py \
+ playground6_groceryRec/tests/test_recipe_status_cold_start.py \
  playground6_groceryRec/saved_recipes_api/tests/test_recovery_reliability.py \
  playground6_groceryRec/kitchen_api/tests/test_deadlock_retry.py \
  obs/ux_failure_monitor/tests/test_outcomes.py \
