@@ -1,7 +1,11 @@
+import ai_consent_guard as _ai_consent
+from storage_guidance_output import legacy_safe_guidance, legacy_safe_payload
+from create_idempotency import kitchen_create_lock as _kitchen_create_lock, KitchenCreateBusy
 # kitchen_api/app.py
 # Force republish after dependency-layer restore.
 import os
 import json
+import re
 import time
 import boto3
 import uuid
@@ -34,6 +38,8 @@ _RECIPE_RELEVANT_KITCHEN_FIELDS = {
     'product_description',
     'category',
     'ingredients',
+    'quantity_value',
+    'quantity_unit',
     'action',
     'analysis_stage',
     'analysis_status',
@@ -109,6 +115,10 @@ def _ai_op(op, model, latency_ms, status, input_summary='', output_summary='',
 
 
 def _invoke_meal_plan_generator(owner):
+    try:
+        if not _ai_consent.allowed(_ai_consent.actor_context.get()): return
+    except Exception:
+        return  # Optional refresh must not fail a completed manual mutation.
     """Fire-and-forget invoke of meal plan generator (e.g. after kitchen change)."""
     arn = os.getenv('MEAL_PLAN_GENERATOR_ARN')
     if not arn:
@@ -117,7 +127,7 @@ def _invoke_meal_plan_generator(owner):
         boto3.client('lambda').invoke(
             FunctionName=arn,
             InvocationType='Event',
-            Payload=json.dumps({'owner': owner}),
+            Payload=json.dumps({'user_id': _ai_consent.actor_context.get(), 'owner': owner}),
         )
     except Exception as e:
         print(f"[WARN] Meal plan generator invoke failed: {e}")
@@ -125,6 +135,10 @@ def _invoke_meal_plan_generator(owner):
 
 
 def _invoke_recipes_generator(owner):
+    try:
+        if not _ai_consent.allowed(_ai_consent.actor_context.get()): return
+    except Exception:
+        return  # Optional refresh must not fail a completed manual mutation.
     """Fire-and-forget invoke of recipes generator (e.g. after kitchen change)."""
     arn = os.getenv('RECIPES_GENERATOR_ARN')
     if not arn:
@@ -133,7 +147,7 @@ def _invoke_recipes_generator(owner):
         boto3.client('lambda').invoke(
             FunctionName=arn,
             InvocationType='Event',
-            Payload=json.dumps({'owner': owner}),
+            Payload=json.dumps({'user_id': _ai_consent.actor_context.get(), 'owner': owner}),
         )
     except Exception as e:
         print(f"[WARN] Recipes generator invoke failed: {e}")
@@ -141,6 +155,10 @@ def _invoke_recipes_generator(owner):
 
 
 def _invoke_explore_personalizer(owner):
+    try:
+        if not _ai_consent.allowed(_ai_consent.actor_context.get()): return
+    except Exception:
+        return  # Optional refresh must not fail a completed manual mutation.
     """Fire-and-forget rebuild of this person's Explore feed after a preferences change.
 
     Runs on the recipes-generator function (which already holds the preference reader and
@@ -154,13 +172,17 @@ def _invoke_explore_personalizer(owner):
         boto3.client('lambda').invoke(
             FunctionName=arn,
             InvocationType='Event',
-            Payload=json.dumps({'owner': owner, 'explore_personalize': True}),
+            Payload=json.dumps({'user_id': _ai_consent.actor_context.get(), 'owner': owner, 'explore_personalize': True}),
         )
     except Exception as e:
         print(f"[WARN] Explore personalizer invoke failed: {e}")
 
 
 def _invoke_kitchen_analysis_generator(owner, points_delta=0):
+    try:
+        if not _ai_consent.allowed(_ai_consent.actor_context.get()): return
+    except Exception:
+        return  # Optional refresh must not fail a completed manual mutation.
     """Fire-and-forget invoke of kitchen analysis generator after kitchen mutations."""
     arn = os.getenv('KITCHEN_ANALYSIS_GENERATOR_ARN')
     if not arn:
@@ -169,7 +191,7 @@ def _invoke_kitchen_analysis_generator(owner, points_delta=0):
         boto3.client('lambda').invoke(
             FunctionName=arn,
             InvocationType='Event',
-            Payload=json.dumps({'owner': owner, 'points_delta': int(points_delta or 0)}),
+            Payload=json.dumps({'user_id': _ai_consent.actor_context.get(), 'owner': owner, 'points_delta': int(points_delta or 0)}),
         )
     except Exception as e:
         print(f"[WARN] Kitchen analysis generator invoke failed: {e}")
@@ -177,33 +199,34 @@ def _invoke_kitchen_analysis_generator(owner, points_delta=0):
 
 
 def _refresh_shelf_life_cache(owner):
-    """Fire-and-forget: recalculate shelf life cache after kitchen mutations."""
-    arn = os.getenv('HOME_SUGGESTIONS_ARN')
-    if not arn:
-        return
-    try:
-        boto3.client('lambda').invoke(
-            FunctionName=arn,
-            InvocationType='Event',
-            Payload=json.dumps({
-                'rawPath': f'/home/items-to-watch/{owner}',
-                'requestContext': {'http': {'method': 'POST'}},
-                'pathParameters': {'owner': owner},
-            }),
-        )
-    except Exception as e:
-        print(f"[WARN] Shelf life cache refresh failed: {e}")
-        _report_backend_error('refresh_shelf_life_cache', owner_id=owner, code='invoke_failed', error=e)
+    """Compatibility hook: Shelf Life GET evaluates live inventory on every request.
+
+    No consumer reads this cache anymore. Keeping the hook avoids changing older
+    mutation call contracts while eliminating a redundant Lambda invocation/read
+    per creation, enrichment, edit and deletion. Direct legacy POST still works.
+    """
+    return None
 
 
 def _shared_kitchen_insert(conn, owner, payload):
     """Insert a row into shared_kitchen. On failure emit a backend_error marker so a
     silently-lost kitchen write pages instead of vanishing (KitchenBackendError alarm)."""
+    origin = None
     try:
         with conn.cursor() as cur:
             # Add owner_id to payload
             row = dict(payload)
             row['owner_id'] = owner
+            if row.get('product_expiration'):
+                try:
+                    normalized = datetime.strptime(str(row['product_expiration']), '%Y-%m-%d').strftime('%Y-%m-%d')
+                    row['product_expiration'] = normalized
+                    origin = {'version': 1, 'source': 'create_request', 'value': normalized,
+                              'observed_at': datetime.utcnow().isoformat() + '+00:00'}
+                except (TypeError, ValueError):
+                    pass  # Keep existing validation behavior; never invent origin.
+            if origin:
+                conn.begin()
 
             # Filter to columns that exist in shared_kitchen
             # Use a broad set — extra columns are harmlessly ignored
@@ -217,8 +240,15 @@ def _shared_kitchen_insert(conn, owner, payload):
                 f"ON DUPLICATE KEY UPDATE `_updatedDate` = NOW()",
                 values
             )
+            # With the default client flags, affected=1 means a new INSERT;
+            # duplicate updates affect 0 or 2 rows. Never relabel an old row.
+            if origin and cur.rowcount == 1:
+                cur.execute('INSERT IGNORE INTO kitchen_item_edits(item_id,overrides) VALUES(%s,%s)',
+                            (row['_id'], json.dumps({'__expiration_provenance': origin})))
             conn.commit()
     except Exception as exc:
+        if origin:
+            conn.rollback()
         _report_backend_error('shared_kitchen_insert', owner_id=owner,
                               code='write_failed', error=exc,
                               job_id=(payload or {}).get('_id'))
@@ -324,7 +354,7 @@ def _openai_client():
     api_key = os.getenv('OPENAI_API_KEY')
     if not api_key:
         raise RuntimeError('OPENAI_API_KEY is not set.')
-    return OpenAI(api_key=api_key)
+    return _ai_consent.provider_client(OpenAI)(api_key=api_key)
 
 
 _conn = None
@@ -525,14 +555,15 @@ def _ensure_owner_kitchen_state_table(conn):
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
         """)
     conn.commit()
+    _ai_consent.ensure_refresh_actor_column(conn, _OWNER_KITCHEN_STATE_TABLE)
 
 
 def _mark_recipe_refresh_needed_for_owners(conn, owners):
-    normalized_owners = [
+    normalized_owners = list(dict.fromkeys(
         _sanitize_user_id(owner)
         for owner in (owners or [])
         if _sanitize_user_id(owner)
-    ]
+    ))
     if not normalized_owners:
         return
     _ensure_owner_kitchen_state_table(conn)
@@ -543,17 +574,19 @@ def _mark_recipe_refresh_needed_for_owners(conn, owners):
                 owner,
                 kitchen_version,
                 last_recipe_refresh_requested_version,
-                recipe_refresh_needed
-            ) VALUES (%s, %s, %s, %s)
+                recipe_refresh_needed, ai_consent_actor
+            ) VALUES (%s, %s, %s, %s, %s)
             ON DUPLICATE KEY UPDATE
                 kitchen_version = kitchen_version + 1,
-                last_recipe_refresh_requested_version = kitchen_version + 1,
+                last_recipe_refresh_requested_version = kitchen_version,
                 recipe_refresh_needed = 1,
+                ai_consent_actor = VALUES(ai_consent_actor),
                 _updatedDate = NOW()
             """,
-            [(owner, 1, 1, 1) for owner in normalized_owners],
+            [(owner, 1, 1, 1, _ai_consent.actor_context.get()) for owner in normalized_owners],
         )
     conn.commit()
+
 
 
 # --- Dietary preferences (household-scoped hard constraints on recipe generation) ---------
@@ -764,15 +797,18 @@ def _serialize_rows(rows):
         item_dict = {}
         for key, value in item.items():
             try:
+                if key == 'storage_guidance':
+                    value = legacy_safe_guidance(value)
                 item_dict[key] = json_serial(_decode_json_field_if_needed(key, value))
             except Exception as e:
                 print(f"[WARN] Failed to serialize {key}: {type(value)} - {str(e)}")
-                item_dict[key] = str(value) if value is not None else None
+                item_dict[key] = None if key == 'storage_guidance' else (str(value) if value is not None else None)
         # Additive: computed whole-days-in-kitchen so the iOS item-detail fallback has a
         # server-authoritative value (null when the date is missing/unparseable).
         item_dict['days_old'] = _compute_days_old(item.get('_createdDate'))
         serialized.append(item_dict)
     return serialized
+
 
 
 def _record_master_feed_event(conn, owner, member_ids, record):
@@ -1372,6 +1408,13 @@ def _build_create_payload(owner, body):
     return payload, None
 
 
+def _ensure_kitchen_create_receipts(cur):
+    cur.execute("""CREATE TABLE IF NOT EXISTS kitchen_create_receipts_v1 (
+        owner_id VARCHAR(36) NOT NULL, job_id VARCHAR(128) NOT NULL,
+        item_id VARCHAR(36) NOT NULL, PRIMARY KEY(owner_id, job_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4""")
+
+
 def _create_kitchen_item(owner, body):
     payload, error = _build_create_payload(owner, body)
     if error:
@@ -1385,36 +1428,59 @@ def _create_kitchen_item(owner, body):
         with conn.cursor() as cur:
             _ensure_prod_kitchen_table(conn, cur, table_name)
 
-            read_table, read_where, read_params = _resolve_kitchen_table(owner, '_prod_kitchen', conn)
-            dup_where = "`job_id` = %s"
-            if read_where:
-                dup_where = f"{read_where} AND {dup_where}"
-            cur.execute(
-                f"SELECT * FROM `{read_table}` WHERE {dup_where} LIMIT 1",
-                read_params + [payload['job_id']]
-            )
-            existing_item = cur.fetchone()
-            if existing_item:
-                serialized = _serialize_rows([existing_item])[0]
-                return _success_response({
-                    'message': 'Item already exists',
-                    'created': False,
-                    'item': serialized,
-                })
+            with _kitchen_create_lock(conn, owner, payload['job_id']):
+                read_table, read_where, read_params = _resolve_kitchen_table(owner, '_prod_kitchen', conn)
+                dup_where = "`job_id` = %s"
+                if read_where:
+                    dup_where = f"{read_where} AND {dup_where}"
+                cur.execute(
+                    f"SELECT * FROM `{read_table}` WHERE {dup_where} LIMIT 1",
+                    read_params + [payload['job_id']]
+                )
+                existing_item = cur.fetchone()
+                if existing_item:
+                    serialized = _serialize_rows([existing_item])[0]
+                    return _success_response({
+                        'message': 'Item already exists',
+                        'created': False,
+                        'item': serialized,
+                    })
 
-            # Write to shared table (primary path)
-            _shared_kitchen_insert(conn, owner, payload)
+                # A resumed durable review must not recreate an item that was already saved
+                # and subsequently consumed or removed. Deletion archives before removing the
+                # active row; that historical identity remains an acknowledged creation.
+                if body.get('retain_create_identity') is True:
+                    cur.execute(
+                        "SELECT * FROM `shared_archive_kitchen` WHERE `owner_id`=%s AND `job_id`=%s LIMIT 1",
+                        [owner, payload['job_id']])
+                    archived_item = cur.fetchone()
+                    if archived_item:
+                        return _success_response({'message': 'Item was already added',
+                            'created': False, 'archived': True,
+                            'item': _serialize_rows([archived_item])[0]})
+                    # Removing archive history must not erase a durable create identity.
+                    _ensure_kitchen_create_receipts(cur)
+                    cur.execute('SELECT item_id FROM kitchen_create_receipts_v1 WHERE owner_id=%s AND job_id=%s',
+                        [owner, payload['job_id']])
+                    receipt = cur.fetchone()
+                    if receipt:
+                        return _success_response({'message': 'Item was already added',
+                            'created': False, 'archived': True,
+                            'item': {'_id': receipt['item_id'], 'job_id': payload['job_id'], 'owner_id': owner}})
 
-            _mark_recipe_refresh_needed_for_owners(conn, member_ids)
+                # Write to shared table (primary path)
+                _shared_kitchen_insert(conn, owner, payload)
 
-            rb_table, rb_where, rb_params = _resolve_kitchen_table(owner, '_prod_kitchen', conn)
-            rb_clause = "`_id` = %s"
-            if rb_where:
-                rb_clause = f"{rb_where} AND {rb_clause}"
-            cur.execute(f"SELECT * FROM `{rb_table}` WHERE {rb_clause} LIMIT 1", rb_params + [payload['_id']])
-            created_item = cur.fetchone()
-            if not created_item:
-                return _error_response(500, 'Item was inserted but could not be read back')
+                _mark_recipe_refresh_needed_for_owners(conn, member_ids)
+
+                rb_table, rb_where, rb_params = _resolve_kitchen_table(owner, '_prod_kitchen', conn)
+                rb_clause = "`_id` = %s"
+                if rb_where:
+                    rb_clause = f"{rb_where} AND {rb_clause}"
+                cur.execute(f"SELECT * FROM `{rb_table}` WHERE {rb_clause} LIMIT 1", rb_params + [payload['_id']])
+                created_item = cur.fetchone()
+                if not created_item:
+                    return _error_response(500, 'Item was inserted but could not be read back')
 
             # Each of these is a whole-kitchen recompute, not a per-item delta, so a
             # batch caller (text-add) sets defer_side_effects and fires them ONCE after
@@ -1462,11 +1528,14 @@ def _create_kitchen_item(owner, body):
                 'item': serialized,
             }, status_code=201)
 
+    except KitchenCreateBusy as e:
+        return _error_response(503, str(e))
     except Exception as e:
         print(f"[ERROR] Failed to create kitchen item: {str(e)}")
         import traceback
         traceback.print_exc()
         return _error_response(500, f'Failed to create item: {str(e)}')
+
 
 
 # ──────────────────────────── Text-add (free-text → structured items) ────────────────────────────
@@ -1478,6 +1547,7 @@ TEXT_ADD_PARSE_MODEL = os.getenv('KITCHEN_TEXT_PARSE_MODEL', 'gpt-4o-mini')
 TEXT_ADD_MAX_ITEMS = 25
 TEXT_ADD_PARSE_TIMEOUT_SECONDS = float(os.getenv('KITCHEN_TEXT_PARSE_TIMEOUT_SECONDS', '10'))
 TEXT_ADD_PARSE_ATTEMPTS = 2
+TEXT_ADD_PARSE_BUDGET_SECONDS = 18.0
 # Parallel create+enrich fan-out across parsed items.
 TEXT_ADD_MAX_WORKERS = 8
 # Public enrich endpoint (grocery-identifier stack). KitchenApiFunction's IAM role
@@ -1560,19 +1630,53 @@ _TEXT_ADD_SCHEMA = {
 }
 
 
-def _parse_text_items_with_llm(text, owner=None):
+def _parse_text_items_with_llm(text, owner=None, *, log_input=True, operation_id=None):
+    from text_jobs import quick_items
+    deterministic = quick_items(text)
+    if deterministic is not None:
+        return deterministic, []
+    # A long, one-item-per-line list used to require thousands of output tokens
+    # in one 10-second call. Parse independent lines in bounded parallel batches
+    # while retaining the same item schema, ordering and overall retry budget.
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    if len(lines) > 8 and all(
+        len(line) <= 100 and not any(char in line for char in '.!?;:')
+        for line in lines
+    ):
+        deadline = time.monotonic() + TEXT_ADD_PARSE_BUDGET_SECONDS
+        batches = ['\n'.join(lines[i:i + 8]) for i in range(0, len(lines), 8)]
+        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+            futures = [_ai_consent.submit(
+                pool, _ai_copy_context().run, _parse_text_items_batch, batch, owner,
+                log_input=log_input, operation_id=operation_id, deadline=deadline,
+            ) for batch in batches]
+            results = [future.result() for future in futures]
+        return ([item for items, _ in results for item in items],
+                [entry for _, skipped in results for entry in skipped])
+    return _parse_text_items_batch(text, owner, log_input=log_input, operation_id=operation_id)
+
+
+def _parse_text_items_batch(text, owner=None, *, log_input=True, operation_id=None, deadline=None):
     """Parse free text into (items, skipped) via OpenAI structured outputs. Raises on failure.
 
-    Bounded by TEXT_ADD_PARSE_TIMEOUT_SECONDS with one retry: this call's median is ~2-4s
-    but it has a long stuck tail (28s+ observed). Dying at the timeout and re-asking is far
-    cheaper than waiting out a hung request. Each attempt logs its own ai_op marker.
+    Each attempt has a transport timeout and consumes a shared monotonic retry budget.
+    SDK retries are disabled so they cannot multiply the application attempts. This
+    bounds retry scheduling, not the entire handler or slow-drip transport duration.
+    Each attempt logs its own ai_op marker.
     """
-    client = _openai_client()
+    # Scope retry policy to this operation; other callers keep their existing policy.
+    client = _openai_client().with_options(max_retries=0)
+    if deadline is None:
+        deadline = time.monotonic() + TEXT_ADD_PARSE_BUDGET_SECONDS
     last_error = None
     for attempt in range(1, TEXT_ADD_PARSE_ATTEMPTS + 1):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
         _t0 = time.time()
         try:
-            response = client.chat.completions.create(
+            _ai_consent.require(_ai_consent.actor_context.get())
+            response = _ai_consent.provider_call(client.chat.completions.create)(
                 model=TEXT_ADD_PARSE_MODEL,
                 temperature=0,
                 messages=[
@@ -1580,31 +1684,35 @@ def _parse_text_items_with_llm(text, owner=None):
                     {"role": "user", "content": text},
                 ],
                 response_format={"type": "json_schema", "json_schema": _TEXT_ADD_SCHEMA},
-                timeout=TEXT_ADD_PARSE_TIMEOUT_SECONDS,
+                timeout=min(TEXT_ADD_PARSE_TIMEOUT_SECONDS, remaining),
             )
             data = json.loads(response.choices[0].message.content)
             items = data.get('items') or []
             skipped = data.get('skipped') or []
             _ai_op('parse_text_add', TEXT_ADD_PARSE_MODEL, int((time.time() - _t0) * 1000), 'success',
-                   input_summary=text,
+                   input_summary=text if log_input else f'characters={len(text)}',
                    output_summary=f'items={len(items)} skipped={len(skipped)} attempt={attempt}',
-                   owner_id=owner)
+                   owner_id=owner, job_id=operation_id)
             return items, skipped
         except Exception as _e:
             last_error = _e
             _ai_op('parse_text_add', TEXT_ADD_PARSE_MODEL, int((time.time() - _t0) * 1000), 'error',
-                   input_summary=text, output_summary=f'attempt={attempt}', error=_e, owner_id=owner)
-    raise last_error
+                   input_summary=text if log_input else f'characters={len(text)}', output_summary=f'attempt={attempt}',
+                   error=_e if log_input else type(_e).__name__, owner_id=owner, job_id=operation_id)
+    raise last_error or TimeoutError('Kitchen text parsing budget exhausted')
 
 
 def _fire_kitchen_enrichment(owner, item_id, product_name, brand, variant):
     """Fire-and-forget enrichment dispatch (ingredients/nutrition/storage_location) over HTTP.
     Never raises — enrichment is best-effort and must not fail the text-add request."""
     try:
+        if not _ai_consent.allowed(_ai_consent.actor_context.get()):
+            return True  # Optional AI enrichment is intentionally skipped.
         seed = {"product_name": product_name, "brand": brand, "variant": variant}
         payload = {
             "owner": owner,
             "item_id": item_id,
+            "user_id": _ai_consent.actor_context.get(),
             "preliminary_item": {"product_name": product_name, "needs_review": False},
             "initial_payload": seed,
         }
@@ -1722,7 +1830,7 @@ def _handle_text_add(owner, body):
         # The `with` block joins every worker before we build the response: Lambda freezes
         # the execution environment on return, so nothing may outlive the handler.
         with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
-            for idx, outcome in pool.map(lambda j: _create_and_enrich(*j), jobs):
+            for idx, outcome in pool.map(lambda pair: pair[0].run(_create_and_enrich, *pair[1]), [(_ai_copy_context(), j) for j in jobs]):
                 outcomes[idx] = outcome
 
     created = []
@@ -1760,6 +1868,7 @@ def _handle_text_add(owner, body):
 
 def _correct_kitchen_item_with_llm(item_dict, correction_text, owner=None):
     """Call OpenAI to re-derive item fields based on a user correction."""
+    _ai_consent.require(_ai_consent.actor_context.get())
     system_prompt = (
         "You are a kitchen inventory AI. A user has corrected a misidentified kitchen item. "
         "Given the current item data and the correction, return a JSON object with updated fields. "
@@ -1785,7 +1894,7 @@ IMPORTANT about `variant`: it is the descriptive qualifier shown DIRECTLY UNDER 
     _t0 = time.time()
     _input_summary = f"product_name={item_dict.get('product_name', '')} :: correction={correction_text}"
     try:
-        response = client.chat.completions.create(
+        response = _ai_consent.provider_call(client.chat.completions.create)(
             model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": system_prompt},
@@ -1833,6 +1942,8 @@ def _handle_correct_kitchen_item(owner, item_id, body, conn):
             return _error_response(404, f'Item with id {item_id} not found')
 
         current_dict = _serialize_rows([current_row])[0]
+        from amount_operations import annotate, apply_explicit_correction, Rejected
+        correction_revision = annotate(conn, [dict(current_row)])[0]['amount_revision']
 
         try:
             corrected = _correct_kitchen_item_with_llm(current_dict, correction, owner=owner)
@@ -1883,7 +1994,10 @@ def _handle_correct_kitchen_item(owner, item_id, body, conn):
 
         member_ids = _get_household_member_ids(conn, owner)
         update_dict = {col: val for col, val in field_map.items() if val is not None}
-        _shared_kitchen_update(conn, item_id, update_dict)
+        try:
+            apply_explicit_correction(conn, owner, item_id, update_dict, correction_revision, member_ids)
+        except Rejected as exc:
+            return _error_response(exc.status, exc.message)
 
         # Re-fetch updated row
         refetch_where = "`_id` = %s"
@@ -2157,12 +2271,29 @@ def handler(event, context):
         if http_method == 'GET':
             if not owner:
                 return _error_response(400, 'Missing owner parameter')
+            text_job_id = (event.get('queryStringParameters') or {}).get('text_add_job')
+            if text_job_id is not None:
+                from text_jobs import route as text_job_route
+                return text_job_route(event, owner, job_id=text_job_id)
             return _get_kitchen_items(owner, event)
 
         elif http_method == 'POST':
             if not owner:
                 return _error_response(400, 'Missing owner parameter')
             body = json.loads(event.get('body', '{}'))
+            if (event.get('queryStringParameters') or {}).get('amount_operation') == 'v1':
+                import sys
+                from amount_operations import route as amount_route
+                return amount_route(sys.modules[__name__], owner, body)
+            text_import_protocol = (event.get('queryStringParameters') or {}).get('text_import')
+            if text_import_protocol is not None:
+                if text_import_protocol != 'durable-v1' or body.get('protocol') != 'durable-v1':
+                    return _error_response(400, 'Unsupported text import protocol')
+                from text_jobs import route as text_job_route
+                return text_job_route(event, owner, body=body)
+            if raw_path.rstrip('/').endswith('/text-add') and body.get('protocol') == 'durable-v1':
+                from text_jobs import route as text_job_route
+                return text_job_route(event, owner, body=body)
             if body.get('trigger_recipes_only'):
                 _invoke_recipes_generator(owner)
                 _invoke_meal_plan_generator(owner)
@@ -2214,6 +2345,17 @@ def _get_kitchen_items(owner, event=None):
     """Get all items from owner's kitchen table"""
     try:
         include_archived = _query_param_truthy(event or {}, 'include_archived')
+        from shelf_lifecycle_store import enabled_for as shelf_enabled_for
+        conn = _mysql_conn()
+        shelf_zone = 'America/Los_Angeles'
+        if shelf_enabled_for(conn, owner):
+            headers = {k.lower():v for k,v in ((event or {}).get('headers') or {}).items()}
+            shelf_zone = headers.get('x-trepo-time-zone') or shelf_zone
+            try:
+                from zoneinfo import ZoneInfo
+                ZoneInfo(shelf_zone)
+            except (ValueError, KeyError, TypeError):
+                return _error_response(400, 'Invalid timezone')
 
         conn = _mysql_conn()
         with conn.cursor() as cur:
@@ -2236,6 +2378,17 @@ def _get_kitchen_items(owner, event=None):
                     ORDER BY `_createdDate` DESC
                 """, owner_params)
                 items_list = _serialize_rows(cur.fetchall())
+                from amount_operations import annotate
+                annotate(conn, items_list)
+                from shelf_lifecycle_store import enabled_for as shelf_enabled_for, annotate as shelf_annotate
+                if shelf_enabled_for(conn, owner):
+                    conn.begin()
+                    try:
+                        shelf_annotate(conn, items_list, time_zone=shelf_zone)
+                        conn.commit()
+                    except Exception:
+                        conn.rollback()
+                        raise
                 response_body = {
                     'owner': owner,
                     'items': items_list,
@@ -2270,6 +2423,41 @@ def _get_kitchen_items(owner, event=None):
 def _update_kitchen_item(owner, item_id, body):
     """Update a kitchen item (e.g., expiration date)"""
     try:
+        # Older clients may edit ordinary fields on a managed item. Never let a
+        # stale integer quantity overwrite a newer fractional amount.
+        from amount_operations import FIELDS, route as amount_route, amount, Rejected
+        conn = _mysql_conn()
+        with conn.cursor() as edit_cur:
+            edit_cur.execute('SELECT revision FROM kitchen_item_edits WHERE item_id=%s', (item_id,))
+            managed = edit_cur.fetchone()
+        state_edit = body and any(k in body for k in ('is_opened','storage_location','product_expiration')) and not any(k in body for k in ('quantity_value','quantity_unit','remaining_quantity','fill_percent'))
+        if (managed or state_edit) and body and set(body).issubset(FIELDS):
+            managed = managed or {'revision': 0}
+            fields = dict(body)
+            if fields.get('product_expiration'):
+                fields['product_expiration'], _ = _normalize_expiration_calendar(fields['product_expiration'])
+            if 'quantity_value' in fields or 'quantity_unit' in fields:
+                with conn.cursor() as edit_cur:
+                    table, scope, params = _resolve_kitchen_table(owner, '_prod_kitchen', conn)
+                    edit_cur.execute('SELECT quantity_value,quantity_unit FROM `'+table+'` WHERE '+(scope+' AND ' if scope else '')+'_id=%s', params+[item_id])
+                    existing=edit_cur.fetchone()
+                if not existing: return _error_response(404, 'Item not found')
+                if any(str(fields[k]) != str(existing[k]) for k in ('quantity_unit',) if k in fields) or ('quantity_value' in fields and (fields['quantity_value'] is None or amount(fields['quantity_value']) != amount(existing['quantity_value']))):
+                    return _error_response(409, 'This amount was updated. Refresh your kitchen and use the latest app to adjust it.')
+                fields.pop('quantity_value',None);fields.pop('quantity_unit',None)
+            fields.pop('remaining_quantity',None);fields.pop('fill_percent',None)
+            if fields:
+                import sys
+                response=amount_route(sys.modules[__name__],owner,{'operation_id':str(uuid.uuid4()),'kind':'edit','items':[{'item_id':item_id,'revision':managed['revision'],'fields':fields}]})
+                if response['statusCode']==200:
+                    return _success_response({'message':'Item updated successfully','item':json.loads(response['body'])['items'][0]['item']})
+                return response
+            with conn.cursor() as edit_cur:
+                table, scope, params = _resolve_kitchen_table(owner, '_prod_kitchen', conn)
+                edit_cur.execute('SELECT * FROM `'+table+'` WHERE '+(scope+' AND ' if scope else '')+'_id=%s', params+[item_id])
+                unchanged = edit_cur.fetchone()
+            if not unchanged: return _error_response(404, 'Item not found')
+            return _success_response({'message':'Item updated successfully','item':_serialize_rows([unchanged])[0]})
         table_name = f"{owner}_prod_kitchen"
         
         # Validate allowed fields for update
@@ -2588,6 +2776,17 @@ def _delete_archived_kitchen_item(owner, item_id, event=None):
             },
         )
 
+        # Keep only the original identity before removing a bulk item's archive snapshot.
+        # A failed receipt write stops the purge; retry must never resurrect a consumed item.
+        job_id = str(existing_row.get('job_id') or '')
+        if re.fullmatch(r'[0-9a-fA-F-]{36}:bulk:[1-9][0-9]*', job_id):
+            with conn.cursor() as cur:
+                _ensure_kitchen_create_receipts(cur)
+                cur.execute("INSERT INTO kitchen_create_receipts_v1(owner_id,job_id,item_id) VALUES(%s,%s,%s) "
+                            "ON DUPLICATE KEY UPDATE item_id=item_id",
+                    [existing_row.get('owner_id') or owner, job_id, item_id])
+                conn.commit()
+
         # Now remove it from the archive feed (the user's requested action).
         with conn.cursor() as cur:
             cur.execute(f"DELETE FROM `{arch_table}` WHERE {verify_where}", arch_params + [item_id])
@@ -2636,7 +2835,14 @@ def _delete_kitchen_item(owner, item_id, event=None):
             cur.execute(f"SELECT * FROM `{read_table}` WHERE {verify_where} LIMIT 1", read_params + [item_id])
             existing_item = cur.fetchone()
             if not existing_item:
-                return _error_response(404, f'Item with id {item_id} not found')
+                # A retry after a successful archive is an idempotent success.
+                # Missing tables still fail above; no history or side effects
+                # should be repeated when this owner's active row is absent.
+                return _success_response({
+                    'message': 'Item already deleted',
+                    'item_id': item_id,
+                    'already_deleted': True,
+                })
             existing_serialized = _serialize_rows([existing_item])[0]
                 
             # Delete from shared table (primary path). Full-row snapshot is
@@ -2692,7 +2898,39 @@ def _delete_kitchen_item(owner, item_id, event=None):
 
 
 def _success_response(data, status_code=200):
-    """Return successful response"""
+    """Return successful response, with current state for any returned items."""
+    from kitchen_artwork import decorate as decorate_artwork
+    from kitchen_write_artwork import after_success
+    after_success(data)
+    decorate_artwork(data)
+    from shelf_lifecycle_store import enabled as shelf_enabled, annotate as shelf_annotate
+    if shelf_enabled() and isinstance(data, dict):
+        rows = []
+        def collect(value):
+            if isinstance(value, dict):
+                if value.get('_id') and 'product_name' in value:
+                    rows.append(value)
+                else:
+                    for child in value.values(): collect(child)
+            elif isinstance(value, list):
+                for child in value: collect(child)
+        collect(data)
+        rows = [row for row in rows if 'shelf_life' not in row]
+        if rows:
+            conn = _mysql_conn()
+            conn.begin()
+            try:
+                shelf_annotate(conn, rows)
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                # A successful non-idempotent admission must not become a failed
+                # response after its write. The journal will retry projection.
+                from shelf_lifecycle import VERSION
+                for row in rows:
+                    row['shelf_life'] = {'version':VERSION,'status':'unavailable','deadline':None,
+                        'basis':'unknown','reason':'Refresh to check shelf life.','time_zone':'America/Los_Angeles'}
+                _report_backend_error('shelf_projection', code='projection_deferred')
     return {
         'statusCode': status_code,
         'headers': {
@@ -2701,8 +2939,9 @@ def _success_response(data, status_code=200):
             'Access-Control-Allow-Headers': 'Content-Type',
             'Access-Control-Allow-Methods': 'GET,POST,PUT,PATCH,DELETE,OPTIONS'
         },
-        'body': json.dumps(data, default=json_serial)
+        'body': json.dumps(legacy_safe_payload(data), default=json_serial)
     }
+
 
 
 def _error_response(status_code, message):
@@ -2719,3 +2958,16 @@ def _error_response(status_code, message):
             'error': message
         })
     }
+
+
+# Request-scoped artwork compatibility; preserves existing auth and routing.
+from icon_service.client_compatibility import gate_handler as _gate_artwork_handler
+handler = _gate_artwork_handler(handler)
+
+from kitchen_write_artwork import gate as _gate_artwork_writes
+handler = _gate_artwork_writes(handler)
+
+import ai_consent_guard as _ai_consent
+from contextvars import copy_context as _ai_copy_context
+handler = _ai_consent.context_handler(handler)
+
