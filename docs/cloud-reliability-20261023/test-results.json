@@ -1,0 +1,96 @@
+{
+  "status": "local-tests-passed-not-deployed",
+  "tests": {
+    "python": 109,
+    "voice": 153,
+    "edge": 3,
+    "context_projection": 7,
+    "additional_python_subtests": 6,
+    "assembled_sam_mysql_tests": 8
+  },
+  "lambda_import_checks": [
+    {
+      "function": "trepo-grocery-backend-dev-SavedRecipeStatus",
+      "runtime": "python3.9",
+      "package_sha256": "37656bc193ac3d9915b972a16fef519fed01f25d401bd83bbeea83d49b663219",
+      "base_code_sha256": "GyajnZLZq0yOf+KffuEeL3k45U74RpYZIlXk03S1G1A=",
+      "result": "pass"
+    },
+    {
+      "function": "trepo-grocery-backend-dev-SavedRecipesApiFunction-a7aWuWlJvEF2",
+      "runtime": "python3.9",
+      "package_sha256": "97888728025143eff0adc46deab12f2661dc836961dd2e3e80ac4151eae9c226",
+      "base_code_sha256": "k+i52D4p6T64P5t1FC7VEgsH15bv9Fv4zF//sWx3x2c=",
+      "result": "pass"
+    },
+    {
+      "function": "trepo-grocery-backend-dev-KitchenApiFunction-lC0BHStmZf1k",
+      "runtime": "python3.9",
+      "package_sha256": "93714ab72a0cb5669fc945857578b11273b6408a4531335ef0e430a496647187",
+      "base_code_sha256": "NLPyaFj23QS1I+E8FldXQfXTjGA/n+gBcpLFg3pDEkQ=",
+      "result": "pass"
+    },
+    {
+      "function": "trepo-quick-ack-async-worker-dev",
+      "runtime": "nodejs22.x",
+      "package_sha256": "f9c194c2047c84754cc874e297e3b84c9f3e700f0b20d34cd5442c79e388aca6",
+      "base_code_sha256": "sFI0v4eEKgCNPvfcqVyMjrkOmPv1PwZvOjZG9dQp1Z0=",
+      "result": "pass"
+    },
+    {
+      "function": "trepo-quick-ack-stream-dev",
+      "runtime": "nodejs22.x",
+      "package_sha256": "511e5409a3f443f00101c920bf7fb891127e5a3cb372f4ad8209ebebd2ebe072",
+      "base_code_sha256": "l+wv0pkFHuxYN+Oe0J/CymN4r7GnVXNg1kFKCri88bE=",
+      "result": "pass"
+    },
+    {
+      "function": "trepo-ux-failure-monitor",
+      "runtime": "python3.11",
+      "package_sha256": "b53aa7ea68a979ce38bdd537f76022297f3f26b52ecfda5fb2637a7863629ca2",
+      "base_code_sha256": "q533zICSCWxdkJeBtrKg0XDpytvTRz9zZ/PtJHfguTc=",
+      "result": "pass"
+    },
+    {
+      "function": "trepo-grocery-backend-dev-MealPlanApiFunction-BPOVuOSkR8X2",
+      "runtime": "python3.9",
+      "package_sha256": "78b8949b27d3645c19414b58aab118e82492b4acdab392a69a9a810947ff5514",
+      "base_code_sha256": "kg2U4kqJOD7qaB9LDkJx6yNmcBOxDXwH1thR5Pj9Wcs=",
+      "result": "pass"
+    },
+    {
+      "function": "trepo-imessage-context-projection",
+      "runtime": "nodejs24.x",
+      "package_sha256": "3de202f04a59cf2d15f5a4a14de1d5f795de9739ec9afb055bcb0adfbc930aba",
+      "base_code_sha256": "VhD9eJIO7W2wBmN829cPpRkNGXOjxOlvs60TElbXdfo=",
+      "result": "pass"
+    },
+    {
+      "function": "trepo-quick-ack-sam-dev",
+      "runtime": "nodejs22.x",
+      "package_sha256": "68e7e251d2faea06e46c36e769b9e6391ee57c3bee6d34bce57d7b99fd6c9929",
+      "base_code_sha256": "4WdnLOFYgIbvGdW/4VCd5UaYCutx5uBWvMDrDyirdk4=",
+      "result": "pass"
+    },
+    {
+      "function": "trepo-grocery-backend-dev-MealPlanGeneratorFunctio-4rNstnlDTS1Z",
+      "runtime": "python3.12",
+      "package_sha256": "1e777466c2891061bc3de6a779ac194e3383533ab12365d64c546775e0f597f9",
+      "base_code_sha256": "f8eMhKkYKIcQcIwDivsWXsPhqthWY+BTs+2zDay8+wY=",
+      "result": "pass"
+    },
+    {
+      "function": "trepo-item-icons-v2-Resolver-9pwJBED5nh32",
+      "runtime": "python3.12",
+      "package_sha256": "4e5d998ff90a567f07bfc29b02246373b618cc53ebd21260debac67dcaccb3b6",
+      "base_code_sha256": "8QowIqX2nnWvcsPR5Xjmmws7b+9bvrMXQEIY9FhEBYE=",
+      "result": "pass"
+    }
+  ],
+  "limits": [
+    "No live customer mutation, deployment or backfill",
+    "Provider/network calls stubbed for regressions; real isolated MySQL used for transactions",
+    "Container imports use network isolation and a minimal streaming runtime shim",
+    "Production/native end-to-end and CloudFront load qualification remain"
+  ]
+}
