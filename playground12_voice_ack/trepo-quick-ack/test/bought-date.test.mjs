@@ -1,12 +1,12 @@
 import {test,mock,beforeEach} from 'node:test';
 import assert from 'node:assert/strict';
-import {normalizeBoughtDate,boughtDateFields} from '../../../shared/voice-assistant/bought-date.mjs';
+import {normalizeBoughtDate,boughtDateFields,boughtDateYearFollowup} from '../../../shared/voice-assistant/bought-date.mjs';
 import {validateToolCall} from '../../../shared/voice-assistant/tool-executor.mjs';
 const lib=new URL('../lib/',import.meta.url);
 const retained=new Map();
 mock.module(new URL('session-store.mjs',lib).href,{namedExports:{readKitchenEditRequest:async s=>retained.get(s.operationId),retainKitchenEditRequest:async(s,b)=>{retained.set(s.operationId,b);return b;}}});
 const {createKitchenMutationContext,kitchenEditBody,prepareKitchenEdit,saveKitchenEdit,renameReference}=await import('../lib/kitchen-edit-client.mjs');
-const {applyKitchenTask,rememberKitchenTaskResult,explicitKitchenEdit}=await import('../lib/kitchen-task-context.mjs');
+const {applyKitchenTask,rememberKitchenTaskResult,explicitKitchenEdit,validateTaskHistory,prepareKitchenTask}=await import('../lib/kitchen-task-context.mjs');
 const at={now:new Date('2026-10-27T01:00:00Z'),timeZone:'America/Los_Angeles'};
 const context={userId:'test',ownerId:'test-family'}, row={_id:'milk',amount_revision:4};
 beforeEach(()=>{retained.clear();mock.restoreAll();});
@@ -18,6 +18,40 @@ test('calendar handles exact dates and relative phrases in household time',()=>{
 test('shared action schema accepts date-only and explicit unknown, rejects invalid values',()=>{
  for(const value of ['yesterday',null]) assert.equal(validateToolCall('update_item_details',{item_name:'milk',bought_date:value}).ok,true);
  for(const value of ['',false,123,{}]) assert.equal(validateToolCall('update_item_details',{item_name:'milk',bought_date:value}).ok,false);
+});
+test('named dates accept month abbreviations and resolve an omitted year to the latest past occurrence',()=>{
+ for (const [input,want] of [['Sept 28','2026-09-28'],['Sep. 28','2026-09-28'],['September 28th','2026-09-28'],['Sept 28, 2026','2026-09-28'],['Dec 28','2025-12-28'],['Feb 29','2024-02-29']])
+  assert.equal(normalizeBoughtDate(input,at),want);
+ assert.equal(normalizeBoughtDate('Dec 31',{now:new Date('2026-01-01T09:00:00Z'),timeZone:'America/Los_Angeles'}),'2025-12-31');
+ for(const bad of ['Sept 31','Apr 31','Dec 28, 2026','2026','02/03']) assert.throws(()=>normalizeBoughtDate(bad,at));
+});
+const celeryHistory=[{role:'user',content:'Hey I bought that celery on sept 28'},
+ {role:'assistant',content:'Got it — I can update the celery’s bought date, but Sept 28 is ambiguous without a year. What year should I use for the celery?'}];
+test('the exact reported year follow-up retains the user item and confirmed year',async()=>{
+ const followup=boughtDateYearFollowup('2026',celeryHistory);
+ assert.equal(followup.boughtDate,'2026-09-28');
+ assert.equal(followup.sourceTranscript,'Hey I bought that celery on sept 28, 2026');
+ const state={task:null};validateTaskHistory(state,celeryHistory,{transcript:'2026'});
+ await prepareKitchenTask(state,'2026');
+ const prepared=applyKitchenTask(state,'2026','update_item_details',{item_name:'Celery',bought_date:'2025-09-28',item_id:'model-guess'});
+ assert.equal(prepared.args.bought_date,'2026-09-28');
+ assert.deepEqual(renameReference(prepared.args,{bought_date:prepared.args.bought_date},{sourceTranscript:state.boughtDateFollowup.sourceTranscript}),{item_name:'Celery',item_id:null,selection_hint:null});
+ assert.throws(()=>renameReference({item_name:'Milk'},prepared.args,{sourceTranscript:state.boughtDateFollowup.sourceTranscript}),/repeat the item/);
+ for(const args of [{item_name:'Celery',bought_date:'2026-09-28',new_name:'Milk'}, {item_name:'Celery',bought_date:'2026-09-28',quantity_value:2}])
+  assert.ok(applyKitchenTask(state,'2026','update_item_details',args).error);
+ assert.ok(applyKitchenTask(state,'2026','discard_item',{item_name:'Celery'}).error);
+ assert.equal(explicitKitchenEdit('Hey I bought that celery on sept 28'),true);
+});
+test('a year cannot revive old, cancelled, unrelated or assistant-invented correction intent',()=>{
+ const cases=[[],[celeryHistory[1]], [celeryHistory[0],{role:'assistant',content:'Updated.'}],
+  [...celeryHistory,{role:'user',content:'cancel'},{role:'assistant',content:'What year?'}],
+  [{role:'user',content:'I have celery'},celeryHistory[1]],
+  [{role:'user',content:'Do not change the bought date for celery to Sept 28'},celeryHistory[1]],
+  [{role:'user',content:'Did I buy celery on Sept 28?'},celeryHistory[1]],
+  [{role:'user',content:'I bought celery on Sept 28, 2025'},celeryHistory[1]],
+  [...celeryHistory,{role:'user',content:'What recipes do I have?'},{role:'assistant',content:'Here they are.'}]];
+ for(const history of cases) assert.equal(boughtDateYearFollowup('2026',history),null);
+ for(const text of ['yes','2026 and delete the milk','2026?']) assert.equal(boughtDateYearFollowup(text,celeryHistory),null);
 });
 test('date-only body is separate from expiration, created date and quantity',()=>{
  const mutation=createKitchenMutationContext({operationId:'request'});
@@ -95,4 +129,6 @@ test('visible confirmation shows saved date and allows duplicate/date clarificat
  for(const type of ['ambiguous_kitchen_item','invalid_bought_date']) {
   assert.deepEqual(actionOutcomes([{...event,result:{ok:false,details:{type}}}]),[]);
  }
+ assert.equal(actionOutcomeText(actionOutcomes([{...event,result:{ok:false,statusCode:409,error:'Please repeat the item and its bought date to confirm this correction.'}}])),
+  'I haven’t changed it yet. Please tell me the item and bought date together.');
 });

@@ -80,7 +80,10 @@ export function actionOutcomeText(outcomes) {
       const lines=outcome.entities.map(e => `${e.name}${e.aisle ? ` → ${e.aisle}` : ''}${e.dateCorrection ? (e.boughtDate===null ? ' · Bought date cleared' : ` · Bought ${e.boughtDate}`) : ''}${e.quantity ? ` (${e.quantity})` : ''}${e.date ? ` · ${e.date}${e.slot ? ' '+e.slot : ''}` : ''}`);
       sections.push(`${outcome.label}:\n${lines.map(x => '- '+x).join('\n')}`);
     }
-    if (outcome.failed) sections.push(outcome.error === 'ambiguous_match' ? 'More than one item matches. Choose the specific item before removing or changing it.' : "Some requested changes couldn't be completed.");
+    if (outcome.failed) sections.push(outcome.error === 'ambiguous_match' ? 'More than one item matches. Choose the specific item before removing or changing it.'
+      : outcome.toolName === 'update_item_details' && outcome.error === 'Please repeat the item and its bought date to confirm this correction.'
+        ? "I haven’t changed it yet. Please tell me the item and bought date together."
+        : "Some requested changes couldn't be completed.");
     if (outcome.unverified) sections.push("I couldn't confirm every change. Check the relevant list before trying again.");
   }
   return [...new Set(sections)].join('\n\n');

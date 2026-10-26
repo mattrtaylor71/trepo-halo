@@ -1,7 +1,7 @@
 import {explicitLeftoverCheckIn} from "./leftover-check-in-intent.mjs";
 import {haloAddDestination} from "./halo-add-intent.mjs";
 import crypto from 'node:crypto';
-import {hasBoughtDate} from '../../../shared/voice-assistant/bought-date.mjs';
+import {hasBoughtDate, boughtDateYearFollowup} from '../../../shared/voice-assistant/bought-date.mjs';
 import {canonicalKitchenUnit} from './kitchen-edit-client.mjs';
 import {DynamoDBClient} from '@aws-sdk/client-dynamodb';
 import {DynamoDBDocumentClient,GetCommand,PutCommand} from '@aws-sdk/lib-dynamodb';
@@ -20,7 +20,7 @@ export function explicitRename(text) {
   return /\b(?:rename|renaming|name|called|spelled|spelling)\b/i.test(text);
 }
 export function explicitKitchenEdit(text) {
-  return /^(?:(?:please|can you|could you) )?(?:(?:i|we) (?:have |just |actually )?)?(?:bought|purchased|opened|sealed|unsealed|close|mark|move|change|update|set|correct)\b/i.test(String(text).trim());
+  return /^(?:(?:hey|hi|hello)[,!]?\s+)?(?:(?:please|can you|could you) )?(?:(?:i|we) (?:have |just |actually )?)?(?:bought|purchased|opened|sealed|unsealed|close|mark|move|change|update|set|correct)\b/i.test(String(text).trim());
 }
 export function pantryConfirmation(text) {
   const normalized=String(text).toLowerCase().replace(/[.,!?’']/g,'').replace(/\s+/g,' ').trim();
@@ -75,6 +75,7 @@ export async function storeKitchenTask(state, task) {
 export function taskOrigin(text) { return crypto.createHash('sha256').update(String(text).trim().toLowerCase()).digest('hex'); }
 
 export function validateTaskHistory(state, messages, options = {}) {
+  state.boughtDateFollowup = boughtDateYearFollowup(options.transcript, messages);
   if (!state.task) return;
   const anchor=[...(messages || [])].reverse().find(m=>m.role==='user' &&
     (explicitRename(m.content) || explicitKitchenEdit(m.content) || explicitPantryEntry(m.content) || ['cancel','switch'].includes(taskTurnKind(m.content,options))));
@@ -117,6 +118,13 @@ export function pantryAmount(text) {
 
 export function applyKitchenTask(state, transcript, toolName, args) {
   const readOnly=/^(?:get_|search_|list_|recommend_)/.test(toolName);
+  if (state.boughtDateFollowup && !readOnly) {
+    if (toolName !== 'update_item_details' || !hasBoughtDate(args) ||
+        Object.keys(args).some(key=>!['item_name','item_id','bought_date'].includes(key)))
+      return {error:'That reply only confirms the year for the bought-date correction.'};
+    // Preserve the user's confirmed date even if the model emits a different one.
+    args={...args,bought_date:state.boughtDateFollowup.boughtDate};
+  }
   if ((state.turn === 'cancel' || state.turn === 'question') && !readOnly)
     return {error:'Please confirm the change explicitly.'};
   // Pantry follow-ups must not intercept confirmations owned by other features.

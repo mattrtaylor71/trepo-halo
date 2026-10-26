@@ -1419,7 +1419,8 @@ async function executeKitchenAwareTool(input, taskState) {
       return {ok:false,statusCode:409,error:'The pending correction changed. Please select the item again.'};
     input={...input,mutationContext:createKitchenMutationContext({operationId:prepared.operationId,authorization:input.mutationContext.authorization})};
   }
-  const result=await executeToolAction({...input,args:prepared.args,expectedRevision:prepared.expectedRevision});
+  const result=await executeToolAction({...input,args:prepared.args,expectedRevision:prepared.expectedRevision,
+    sourceTranscript:taskState.boughtDateFollowup?.sourceTranscript || input.sourceTranscript});
   if (memory && WRITE_TOOL_NAMES.has(input.toolName)) memory.attempts.set(attemptKey,result);
   const remembered=await rememberKitchenTaskResult(taskState,input.toolName,result,`${input.mutationContext.requestId}:clarification:${ordinal}`);
   if (!remembered && result.ok) return {...result,task_context:'unavailable'};
@@ -1433,7 +1434,7 @@ async function executeKitchenAwareTool(input, taskState) {
 
 async function initializeKitchenTask(userContext,kitchenRequest,env,transcript,sessionMessages,responseSurface) {
   const state=await loadKitchenTask({household:userContext?.ownerId,actor:userContext?.userId || userContext?.tableOwnerId,session:kitchenRequest?.sessionId},env);
-  validateTaskHistory(state,sessionMessages,{responseSurface});
+  validateTaskHistory(state,sessionMessages,{responseSurface,transcript});
   return prepareKitchenTask(state,transcript,{responseSurface});
 }
 

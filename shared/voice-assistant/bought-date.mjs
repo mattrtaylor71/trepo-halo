@@ -3,6 +3,9 @@
 export const hasBoughtDate = value => Object.hasOwn(value || {}, 'bought_date');
 const invalid = () => Object.assign(new Error('What exact bought date should I use? Choose a past date, such as October 19, 2026, or say yesterday.'), {statusCode:400,details:{type:"invalid_bought_date"}});
 const iso = date => date.toISOString().slice(0,10);
+const monthNames = ['january','february','march','april','may','june','july','august','september','october','november','december'];
+const monthPattern = '(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)';
+const namedDatePattern = new RegExp(`^(${monthPattern})\\.? (\\d{1,2})(?:st|nd|rd|th)?(?:,? (\\d{4}))?$`);
 export function normalizeBoughtDate(value, {now = new Date(), timeZone = 'America/Los_Angeles'} = {}) {
   if (value === null) return null; // Only an explicit request to forget the date.
   if (typeof value !== 'string' || !value.trim() || value.length > 100) throw invalid();
@@ -16,7 +19,7 @@ export function normalizeBoughtDate(value, {now = new Date(), timeZone = 'Americ
   else {
     const ago=text.match(/^(\d+|one|two|three|four|five|six|seven|eight|nine|ten|a|an) (days?|weeks?) ago$/);
     const weekday=text.match(/^last (sunday|monday|tuesday|wednesday|thursday|friday|saturday)$/);
-    const named=text.match(/^(january|february|march|april|may|june|july|august|september|october|november|december) (\d{1,2})(?:st|nd|rd|th)?[,]? (\d{4})$/);
+    const named=text.match(namedDatePattern);
     if (ago) {
       const n=Number(ago[1]) || ({one:1,two:2,three:3,four:4,five:5,six:6,seven:7,eight:8,nine:9,ten:10,a:1,an:1}[ago[1]]) || 0;
       if(n>36500) throw invalid();
@@ -25,13 +28,42 @@ export function normalizeBoughtDate(value, {now = new Date(), timeZone = 'Americ
       const index=['sunday','monday','tuesday','wednesday','thursday','friday','saturday'].indexOf(weekday[1]);
       day.setUTCDate(day.getUTCDate()-((day.getUTCDay()-index+7)%7 || 7));result=iso(day);
     } else if (named) {
-      const month=['january','february','march','april','may','june','july','august','september','october','november','december'].indexOf(named[1])+1;
-      result=`${named[3]}-${String(month).padStart(2,'0')}-${named[2].padStart(2,'0')}`;
+      const month=monthNames.findIndex(name=>name.slice(0,3)===named[1].slice(0,3))+1;
+      const suffix=`${String(month).padStart(2,'0')}-${named[2].padStart(2,'0')}`;
+      // Past purchase + omitted year means its most recent calendar occurrence.
+      // Do not invent a future purchase or reinterpret an explicit year.
+      let year=Number(named[3] || parts.year);
+      if (!named[3] && `${year}-${suffix}`>today) year--;
+      result=`${year}-${suffix}`;
+      if (!named[3] && suffix==='02-29') {
+        while (year>=1900 && iso(new Date(`${result}T12:00:00Z`))!==result) result=`${--year}-${suffix}`;
+      }
     } else throw invalid();
   }
   const parsed=new Date(`${result}T12:00:00Z`);
   if (!Number.isFinite(parsed.getTime()) || iso(parsed)!==result || result>today || result<'1900-01-01') throw invalid();
   return result;
+}
+
+// Recover only an adjacent, server-loaded year clarification. User words supply
+// the item and date; assistant text merely proves it asked for the missing year.
+// Never search older turns past a new request, cancellation or topic change.
+export function boughtDateYearFollowup(transcript, messages = []) {
+  const year=String(transcript).trim().match(/^(\d{4})[.!]?$/)?.[1];
+  if (!year) return null;
+  const turns=messages.filter(m=>['user','assistant'].includes(m?.role) && typeof m.content==='string');
+  const question=turns.at(-1), request=turns.at(-2);
+  if (question?.role!=='assistant' || request?.role!=='user' ||
+      !/\b(?:what|which) year\b/i.test(question.content)) return null;
+  const source=request.content.trim();
+  if (!/\b(?:i|we)\s+(?:(?:actually|just|really)\s+)*(?:bought|purchased)\b|\b(?:change|correct|update|set)\b[^.!?]*\b(?:bought|purchase|acquired)\s+date\b/i.test(source) ||
+      /\b(?:don['’]t|do not|never|cancel|ignore|instead)\b|[?]/i.test(source)) return null;
+  const matches=[...source.matchAll(new RegExp(`\\b(${monthPattern})\\.? (\\d{1,2})(?:st|nd|rd|th)?(?=\\s*[.!]?\\s*$)`, 'gi'))];
+  if (matches.length!==1) return null;
+  const match=matches[0];
+  const month=monthNames.findIndex(name=>name.slice(0,3)===match[1].toLowerCase().slice(0,3))+1;
+  const boughtDate=`${year}-${String(month).padStart(2,'0')}-${match[2].padStart(2,'0')}`;
+  return {sourceTranscript:source.slice(0,match.index)+`${match[0]}, ${year}`+source.slice(match.index+match[0].length),boughtDate};
 }
 
 export async function householdBoughtDate(connection, household, value) {
