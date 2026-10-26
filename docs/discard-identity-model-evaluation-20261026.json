@@ -1,0 +1,1061 @@
+{
+  "model": "gpt-6-astra",
+  "passed": 28,
+  "total": 28,
+  "results": [
+    {
+      "id": "avocado_not_ingredients",
+      "passed": true,
+      "latency_s": 2.88,
+      "model": "gpt-6-astra",
+      "usage": {
+        "input_tokens": 762,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 54,
+        "output_tokens_details": {
+          "reasoning_tokens": 0
+        },
+        "total_tokens": 816
+      },
+      "decision": {
+        "status": "no_match",
+        "matching_ids": [],
+        "reason": "None of the candidates is avocado fruit; chips, dressing, and avocado oil are different products.",
+        "authorization_quote": null,
+        "scope": "one_entry",
+        "selection": "oldest"
+      },
+      "resolved": {
+        "version": "discard-identity-v1",
+        "status": "no_match",
+        "reason": "None of the candidates is avocado fruit; chips, dressing, and avocado oil are different products.",
+        "matched": false
+      }
+    },
+    {
+      "id": "avocado_with_distractors",
+      "passed": true,
+      "latency_s": 3.51,
+      "model": "gpt-6-astra",
+      "usage": {
+        "input_tokens": 754,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 92,
+        "output_tokens_details": {
+          "reasoning_tokens": 33
+        },
+        "total_tokens": 846
+      },
+      "decision": {
+        "status": "matched",
+        "matching_ids": [
+          "fruit"
+        ],
+        "reason": "Avocado matches Hass avocados, not avocado oil or dressing. Photo discard mode authorizes one entry.",
+        "authorization_quote": null,
+        "scope": "one_entry",
+        "selection": "oldest"
+      },
+      "resolved": {
+        "version": "discard-identity-v1",
+        "matched": true,
+        "status": "matched",
+        "reason": "Avocado matches Hass avocados, not avocado oil or dressing. Photo discard mode authorizes one entry.",
+        "selected_id": "fruit",
+        "matching_ids": [
+          "fruit"
+        ],
+        "expected": {
+          "_id": "fruit",
+          "product_name": "Hass Avocados 4 Ct Bag",
+          "_createdDate": "2026-10-01"
+        },
+        "fingerprint": "c88eeb93d22a4a077d0ad4f434e8557c025ae4f6e3bf1e52249f35279b2ce7ef"
+      }
+    },
+    {
+      "id": "produce_duplicates",
+      "passed": true,
+      "latency_s": 4.92,
+      "model": "gpt-6-astra",
+      "usage": {
+        "input_tokens": 745,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 139,
+        "output_tokens_details": {
+          "reasoning_tokens": 86
+        },
+        "total_tokens": 884
+      },
+      "decision": {
+        "status": "matched",
+        "matching_ids": [
+          "new",
+          "old"
+        ],
+        "reason": "Both entries identify avocado fruit; avocado oil is a different product.",
+        "authorization_quote": null,
+        "scope": "one_entry",
+        "selection": "oldest"
+      },
+      "resolved": {
+        "version": "discard-identity-v1",
+        "matched": true,
+        "status": "matched",
+        "reason": "Both entries identify avocado fruit; avocado oil is a different product.",
+        "selected_id": "new",
+        "matching_ids": [
+          "new",
+          "old"
+        ],
+        "expected": {
+          "_id": "new",
+          "product_name": "Avocado",
+          "_createdDate": "2026-10-01"
+        },
+        "fingerprint": "58219a24766f7afc38ef6cefc7aa0bd1a3373cdb1707f5ea2dd5dd11502c509d"
+      }
+    },
+    {
+      "id": "avocado_oil",
+      "passed": true,
+      "latency_s": 3.36,
+      "model": "gpt-6-astra",
+      "usage": {
+        "input_tokens": 752,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 84,
+        "output_tokens_details": {
+          "reasoning_tokens": 28
+        },
+        "total_tokens": 836
+      },
+      "decision": {
+        "status": "matched",
+        "matching_ids": [
+          "oil"
+        ],
+        "reason": "Avocado oil matches Chosen Foods Avocado Oil, not avocado fruit or tortilla chips.",
+        "authorization_quote": null,
+        "scope": "one_entry",
+        "selection": "oldest"
+      },
+      "resolved": {
+        "version": "discard-identity-v1",
+        "matched": true,
+        "status": "matched",
+        "reason": "Avocado oil matches Chosen Foods Avocado Oil, not avocado fruit or tortilla chips.",
+        "selected_id": "oil",
+        "matching_ids": [
+          "oil"
+        ],
+        "expected": {
+          "_id": "oil",
+          "product_name": "Chosen Foods Avocado Oil",
+          "_createdDate": "2026-10-01"
+        },
+        "fingerprint": "26741fcf09bc4509d546679bb5967cffcd412d7225c33e2da8a7950453d2ca81"
+      }
+    },
+    {
+      "id": "generic_eggs",
+      "passed": true,
+      "latency_s": 2.74,
+      "model": "gpt-6-astra",
+      "usage": {
+        "input_tokens": 725,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 51,
+        "output_tokens_details": {
+          "reasoning_tokens": 0
+        },
+        "total_tokens": 776
+      },
+      "decision": {
+        "status": "matched",
+        "matching_ids": [
+          "eggs"
+        ],
+        "reason": "Eggs matches Kirkland Organic Free Range Eggs, not egg salad.",
+        "authorization_quote": null,
+        "scope": "one_entry",
+        "selection": "oldest"
+      },
+      "resolved": {
+        "version": "discard-identity-v1",
+        "matched": true,
+        "status": "matched",
+        "reason": "Eggs matches Kirkland Organic Free Range Eggs, not egg salad.",
+        "selected_id": "eggs",
+        "matching_ids": [
+          "eggs"
+        ],
+        "expected": {
+          "_id": "eggs",
+          "product_name": "Kirkland Organic Free Range Eggs",
+          "_createdDate": "2026-10-01"
+        },
+        "fingerprint": "0c9c03d2b016be4eddb879bd5ec0056fb1956b1392eda42b7bc53e11bd7b3e8a"
+      }
+    },
+    {
+      "id": "plural_berries",
+      "passed": true,
+      "latency_s": 3.15,
+      "model": "gpt-6-astra",
+      "usage": {
+        "input_tokens": 720,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 74,
+        "output_tokens_details": {
+          "reasoning_tokens": 26
+        },
+        "total_tokens": 794
+      },
+      "decision": {
+        "status": "matched",
+        "matching_ids": [
+          "fruit"
+        ],
+        "reason": "Raspberries matches Raspberry, not Raspberry Jam.",
+        "authorization_quote": null,
+        "scope": "one_entry",
+        "selection": "oldest"
+      },
+      "resolved": {
+        "version": "discard-identity-v1",
+        "matched": true,
+        "status": "matched",
+        "reason": "Raspberries matches Raspberry, not Raspberry Jam.",
+        "selected_id": "fruit",
+        "matching_ids": [
+          "fruit"
+        ],
+        "expected": {
+          "_id": "fruit",
+          "product_name": "Raspberry",
+          "_createdDate": "2026-10-01"
+        },
+        "fingerprint": "5a9edc237b0373a02dc549d2e89f4414f761dce7b5763310784705e0dc374154"
+      }
+    },
+    {
+      "id": "milk_ambiguous",
+      "passed": true,
+      "latency_s": 5.13,
+      "model": "gpt-6-astra",
+      "usage": {
+        "input_tokens": 718,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 51,
+        "output_tokens_details": {
+          "reasoning_tokens": 0
+        },
+        "total_tokens": 769
+      },
+      "decision": {
+        "status": "ambiguous",
+        "matching_ids": [],
+        "reason": "Generic milk could refer to whole milk or skim milk, which are distinct products.",
+        "authorization_quote": null,
+        "scope": "one_entry",
+        "selection": "oldest"
+      },
+      "resolved": {
+        "version": "discard-identity-v1",
+        "status": "ambiguous",
+        "reason": "Generic milk could refer to whole milk or skim milk, which are distinct products.",
+        "matched": false
+      }
+    },
+    {
+      "id": "explicit_whole_milk",
+      "passed": true,
+      "latency_s": 3.48,
+      "model": "gpt-6-astra",
+      "usage": {
+        "input_tokens": 724,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 91,
+        "output_tokens_details": {
+          "reasoning_tokens": 35
+        },
+        "total_tokens": 815
+      },
+      "decision": {
+        "status": "matched",
+        "matching_ids": [
+          "whole"
+        ],
+        "reason": "Whole Milk matches Organic Whole Milk 1 Gallon; skim milk is a conflicting variant.",
+        "authorization_quote": null,
+        "scope": "one_entry",
+        "selection": "oldest"
+      },
+      "resolved": {
+        "version": "discard-identity-v1",
+        "matched": true,
+        "status": "matched",
+        "reason": "Whole Milk matches Organic Whole Milk 1 Gallon; skim milk is a conflicting variant.",
+        "selected_id": "whole",
+        "matching_ids": [
+          "whole"
+        ],
+        "expected": {
+          "_id": "whole",
+          "product_name": "Organic Whole Milk 1 Gallon",
+          "_createdDate": "2026-10-01"
+        },
+        "fingerprint": "fda884817d29b3f8387ce1eef135e563991a5066c0fb1bbb7e093f039d9914f9"
+      }
+    },
+    {
+      "id": "milk_not_oat",
+      "passed": true,
+      "latency_s": 2.04,
+      "model": "gpt-6-astra",
+      "usage": {
+        "input_tokens": 694,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 45,
+        "output_tokens_details": {
+          "reasoning_tokens": 0
+        },
+        "total_tokens": 739
+      },
+      "decision": {
+        "status": "no_match",
+        "matching_ids": [],
+        "reason": "Whole milk and oat milk are different product types.",
+        "authorization_quote": null,
+        "scope": "one_entry",
+        "selection": "oldest"
+      },
+      "resolved": {
+        "version": "discard-identity-v1",
+        "status": "no_match",
+        "reason": "Whole milk and oat milk are different product types.",
+        "matched": false
+      }
+    },
+    {
+      "id": "conflicting_brand",
+      "passed": true,
+      "latency_s": 3.75,
+      "model": "gpt-6-astra",
+      "usage": {
+        "input_tokens": 695,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 83,
+        "output_tokens_details": {
+          "reasoning_tokens": 32
+        },
+        "total_tokens": 778
+      },
+      "decision": {
+        "status": "no_match",
+        "matching_ids": [],
+        "reason": "Brand conflict: target is Trader Joes; candidate is Goya.",
+        "authorization_quote": null,
+        "scope": "one_entry",
+        "selection": "oldest"
+      },
+      "resolved": {
+        "version": "discard-identity-v1",
+        "status": "no_match",
+        "reason": "Brand conflict: target is Trader Joes; candidate is Goya.",
+        "matched": false
+      }
+    },
+    {
+      "id": "flavor_mismatch",
+      "passed": true,
+      "latency_s": 2.45,
+      "model": "gpt-6-astra",
+      "usage": {
+        "input_tokens": 701,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 43,
+        "output_tokens_details": {
+          "reasoning_tokens": 0
+        },
+        "total_tokens": 744
+      },
+      "decision": {
+        "status": "no_match",
+        "matching_ids": [],
+        "reason": "Lime and grapefruit are conflicting flavors.",
+        "authorization_quote": null,
+        "scope": "one_entry",
+        "selection": "oldest"
+      },
+      "resolved": {
+        "version": "discard-identity-v1",
+        "status": "no_match",
+        "reason": "Lime and grapefruit are conflicting flavors.",
+        "matched": false
+      }
+    },
+    {
+      "id": "unclear_identity",
+      "passed": true,
+      "latency_s": 3.42,
+      "model": "gpt-6-astra",
+      "usage": {
+        "input_tokens": 723,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 93,
+        "output_tokens_details": {
+          "reasoning_tokens": 38
+        },
+        "total_tokens": 816
+      },
+      "decision": {
+        "status": "uncertain",
+        "matching_ids": [],
+        "reason": "\u201cDairy Tub\u201d does not establish whether the product is sour cream or Greek yogurt.",
+        "authorization_quote": null,
+        "scope": "one_entry",
+        "selection": "oldest"
+      },
+      "resolved": {
+        "version": "discard-identity-v1",
+        "status": "uncertain",
+        "reason": "\u201cDairy Tub\u201d does not establish whether the product is sour cream or Greek yogurt.",
+        "matched": false
+      }
+    },
+    {
+      "id": "exact_product_duplicate",
+      "passed": true,
+      "latency_s": 2.45,
+      "model": "gpt-6-astra",
+      "usage": {
+        "input_tokens": 775,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 57,
+        "output_tokens_details": {
+          "reasoning_tokens": 0
+        },
+        "total_tokens": 832
+      },
+      "decision": {
+        "status": "matched",
+        "matching_ids": [
+          "new",
+          "old"
+        ],
+        "reason": "Both entries match FAGE 0% Plain Greek Yogurt; vanilla is a conflicting variant.",
+        "authorization_quote": null,
+        "scope": "one_entry",
+        "selection": "oldest"
+      },
+      "resolved": {
+        "version": "discard-identity-v1",
+        "matched": true,
+        "status": "matched",
+        "reason": "Both entries match FAGE 0% Plain Greek Yogurt; vanilla is a conflicting variant.",
+        "selected_id": "new",
+        "matching_ids": [
+          "new",
+          "old"
+        ],
+        "expected": {
+          "_id": "new",
+          "product_name": "FAGE 0% Plain Greek Yogurt",
+          "_createdDate": "2026-10-01",
+          "brand": "FAGE",
+          "variant": "0% Plain"
+        },
+        "fingerprint": "57982123ad7517955cc62d23a2723983f10420afc8b868784ab1109dc1ed10f6"
+      }
+    },
+    {
+      "id": "missing_variant_not_conflict",
+      "passed": true,
+      "latency_s": 4.14,
+      "model": "gpt-6-astra",
+      "usage": {
+        "input_tokens": 700,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 79,
+        "output_tokens_details": {
+          "reasoning_tokens": 28
+        },
+        "total_tokens": 779
+      },
+      "decision": {
+        "status": "matched",
+        "matching_ids": [
+          "beans"
+        ],
+        "reason": "Brand and product match; organic is a non-conflicting description.",
+        "authorization_quote": null,
+        "scope": "one_entry",
+        "selection": "oldest"
+      },
+      "resolved": {
+        "version": "discard-identity-v1",
+        "matched": true,
+        "status": "matched",
+        "reason": "Brand and product match; organic is a non-conflicting description.",
+        "selected_id": "beans",
+        "matching_ids": [
+          "beans"
+        ],
+        "expected": {
+          "_id": "beans",
+          "product_name": "Trader Joes Organic Black Beans",
+          "_createdDate": "2026-10-01",
+          "brand": "Trader Joes",
+          "variant": "Organic"
+        },
+        "fingerprint": "02cb0d8c401ac8bee52ef479db462aae4cde8bd29e590d0ca74c66b72a2419c8"
+      }
+    },
+    {
+      "id": "apple_not_juice",
+      "passed": true,
+      "latency_s": 3.09,
+      "model": "gpt-6-astra",
+      "usage": {
+        "input_tokens": 718,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 77,
+        "output_tokens_details": {
+          "reasoning_tokens": 29
+        },
+        "total_tokens": 795
+      },
+      "decision": {
+        "status": "no_match",
+        "matching_ids": [],
+        "reason": "Apple fruit does not match apple juice or apple sauce.",
+        "authorization_quote": null,
+        "scope": "one_entry",
+        "selection": "oldest"
+      },
+      "resolved": {
+        "version": "discard-identity-v1",
+        "status": "no_match",
+        "reason": "Apple fruit does not match apple juice or apple sauce.",
+        "matched": false
+      }
+    },
+    {
+      "id": "tomato_not_soup",
+      "passed": true,
+      "latency_s": 2.86,
+      "model": "gpt-6-astra",
+      "usage": {
+        "input_tokens": 721,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 75,
+        "output_tokens_details": {
+          "reasoning_tokens": 26
+        },
+        "total_tokens": 796
+      },
+      "decision": {
+        "status": "matched",
+        "matching_ids": [
+          "tomato"
+        ],
+        "reason": "Tomato matches Roma Tomatoes, not Tomato Soup.",
+        "authorization_quote": null,
+        "scope": "one_entry",
+        "selection": "oldest"
+      },
+      "resolved": {
+        "version": "discard-identity-v1",
+        "matched": true,
+        "status": "matched",
+        "reason": "Tomato matches Roma Tomatoes, not Tomato Soup.",
+        "selected_id": "tomato",
+        "matching_ids": [
+          "tomato"
+        ],
+        "expected": {
+          "_id": "tomato",
+          "product_name": "Roma Tomatoes",
+          "_createdDate": "2026-10-01"
+        },
+        "fingerprint": "18e166466973db2de162745f1a039a8e6be03a016370337a83685323fa413ae0"
+      }
+    },
+    {
+      "id": "beef_not_broth",
+      "passed": true,
+      "latency_s": 2.56,
+      "model": "gpt-6-astra",
+      "usage": {
+        "input_tokens": 727,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 56,
+        "output_tokens_details": {
+          "reasoning_tokens": 0
+        },
+        "total_tokens": 783
+      },
+      "decision": {
+        "status": "matched",
+        "matching_ids": [
+          "beef"
+        ],
+        "reason": "Ground beef matches Organic Ground Beef 85% Lean; beef broth is a different product type.",
+        "authorization_quote": null,
+        "scope": "one_entry",
+        "selection": "oldest"
+      },
+      "resolved": {
+        "version": "discard-identity-v1",
+        "matched": true,
+        "status": "matched",
+        "reason": "Ground beef matches Organic Ground Beef 85% Lean; beef broth is a different product type.",
+        "selected_id": "beef",
+        "matching_ids": [
+          "beef"
+        ],
+        "expected": {
+          "_id": "beef",
+          "product_name": "Organic Ground Beef 85% Lean",
+          "_createdDate": "2026-10-01"
+        },
+        "fingerprint": "308e43ba374b657e5c4f4d6f59f85fbc55ab46fc5ea949b9bd228285d987caf0"
+      }
+    },
+    {
+      "id": "same_name_wrong_barcode",
+      "passed": true,
+      "latency_s": 2.21,
+      "model": "gpt-6-astra",
+      "usage": {
+        "input_tokens": 698,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 42,
+        "output_tokens_details": {
+          "reasoning_tokens": 0
+        },
+        "total_tokens": 740
+      },
+      "decision": {
+        "status": "no_match",
+        "matching_ids": [],
+        "reason": "The candidate has a conflicting barcode.",
+        "authorization_quote": null,
+        "scope": "one_entry",
+        "selection": "oldest"
+      },
+      "resolved": {
+        "version": "discard-identity-v1",
+        "status": "no_match",
+        "reason": "The candidate has a conflicting barcode.",
+        "matched": false
+      }
+    },
+    {
+      "id": "voice_avocado_actual",
+      "passed": true,
+      "latency_s": 4.66,
+      "model": "gpt-6-astra",
+      "usage": {
+        "input_tokens": 737,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 125,
+        "output_tokens_details": {
+          "reasoning_tokens": 71
+        },
+        "total_tokens": 862
+      },
+      "decision": {
+        "status": "not_authorized",
+        "matching_ids": [],
+        "reason": "The transcript describes what others do rather than clearly authorizing removal of the avocado.",
+        "authorization_quote": null,
+        "scope": "one_entry",
+        "selection": "oldest"
+      },
+      "resolved": {
+        "version": "discard-identity-v1",
+        "status": "not_authorized",
+        "reason": "The transcript describes what others do rather than clearly authorizing removal of the avocado.",
+        "matched": false
+      }
+    },
+    {
+      "id": "voice_checkin_mistranscribed",
+      "passed": true,
+      "latency_s": 2.14,
+      "model": "gpt-6-astra",
+      "usage": {
+        "input_tokens": 728,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 49,
+        "output_tokens_details": {
+          "reasoning_tokens": 0
+        },
+        "total_tokens": 777
+      },
+      "decision": {
+        "status": "not_authorized",
+        "matching_ids": [],
+        "reason": "The current transcript does not explicitly authorize discarding chicken or avocado.",
+        "authorization_quote": null,
+        "scope": "one_entry",
+        "selection": "oldest"
+      },
+      "resolved": {
+        "version": "discard-identity-v1",
+        "status": "not_authorized",
+        "reason": "The current transcript does not explicitly authorize discarding chicken or avocado.",
+        "matched": false
+      }
+    },
+    {
+      "id": "voice_negation",
+      "passed": true,
+      "latency_s": 2.08,
+      "model": "gpt-6-astra",
+      "usage": {
+        "input_tokens": 696,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 46,
+        "output_tokens_details": {
+          "reasoning_tokens": 0
+        },
+        "total_tokens": 742
+      },
+      "decision": {
+        "status": "not_authorized",
+        "matching_ids": [],
+        "reason": "The current transcript explicitly prohibits discarding the avocado.",
+        "authorization_quote": null,
+        "scope": "one_entry",
+        "selection": "oldest"
+      },
+      "resolved": {
+        "version": "discard-identity-v1",
+        "status": "not_authorized",
+        "reason": "The current transcript explicitly prohibits discarding the avocado.",
+        "matched": false
+      }
+    },
+    {
+      "id": "voice_checkin",
+      "passed": true,
+      "latency_s": 1.88,
+      "model": "gpt-6-astra",
+      "usage": {
+        "input_tokens": 695,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 50,
+        "output_tokens_details": {
+          "reasoning_tokens": 0
+        },
+        "total_tokens": 745
+      },
+      "decision": {
+        "status": "not_authorized",
+        "matching_ids": [],
+        "reason": "The current transcript requests checking in an avocado, not discarding it.",
+        "authorization_quote": null,
+        "scope": "one_entry",
+        "selection": "oldest"
+      },
+      "resolved": {
+        "version": "discard-identity-v1",
+        "status": "not_authorized",
+        "reason": "The current transcript requests checking in an avocado, not discarding it.",
+        "matched": false
+      }
+    },
+    {
+      "id": "voice_hass",
+      "passed": true,
+      "latency_s": 3.39,
+      "model": "gpt-6-astra",
+      "usage": {
+        "input_tokens": 723,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 83,
+        "output_tokens_details": {
+          "reasoning_tokens": 30
+        },
+        "total_tokens": 806
+      },
+      "decision": {
+        "status": "matched",
+        "matching_ids": [
+          "fruit"
+        ],
+        "reason": "Hass avocado matches the requested fruit; avocado oil does not.",
+        "authorization_quote": "Discard the avocado.",
+        "scope": "one_entry",
+        "selection": "oldest"
+      },
+      "resolved": {
+        "version": "discard-identity-v1",
+        "matched": true,
+        "status": "matched",
+        "reason": "Hass avocado matches the requested fruit; avocado oil does not.",
+        "selected_id": "fruit",
+        "matching_ids": [
+          "fruit"
+        ],
+        "expected": {
+          "_id": "fruit",
+          "product_name": "Hass Avocado",
+          "_createdDate": "2026-10-01"
+        },
+        "fingerprint": "9bd97c28796cb66ab0aeb7c530d816bcac9467a06a2c66d4683cb8ae40848d0e"
+      }
+    },
+    {
+      "id": "voice_finished",
+      "passed": true,
+      "latency_s": 3.1,
+      "model": "gpt-6-astra",
+      "usage": {
+        "input_tokens": 725,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 91,
+        "output_tokens_details": {
+          "reasoning_tokens": 30
+        },
+        "total_tokens": 816
+      },
+      "decision": {
+        "status": "matched",
+        "matching_ids": [
+          "milk"
+        ],
+        "reason": "Organic Whole Milk matches the generic milk request; Chocolate Milk Ice Cream is a different product type.",
+        "authorization_quote": "I used up the milk.",
+        "scope": "one_entry",
+        "selection": "oldest"
+      },
+      "resolved": {
+        "version": "discard-identity-v1",
+        "matched": true,
+        "status": "matched",
+        "reason": "Organic Whole Milk matches the generic milk request; Chocolate Milk Ice Cream is a different product type.",
+        "selected_id": "milk",
+        "matching_ids": [
+          "milk"
+        ],
+        "expected": {
+          "_id": "milk",
+          "product_name": "Organic Whole Milk",
+          "_createdDate": "2026-10-01"
+        },
+        "fingerprint": "a6ff57ed992d49b7e6f3665670c097f7e75827e7c41ba451c52cb35735dc803e"
+      }
+    },
+    {
+      "id": "voice_partial",
+      "passed": true,
+      "latency_s": 2.28,
+      "model": "gpt-6-astra",
+      "usage": {
+        "input_tokens": 694,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 53,
+        "output_tokens_details": {
+          "reasoning_tokens": 0
+        },
+        "total_tokens": 747
+      },
+      "decision": {
+        "status": "matched",
+        "matching_ids": [
+          "milk"
+        ],
+        "reason": "Milk matches the sole whole-milk entry; half specifies a partial removal.",
+        "authorization_quote": "Discard half the milk.",
+        "scope": "partial",
+        "selection": "oldest"
+      },
+      "resolved": {
+        "version": "discard-identity-v1",
+        "status": "uncertain",
+        "reason": "quantity_requires_review",
+        "matched": false
+      }
+    },
+    {
+      "id": "voice_all",
+      "passed": true,
+      "latency_s": 2.63,
+      "model": "gpt-6-astra",
+      "usage": {
+        "input_tokens": 722,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 57,
+        "output_tokens_details": {
+          "reasoning_tokens": 0
+        },
+        "total_tokens": 779
+      },
+      "decision": {
+        "status": "matched",
+        "matching_ids": [
+          "a",
+          "b"
+        ],
+        "reason": "Both entries are duplicates of the requested product; the transcript explicitly requests all entries.",
+        "authorization_quote": "Discard all the avocados.",
+        "scope": "multiple",
+        "selection": "oldest"
+      },
+      "resolved": {
+        "version": "discard-identity-v1",
+        "status": "uncertain",
+        "reason": "quantity_requires_review",
+        "matched": false
+      }
+    },
+    {
+      "id": "voice_question",
+      "passed": true,
+      "latency_s": 2.13,
+      "model": "gpt-6-astra",
+      "usage": {
+        "input_tokens": 697,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 48,
+        "output_tokens_details": {
+          "reasoning_tokens": 0
+        },
+        "total_tokens": 745
+      },
+      "decision": {
+        "status": "not_authorized",
+        "matching_ids": [],
+        "reason": "The current transcript asks a question rather than authorizing removal.",
+        "authorization_quote": null,
+        "scope": "one_entry",
+        "selection": "oldest"
+      },
+      "resolved": {
+        "version": "discard-identity-v1",
+        "status": "not_authorized",
+        "reason": "The current transcript asks a question rather than authorizing removal.",
+        "matched": false
+      }
+    },
+    {
+      "id": "voice_stale_context",
+      "passed": true,
+      "latency_s": 2.27,
+      "model": "gpt-6-astra",
+      "usage": {
+        "input_tokens": 699,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 48,
+        "output_tokens_details": {
+          "reasoning_tokens": 0
+        },
+        "total_tokens": 747
+      },
+      "decision": {
+        "status": "not_authorized",
+        "matching_ids": [],
+        "reason": "The current transcript does not explicitly authorize discarding the avocado.",
+        "authorization_quote": null,
+        "scope": "one_entry",
+        "selection": "oldest"
+      },
+      "resolved": {
+        "version": "discard-identity-v1",
+        "status": "not_authorized",
+        "reason": "The current transcript does not explicitly authorize discarding the avocado.",
+        "matched": false
+      }
+    }
+  ],
+  "limitation": "Independent synthetic inputs, no customer writes or original image recognition tested."
+}

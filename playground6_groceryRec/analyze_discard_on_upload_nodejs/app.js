@@ -39,7 +39,7 @@ const {
   finalizeDiscardRow,
   markDiscardRowFailed,
 } = require('./dist/utils/mysqlDiscardWriter');
-const { matchAndRemoveFromKitchen } = require('./dist/utils/matchAndRemoveFromKitchen');
+const { matchAndRemoveFromKitchen } = require('./discard_matcher.cjs');
 const { writeFeedEvent } = require('./dist/utils/mysqlFeedWriter');
 const { getHouseholdMemberIds, stableHouseholdRowId } = require('./dist/utils/householdSync');
 const { identifyItemFastLegacy, identifyItemQuickGlance } = require('./vendor/grocery-identifier/quickIdentify/service');
@@ -1401,7 +1401,9 @@ exports.handler = async (event, context) => {
     let matchedKitchenRow = null;
     if (!isUnknownItem) {
       try {
-        matchedKitchenRow = await matchAndRemoveFromKitchen(owner, groceryItem, { remove: false });
+        matchedKitchenRow = await matchAndRemoveFromKitchen(owner, groceryItem, {
+          remove: false, jobId, timeoutMs: Math.max(0, Math.min(45000, (context?.getRemainingTimeInMillis?.() || 0) - 15000)),
+        });
         if (matchedKitchenRow?.matched) {
           console.log('[matchKitchen] Preview match found:', {
             _id: matchedKitchenRow._id || null,
@@ -1590,9 +1592,7 @@ exports.handler = async (event, context) => {
     let removedFromKitchen = false;
     if (!isUnknownItem) {
       try {
-        const matchResult = matchedKitchenRow?._id
-          ? await matchAndRemoveFromKitchen(owner, groceryItem, { preferredId: matchedKitchenRow._id })
-          : await matchAndRemoveFromKitchen(owner, groceryItem);
+        const matchResult = await matchAndRemoveFromKitchen(owner, groceryItem, { jobId });
         removedFromKitchen = !!matchResult.removed;
         if (matchResult.removed) {
           console.log(`[matchKitchen] Removed from prod kitchen _id=${matchResult._id}`);

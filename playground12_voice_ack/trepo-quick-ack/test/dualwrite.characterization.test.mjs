@@ -1,3 +1,4 @@
+import {installDiscardPlanFixture} from './discard-plan-fakes.mjs';
 // Characterization tests for the quick-ack data-access dual-write ops.
 // These pin the CURRENT behavior (shared table + per-user/member fan-out, with the
 // right SCOPE: dishes = user-private, shopping/discards = household) so the item-4
@@ -49,6 +50,7 @@ function makeConn({ columns = ALL_COLUMNS, selectRows = [], countRow = { count: 
       if (u.includes("INFORMATION_SCHEMA.COLUMNS")) return [columns.map((c) => ({ column_name: c }))];
       if (u.startsWith("INSERT")) return [{ insertId: 101, affectedRows: 1 }];
       if (u.startsWith("UPDATE") || u.startsWith("DELETE")) return [{ affectedRows: 1 }];
+      if (norm.startsWith('SELECT _id,source_kitchen_id')) return [[]];
       if (u.startsWith("SELECT")) {
         // COUNT(*) probes -> a count row; row-finding SELECTs -> the canned target(s).
         if (/COUNT\(/i.test(norm) || /SELECT\s+1\b/i.test(norm)) return [[countRow]];
@@ -122,6 +124,7 @@ before(async () => {
     prepareKitchenEdit:async (context,reference,updates,options,resolve)=>resolve(),
     saveKitchenEdit:async (context,row,fields)=>{ LAST_EDIT=fields; return {...row,...fields}; }
   }});
+  await installDiscardPlanFixture();
   da = await import(DATA_ACCESS);
 });
 

@@ -1,4 +1,5 @@
-import { withHouseholdKitchenMutation, findHouseholdKitchenRows, updateHouseholdKitchenRow } from "./household-kitchen-mutation.mjs";
+import {prepareDiscardPlan,readDiscardRows,validateDiscardSnapshot} from './kitchen-discard-plan.mjs';
+import { kitchenMutationScope, withHouseholdKitchenMutation, findHouseholdKitchenRows, updateHouseholdKitchenRow } from "./household-kitchen-mutation.mjs";
 // DO NOT deploy this stack from a stale bundle. template.yaml uses CodeUri:
 // .sam-src, so `sam build/deploy` ships .sam-src/…/lib/*.mjs — NOT this repo lib/.
 // Keep .sam-src/ (and any .aws-sam/build/) copies of the lib/ files IN SYNC with
@@ -3110,8 +3111,7 @@ async function insertKitchenRowAcrossHousehold(connection, context, payload) {
   return rowId;
 }
 
-async function insertDiscardRowAcrossHousehold(connection, context, kitchenRow, reason) {
-  const discardId = crypto.randomUUID();
+async function insertDiscardRowAcrossHousehold(connection, context, kitchenRow, reason, discardId = crypto.randomUUID()) {
 
   if (WRITE_SHARED_ONLY) {
     const tableOwnerId = resolveTableOwnerId(context);
@@ -3978,6 +3978,11 @@ export async function markKitchenItemOpened(context, itemReference, options = {}
 }
 
 export async function updateKitchenItemQuantity(context, itemReference, quantityInput, options = {}) {
+  // Zero is destructive too; it must not bypass identity, retry or ownership checks.
+  if (isZeroQuantityTarget(quantityInput)) {
+    const result=await discardKitchenItem(context,itemReference,'finished',options);
+    return {...result.item,affected_count:result.affected_count,discard_id:result.discard_id};
+  }
   const result = await withDbConnection(async (connection) => {
     const mutate = async (context) => {
     const resolvedReference = normalizeKitchenReference(itemReference);
@@ -3986,16 +3991,8 @@ export async function updateKitchenItemQuantity(context, itemReference, quantity
       ? parseStructuredState(quantityInput)
       : parseStructuredState({ remaining_quantity: quantityInput });
 
-    // Setting an item to zero is a removal: on Halo an ambiguous match resolves to every
-    // matching row so we zero all of them, mirroring discard. Non-zero edits stay single-row
-    // (newest on Halo). App/non-halo throws on a multi-match as before to ask for clarification.
-    let rows;
-    if (isZeroQuantityTarget(quantityInput)) {
-      rows = await resolveKitchenRowsByReference(connection, context, resolvedReference);
-    } else {
-      const single = await resolveKitchenRowByReference(connection, context, resolvedReference);
-      rows = single ? [single] : [];
-    }
+    const single=await resolveKitchenRowByReference(connection,context,resolvedReference);
+    const rows=single?[single]:[];
     if (rows.length === 0) {
       throw await buildKitchenNotFoundError(connection, context, resolvedReference.item_name || "that kitchen item");
     }
@@ -4136,53 +4133,32 @@ export async function updateKitchenItemDetails(context, itemReference, updates, 
 }
 
 export async function discardKitchenItem(context, itemReference, reason, options = {}) {
-  const result = await withDbConnection(async (connection) => {
-    const mutate = async (context) => {
-    const resolvedReference = normalizeKitchenReference(itemReference);
-    const rows = await resolveKitchenRowsByReference(connection, context, resolvedReference);
-    if (rows.length === 0) {
-      throw await buildKitchenNotFoundError(connection, context, resolvedReference.item_name || "that kitchen item");
+  if (!WRITE_SHARED_ONLY) throw Object.assign(new Error('Kitchen removal is unavailable for this storage mode.'),{statusCode:503});
+  const reference=normalizeKitchenReference(itemReference);
+  const plan=await prepareDiscardPlan(context,reference,options,()=>withDbConnection(async connection=>{
+    const scope=await kitchenMutationScope(connection,context);
+    return {scope,rows:await readDiscardRows(connection,scope)};
+  },options));
+  // Provider work and durable planning completed without holding database locks.
+  const result=await withDbConnection(connection=>withHouseholdKitchenMutation(connection,context,async scope=>{
+    if (scope.ownerId!==plan.household || JSON.stringify(scope.householdMemberIds)!==JSON.stringify(plan.members))
+      throw Object.assign(new Error('Kitchen membership changed.'),{statusCode:409});
+    const rows=await readDiscardRows(connection,scope,{lock:true,id:plan.selected_id});
+    const [receipts]=await connection.execute('SELECT _id,source_kitchen_id,owner_id FROM shared_discards WHERE _id=? FOR UPDATE',[plan.operation_id]);
+    if (receipts.length) {
+      if (receipts.length!==1 || receipts[0].source_kitchen_id!==plan.selected_id || receipts[0].owner_id!==plan.actor)
+        throw new Error('Could not verify the earlier removal.');
+      return {discard_id:plan.operation_id,item:mapKitchenRow({...plan.expected,action:'OUT'}),affected_count:1,replayed:true};
     }
-
-    // On Halo an ambiguous removal resolves to every matching row — discard all of them.
-    // App/non-halo never reaches here with multiple rows (it throws to ask for clarification).
-    const discarded = [];
-    for (const row of rows) {
-      await updateKitchenRowAcrossHousehold(connection, context, row._id, { action: "OUT" });
-      const discardId = await insertDiscardRowAcrossHousehold(connection, context, row, reason);
-      discarded.push({ row_id: row._id, discard_id: discardId, item: mapKitchenRow({ ...row, action: "OUT" }) });
-    }
-
-    const primary = discarded[0];
-    const result = {
-      discard_id: primary.discard_id,
-      item: primary.item,
-      ...(discarded.length > 1
-        ? { affected_count: discarded.length, affected_items: discarded.map((entry) => entry.item) }
-        : {})
-    };
-    console.log("[DEBUG] kitchen item discarded:", JSON.stringify({
-      ownerId: context?.ownerId || null,
-      userId: context?.userId || null,
-      item_name: primary.item.item_name,
-      affected_count: discarded.length,
-      row_ids: discarded.map((entry) => entry.row_id),
-      discard_id: primary.discard_id,
-      reason: reason || null
-    }));
-    return result;
-    };
-    return WRITE_SHARED_ONLY
-      ? withHouseholdKitchenMutation(connection, context, mutate, async scope => {
-        for (const member of scope.householdMemberIds) await ensureDiscardTable(connection, discardTableName(member));
-      })
-      : mutate(context);
-  }, options);
-
-  if (!options?.skipKitchenDependentGeneration) {
-    await triggerKitchenDependentGeneration(context, options);
-  }
-
+    validateDiscardSnapshot(plan,rows[0],scope);
+    const row=rows[0];
+    await updateKitchenRowAcrossHousehold(connection,scope,row._id,{action:'OUT'});
+    await insertDiscardRowAcrossHousehold(connection,scope,row,reason,plan.operation_id);
+    return {discard_id:plan.operation_id,item:mapKitchenRow({...row,action:'OUT'}),affected_count:1};
+  },async scope=>{
+    for (const member of scope.householdMemberIds) await ensureDiscardTable(connection,discardTableName(member));
+  }),options);
+  if (!options.skipKitchenDependentGeneration && !result.replayed) await triggerKitchenDependentGeneration(context,options);
   return result;
 }
 

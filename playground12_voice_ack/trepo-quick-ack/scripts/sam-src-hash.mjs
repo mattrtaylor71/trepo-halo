@@ -11,7 +11,6 @@ const ENTRY_FILES = [
   "index.js", "index-stream.js", "image_postprocess.js", "async-ingest.js",
   "async-worker.js", "async_ingest.js", "async_worker.js", "package.json", "package-lock.json",
 ];
-const SHARED_FILES = ["tool-definitions.mjs", "tool-executor.mjs", "text-dish-analyzer.mjs"];
 
 function walk(dir, out) {
   if (!existsSync(dir)) return;
@@ -31,10 +30,8 @@ export function computeSourceHash(quickAckRoot, repoRoot) {
     const p = path.join(quickAckRoot, f);
     if (existsSync(p)) files.push(p);
   }
-  for (const f of SHARED_FILES) {
-    const p = path.join(repoRoot, "shared", "voice-assistant", f);
-    if (existsSync(p)) files.push(p);
-  }
+  walk(path.join(repoRoot, "shared", "voice-assistant"),files);
+  walk(path.join(repoRoot, "shared", "kitchen-discard"),files);
   const h = createHash("sha256");
   for (const p of files.sort()) {
     // Include the path (relative to quickAckRoot) + content so moves/renames register.

@@ -1,0 +1,30 @@
+{
+  "photo": {
+    "app.js": {
+      "source": "playground6_groceryRec/analyze_discard_on_upload_nodejs/app.js",
+      "base_sha256": "2d149ae8c230c5b19eb86c9d73d31827bc82827d00070a2b73e8a4fc954d4edf"
+    },
+    "discard_matcher.cjs": {
+      "source": "playground6_groceryRec/analyze_discard_on_upload_nodejs/discard_matcher.cjs"
+    },
+    "discard_identity.cjs": {
+      "source": "shared/kitchen-discard/identity.cjs"
+    }
+  },
+  "voice": {
+    "playground12_voice_ack/trepo-quick-ack/lib/data-access.mjs": {
+      "source": "playground12_voice_ack/trepo-quick-ack/lib/data-access.mjs",
+      "base_sha256": "c6bc9295aa2d8ece5fa6fd6636075a6a5f6a7d7a6cefbbe98188f7df9f25cf8f"
+    },
+    "shared/voice-assistant/tool-definitions.mjs": {
+      "source": "shared/voice-assistant/tool-definitions.mjs",
+      "base_sha256": "fd48713a26774f91607fdb1f064b7fad1364fc98deaeaec67c1141245a0a4e33"
+    },
+    "playground12_voice_ack/trepo-quick-ack/lib/kitchen-discard-plan.mjs": {
+      "source": "playground12_voice_ack/trepo-quick-ack/lib/kitchen-discard-plan.mjs"
+    },
+    "shared/kitchen-discard/identity.cjs": {
+      "source": "shared/kitchen-discard/identity.cjs"
+    }
+  }
+}

@@ -1,3 +1,4 @@
+import {installDiscardPlanFixture} from './discard-plan-fakes.mjs';
 // P4 (audit #2): the kitchen discard/resolve matcher was exact + LIKE only, so
 // plurals / variants / brand phrasings ("raspberries", "broccoli", "second ground
 // beef", "sour cream", "brie", "bagels") returned a flat "not found". This pins the
@@ -52,11 +53,13 @@ function makeConn(rows) {
       if (/FROM new_users actor/.test(norm)) {
         return [rows.map(row => ({...row, _kitchen_scope_actor: "ownerA", _kitchen_scope_household: "ownerA"}))];
       }
+      if (norm.startsWith('SELECT _id,source_kitchen_id')) return [[]];
       if (u.startsWith("SELECT")) {
         if (/COUNT\(/i.test(norm) || /SELECT\s+1\b/i.test(norm)) return [[{ count: 1 }]];
         // Only kitchen reads (against shared_kitchen here) return inventory.
         const isKitchen = /SHARED_KITCHEN|`?SHARED_KITCHEN`?/i.test(norm) || /FROM `shared_kitchen`/i.test(norm);
         if (!isKitchen) return [[]];
+        if (norm.includes("AND k._id=?")) return [rows.filter(row=>row._id===params.at(-1))];
         if (norm.includes("WHERE k._id=?")) return [rows.filter(row=>row._id===params[0])];
         const isExact = /LOWER\(TRIM\(PRODUCT_NAME\)\)\s*=\s*\?/i.test(norm);
         const isLike = /LIKE\s*\?/i.test(norm);
@@ -108,6 +111,7 @@ before(async () => {
     prepareKitchenEdit:async (context,reference,updates,options,resolve)=>resolve(),
     saveKitchenEdit:async (context,row,fields)=>{ LAST_EDIT=fields; return {...row,...fields}; }
   }});
+  await installDiscardPlanFixture();
   da = await import(DATA_ACCESS);
 });
 

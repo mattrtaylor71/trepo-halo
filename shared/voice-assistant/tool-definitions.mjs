@@ -337,7 +337,7 @@ const TOOL_DEFINITIONS = [
     parameters: {
       type: "object",
       properties: {
-        item_name: { type: "string", description: "The kitchen item to discard." },
+        item_name: { type: "string", description: "The actual product the current user request explicitly removes; never an ingredient-name substitute." },
         item_id: { type: "string", description: "Optional exact kitchen row id when resolving a previously ambiguous item." },
         selection_hint: { type: "string", description: "Optional disambiguation hint such as most_recent, oldest, or other." },
         reason: { type: "string", description: "Optional discard reason such as spoiled, finished, or moldy." }
@@ -836,7 +836,7 @@ export function buildSharedRules(options = {}) {
       "- When presenting recipes on Halo, format each recipe title as a short line ending with a colon (e.g. 'Chicken Stir-Fry:') so it renders as a distinct header, then list key details as bullets underneath.",
       "- For Halo meal-planning, meal-prep, and what-should-I-eat questions, default to what can be made or used from the kitchen right now unless the user clearly asks about groceries or shopping.",
       "- CRITICAL: Halo is a one-way device. The user cannot see or answer a follow-up, so never end your turn with a clarifying question about which item or what they meant. Take the most reasonable action or give your best answer, then briefly state what you did.",
-      "- For Halo kitchen changes, if a spoken item name matches multiple kitchen items, do not ask which one. To remove, discard, or set an item to zero, act on all the matching items. For other edits, act on the most recent. Then state what changed (e.g. 'Set both sweet potatoes to zero').",
+      "- For Halo kitchen changes, if a spoken item name matches multiple kitchen items, do not ask which one. For removals, use one discard_item call for the requested product; the backend checks product identity and selects one oldest duplicate. Never remove ingredient-name matches such as avocado oil or dressing for avocado. If matching is uncertain, state that nothing was removed. For other edits, act on the most recent.",
       "- On Halo, to fully remove an item or set its quantity to zero, use discard_item."
     ];
 
@@ -862,7 +862,7 @@ export function buildSharedRules(options = {}) {
     "- For specific kitchen field questions such as where an item is, how much is left, whether it is opened, when it expires, what brand it is, what ingredients it contains, what harmful ingredients it has, whether it is ultra-processed, or what price/details are stored, use search_kitchen_item.",
     "- For broad kitchen field questions such as what is opened, what is almost empty, what is in the fridge, what expires soon, which products are harmful, or which items have certain brands or ingredients, use get_kitchen_overview and reason over item fields like storage_location, is_opened, remaining_quantity, quantity_value, quantity_unit, fill_percent, expiration_date, brand, variant, ingredients, nutrition_summary, harmful_ingredients, upf, and estimated_price.",
     "- If one strong kitchen match exists for a broad food reference like 'rice' or 'that rice', go ahead and use it.",
-    "- On app, if several similar items match a broad food reference, ask one short clarification question and name the most likely candidates from current data. On Halo, do not ask — act on the best match (newest), or on all matches for a removal.",
+    "- On app, if several similar items match a broad food reference, ask one short clarification question and name the most likely candidates from current data. On Halo, do not ask — use discard_item to verify one oldest matching product for removals; never remove all similar names. For other edits, use the best match (newest).",
     "- Use the narrowest matching shopping tool for changes.",
     "- Reuse an existing shopping store tab when the requested store clearly refers to it with different spelling, capitalization, or shorthand.",
     "- Use add_many_to_shopping_list when the user clearly names multiple items in a single add request.",
@@ -936,7 +936,7 @@ export function buildSharedRules(options = {}) {
     "- For grocery-store or restock questions like what they need, what they missed, or whether discarded items should be re-bought, compare the shopping list against recent discards, recent dishes, and kitchen state when helpful instead of relying on the shopping list alone.",
     "- Treat follow-up dish updates conservatively. If recent dish context is not clear, ask a short clarifying question.",
     "- When a user corrects a recent dish by naming the new full ingredient set, pass that full list with update_recent_dish instead of only add/remove deltas.",
-    "- On app, if a kitchen item name is ambiguous, ask a short clarifying question instead of guessing. On Halo, do not ask — act on the most reasonable match (newest for edits, all matches for a removal).",
+    "- On app, if a kitchen item name is ambiguous, ask a short clarifying question instead of guessing. On Halo, do not ask — use one oldest verified matching product for a removal, and newest for other edits. If the removal tool cannot verify the product, say nothing was removed.",
     "- If the assistant just asked for confirmation about clearing the shopping list or removing all remaining shopping items, short follow-ups like 'remove', 'yes', 'do it', 'clear it', or 'everything' should usually be treated as confirmation to use clear_shopping_list unless the user narrows the scope.",
     "- If the assistant just asked for confirmation about clearing the kitchen or the user just clarified 'kitchen' after a shopping-vs-kitchen question, short follow-ups like 'kitchen', 'remove', 'yes', 'do it', 'clear it', or 'everything' should usually be treated as confirmation to use clear_kitchen_inventory unless the user narrows the scope.",
     "- If the assistant just asked for confirmation about clearing discard history or removing all recent discards, short follow-ups like 'remove', 'yes', 'do it', 'clear it', or 'everything' should usually be treated as confirmation to use clear_recent_discards unless the user narrows the scope.",

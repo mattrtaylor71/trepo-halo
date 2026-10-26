@@ -30,12 +30,10 @@ for (const filename of [
 }
 cpSync(path.join(quickAckRoot, "lib"), path.join(stagedQuickAckRoot, "lib"), { recursive: true });
 
-for (const filename of ["tool-definitions.mjs", "tool-executor.mjs", "text-dish-analyzer.mjs"]) {
-  copyFileSync(
-    path.join(repoRoot, "shared", "voice-assistant", filename),
-    path.join(stagedSharedRoot, filename)
-  );
-}
+cpSync(path.join(repoRoot, "shared", "voice-assistant"), stagedSharedRoot, {recursive:true});
+cpSync(path.join(repoRoot, "shared", "kitchen-discard"), path.join(stageRoot,"shared","kitchen-discard"), {
+  recursive:true, filter:source=>!source.includes(path.sep+"test"+path.sep) && path.basename(source)!=="test"
+});
 
 if (existsSync(path.join(stagedQuickAckRoot, "node_modules"))) {
   rmSync(path.join(stagedQuickAckRoot, "node_modules"), { recursive: true, force: true });

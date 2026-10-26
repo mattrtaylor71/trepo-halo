@@ -1,0 +1,691 @@
+[
+  {
+    "id": "avocado_not_ingredients",
+    "input": {
+      "kind": "photo",
+      "target": {
+        "name": "Avocado",
+        "product_name": "Avocado"
+      },
+      "candidates": [
+        {
+          "_id": "chips",
+          "product_name": "Zack's Mighty Tortilla Chips Avocado Oil Organic Sea Salt",
+          "_createdDate": "2026-10-01"
+        },
+        {
+          "_id": "dressing",
+          "product_name": "Primal Kitchen Avocado Lime Dressing",
+          "_createdDate": "2026-10-01"
+        },
+        {
+          "_id": "oil",
+          "product_name": "Avocado Oil",
+          "_createdDate": "2026-10-01"
+        }
+      ]
+    },
+    "expected_match": false,
+    "expected_ids": []
+  },
+  {
+    "id": "avocado_with_distractors",
+    "input": {
+      "kind": "photo",
+      "target": {
+        "name": "Avocado",
+        "product_name": "Avocado"
+      },
+      "candidates": [
+        {
+          "_id": "fruit",
+          "product_name": "Hass Avocados 4 Ct Bag",
+          "_createdDate": "2026-10-01"
+        },
+        {
+          "_id": "oil",
+          "product_name": "Avocado Oil",
+          "_createdDate": "2026-10-01"
+        },
+        {
+          "_id": "dressing",
+          "product_name": "Avocado Lime Dressing",
+          "_createdDate": "2026-10-01"
+        }
+      ]
+    },
+    "expected_match": true,
+    "expected_ids": [
+      "fruit"
+    ]
+  },
+  {
+    "id": "produce_duplicates",
+    "input": {
+      "kind": "photo",
+      "target": {
+        "name": "Avocado",
+        "product_name": "Avocado"
+      },
+      "candidates": [
+        {
+          "_id": "new",
+          "product_name": "Avocado",
+          "_createdDate": "2026-10-01"
+        },
+        {
+          "_id": "old",
+          "product_name": "Avocados",
+          "_createdDate": "2026-10-01"
+        },
+        {
+          "_id": "oil",
+          "product_name": "Avocado Oil",
+          "_createdDate": "2026-10-01"
+        }
+      ]
+    },
+    "expected_match": true,
+    "expected_ids": [
+      "new",
+      "old"
+    ]
+  },
+  {
+    "id": "avocado_oil",
+    "input": {
+      "kind": "photo",
+      "target": {
+        "name": "Avocado Oil",
+        "product_name": "Avocado Oil"
+      },
+      "candidates": [
+        {
+          "_id": "fruit",
+          "product_name": "Avocado",
+          "_createdDate": "2026-10-01"
+        },
+        {
+          "_id": "oil",
+          "product_name": "Chosen Foods Avocado Oil",
+          "_createdDate": "2026-10-01"
+        },
+        {
+          "_id": "chips",
+          "product_name": "Avocado Oil Tortilla Chips",
+          "_createdDate": "2026-10-01"
+        }
+      ]
+    },
+    "expected_match": true,
+    "expected_ids": [
+      "oil"
+    ]
+  },
+  {
+    "id": "generic_eggs",
+    "input": {
+      "kind": "photo",
+      "target": {
+        "name": "Eggs",
+        "product_name": "Eggs"
+      },
+      "candidates": [
+        {
+          "_id": "eggs",
+          "product_name": "Kirkland Organic Free Range Eggs",
+          "_createdDate": "2026-10-01"
+        },
+        {
+          "_id": "salad",
+          "product_name": "Egg Salad",
+          "_createdDate": "2026-10-01"
+        }
+      ]
+    },
+    "expected_match": true,
+    "expected_ids": [
+      "eggs"
+    ]
+  },
+  {
+    "id": "plural_berries",
+    "input": {
+      "kind": "photo",
+      "target": {
+        "name": "Raspberries",
+        "product_name": "Raspberries"
+      },
+      "candidates": [
+        {
+          "_id": "fruit",
+          "product_name": "Raspberry",
+          "_createdDate": "2026-10-01"
+        },
+        {
+          "_id": "jam",
+          "product_name": "Raspberry Jam",
+          "_createdDate": "2026-10-01"
+        }
+      ]
+    },
+    "expected_match": true,
+    "expected_ids": [
+      "fruit"
+    ]
+  },
+  {
+    "id": "milk_ambiguous",
+    "input": {
+      "kind": "photo",
+      "target": {
+        "name": "Milk",
+        "product_name": "Milk"
+      },
+      "candidates": [
+        {
+          "_id": "whole",
+          "product_name": "Whole Milk",
+          "_createdDate": "2026-10-01"
+        },
+        {
+          "_id": "skim",
+          "product_name": "Skim Milk",
+          "_createdDate": "2026-10-01"
+        }
+      ]
+    },
+    "expected_match": false,
+    "expected_ids": []
+  },
+  {
+    "id": "explicit_whole_milk",
+    "input": {
+      "kind": "photo",
+      "target": {
+        "name": "Whole Milk",
+        "product_name": "Whole Milk"
+      },
+      "candidates": [
+        {
+          "_id": "whole",
+          "product_name": "Organic Whole Milk 1 Gallon",
+          "_createdDate": "2026-10-01"
+        },
+        {
+          "_id": "skim",
+          "product_name": "Skim Milk",
+          "_createdDate": "2026-10-01"
+        }
+      ]
+    },
+    "expected_match": true,
+    "expected_ids": [
+      "whole"
+    ]
+  },
+  {
+    "id": "milk_not_oat",
+    "input": {
+      "kind": "photo",
+      "target": {
+        "name": "Whole Milk",
+        "product_name": "Whole Milk"
+      },
+      "candidates": [
+        {
+          "_id": "oat",
+          "product_name": "Oat Milk",
+          "_createdDate": "2026-10-01"
+        }
+      ]
+    },
+    "expected_match": false,
+    "expected_ids": []
+  },
+  {
+    "id": "conflicting_brand",
+    "input": {
+      "kind": "photo",
+      "target": {
+        "name": "Black Beans",
+        "brand": "Trader Joes",
+        "product_name": "Black Beans"
+      },
+      "candidates": [
+        {
+          "_id": "wrong",
+          "product_name": "Black Beans",
+          "_createdDate": "2026-10-01",
+          "brand": "Goya"
+        }
+      ]
+    },
+    "expected_match": false,
+    "expected_ids": []
+  },
+  {
+    "id": "flavor_mismatch",
+    "input": {
+      "kind": "photo",
+      "target": {
+        "name": "Lime Sparkling Water",
+        "product_name": "Lime Sparkling Water"
+      },
+      "candidates": [
+        {
+          "_id": "grapefruit",
+          "product_name": "Grapefruit Sparkling Water",
+          "_createdDate": "2026-10-01"
+        }
+      ]
+    },
+    "expected_match": false,
+    "expected_ids": []
+  },
+  {
+    "id": "unclear_identity",
+    "input": {
+      "kind": "photo",
+      "target": {
+        "name": "Dairy Tub",
+        "needs_review": true,
+        "product_name": "Dairy Tub"
+      },
+      "candidates": [
+        {
+          "_id": "cream",
+          "product_name": "Sour Cream",
+          "_createdDate": "2026-10-01"
+        },
+        {
+          "_id": "yogurt",
+          "product_name": "Greek Yogurt",
+          "_createdDate": "2026-10-01"
+        }
+      ]
+    },
+    "expected_match": false,
+    "expected_ids": []
+  },
+  {
+    "id": "exact_product_duplicate",
+    "input": {
+      "kind": "photo",
+      "target": {
+        "name": "Greek Yogurt",
+        "brand": "FAGE",
+        "variant": "0% Plain",
+        "product_name": "Greek Yogurt"
+      },
+      "candidates": [
+        {
+          "_id": "new",
+          "product_name": "FAGE 0% Plain Greek Yogurt",
+          "_createdDate": "2026-10-01",
+          "brand": "FAGE",
+          "variant": "0% Plain"
+        },
+        {
+          "_id": "old",
+          "product_name": "FAGE 0% Plain Greek Yogurt",
+          "_createdDate": "2026-10-01",
+          "brand": "FAGE",
+          "variant": "0% Plain"
+        },
+        {
+          "_id": "vanilla",
+          "product_name": "FAGE Vanilla Greek Yogurt",
+          "_createdDate": "2026-10-01",
+          "brand": "FAGE",
+          "variant": "Vanilla"
+        }
+      ]
+    },
+    "expected_match": true,
+    "expected_ids": [
+      "new",
+      "old"
+    ]
+  },
+  {
+    "id": "missing_variant_not_conflict",
+    "input": {
+      "kind": "photo",
+      "target": {
+        "name": "Black Beans",
+        "brand": "Trader Joes",
+        "product_name": "Black Beans"
+      },
+      "candidates": [
+        {
+          "_id": "beans",
+          "product_name": "Trader Joes Organic Black Beans",
+          "_createdDate": "2026-10-01",
+          "brand": "Trader Joes",
+          "variant": "Organic"
+        }
+      ]
+    },
+    "expected_match": true,
+    "expected_ids": [
+      "beans"
+    ]
+  },
+  {
+    "id": "apple_not_juice",
+    "input": {
+      "kind": "photo",
+      "target": {
+        "name": "Apple",
+        "product_name": "Apple"
+      },
+      "candidates": [
+        {
+          "_id": "juice",
+          "product_name": "Apple Juice",
+          "_createdDate": "2026-10-01"
+        },
+        {
+          "_id": "sauce",
+          "product_name": "Apple Sauce",
+          "_createdDate": "2026-10-01"
+        }
+      ]
+    },
+    "expected_match": false,
+    "expected_ids": []
+  },
+  {
+    "id": "tomato_not_soup",
+    "input": {
+      "kind": "photo",
+      "target": {
+        "name": "Tomato",
+        "product_name": "Tomato"
+      },
+      "candidates": [
+        {
+          "_id": "tomato",
+          "product_name": "Roma Tomatoes",
+          "_createdDate": "2026-10-01"
+        },
+        {
+          "_id": "soup",
+          "product_name": "Tomato Soup",
+          "_createdDate": "2026-10-01"
+        }
+      ]
+    },
+    "expected_match": true,
+    "expected_ids": [
+      "tomato"
+    ]
+  },
+  {
+    "id": "beef_not_broth",
+    "input": {
+      "kind": "photo",
+      "target": {
+        "name": "Ground Beef",
+        "product_name": "Ground Beef"
+      },
+      "candidates": [
+        {
+          "_id": "broth",
+          "product_name": "Beef Broth",
+          "_createdDate": "2026-10-01"
+        },
+        {
+          "_id": "beef",
+          "product_name": "Organic Ground Beef 85% Lean",
+          "_createdDate": "2026-10-01"
+        }
+      ]
+    },
+    "expected_match": true,
+    "expected_ids": [
+      "beef"
+    ]
+  },
+  {
+    "id": "same_name_wrong_barcode",
+    "input": {
+      "kind": "photo",
+      "target": {
+        "name": "Chocolate Milk",
+        "barcode": "041900074501",
+        "product_name": "Chocolate Milk"
+      },
+      "candidates": [
+        {
+          "_id": "other",
+          "product_name": "Chocolate Milk",
+          "_createdDate": "2026-10-01",
+          "barcode": "041900074518"
+        }
+      ]
+    },
+    "expected_match": false,
+    "expected_ids": []
+  },
+  {
+    "id": "voice_avocado_actual",
+    "input": {
+      "kind": "voice",
+      "transcript": "They discard the avocado.",
+      "target": {
+        "product_name": "Avocado"
+      },
+      "candidates": [
+        {
+          "_id": "chips",
+          "product_name": "Zacks Mighty Tortilla Chips Avocado Oil Organic Sea Salt",
+          "_createdDate": "2026-10-01"
+        },
+        {
+          "_id": "dressing",
+          "product_name": "Primal Kitchen Avocado Lime Dressing",
+          "_createdDate": "2026-10-01"
+        }
+      ]
+    },
+    "expected_match": false,
+    "expected_ids": []
+  },
+  {
+    "id": "voice_checkin_mistranscribed",
+    "input": {
+      "kind": "voice",
+      "transcript": "Chicken one avocado which is five days old.",
+      "target": {
+        "product_name": "Chicken"
+      },
+      "candidates": [
+        {
+          "_id": "wings",
+          "product_name": "Boneless Buffalo Chicken Wings",
+          "_createdDate": "2026-10-01"
+        },
+        {
+          "_id": "fruit",
+          "product_name": "Avocado",
+          "_createdDate": "2026-10-01"
+        }
+      ]
+    },
+    "expected_match": false,
+    "expected_ids": []
+  },
+  {
+    "id": "voice_negation",
+    "input": {
+      "kind": "voice",
+      "transcript": "Do not discard the avocado.",
+      "target": {
+        "product_name": "Avocado"
+      },
+      "candidates": [
+        {
+          "_id": "fruit",
+          "product_name": "Avocado",
+          "_createdDate": "2026-10-01"
+        }
+      ]
+    },
+    "expected_match": false,
+    "expected_ids": []
+  },
+  {
+    "id": "voice_checkin",
+    "input": {
+      "kind": "voice",
+      "transcript": "Check in one avocado.",
+      "target": {
+        "product_name": "Avocado"
+      },
+      "candidates": [
+        {
+          "_id": "fruit",
+          "product_name": "Avocado",
+          "_createdDate": "2026-10-01"
+        }
+      ]
+    },
+    "expected_match": false,
+    "expected_ids": []
+  },
+  {
+    "id": "voice_hass",
+    "input": {
+      "kind": "voice",
+      "transcript": "Discard the avocado.",
+      "target": {
+        "product_name": "Avocado"
+      },
+      "candidates": [
+        {
+          "_id": "fruit",
+          "product_name": "Hass Avocado",
+          "_createdDate": "2026-10-01"
+        },
+        {
+          "_id": "oil",
+          "product_name": "Avocado Oil",
+          "_createdDate": "2026-10-01"
+        }
+      ]
+    },
+    "expected_match": true,
+    "expected_ids": [
+      "fruit"
+    ]
+  },
+  {
+    "id": "voice_finished",
+    "input": {
+      "kind": "voice",
+      "transcript": "I used up the milk.",
+      "target": {
+        "product_name": "Milk"
+      },
+      "candidates": [
+        {
+          "_id": "milk",
+          "product_name": "Organic Whole Milk",
+          "_createdDate": "2026-10-01"
+        },
+        {
+          "_id": "chocolate",
+          "product_name": "Chocolate Milk Ice Cream",
+          "_createdDate": "2026-10-01"
+        }
+      ]
+    },
+    "expected_match": true,
+    "expected_ids": [
+      "milk"
+    ]
+  },
+  {
+    "id": "voice_partial",
+    "input": {
+      "kind": "voice",
+      "transcript": "Discard half the milk.",
+      "target": {
+        "product_name": "Milk"
+      },
+      "candidates": [
+        {
+          "_id": "milk",
+          "product_name": "Whole Milk",
+          "_createdDate": "2026-10-01"
+        }
+      ]
+    },
+    "expected_match": false,
+    "expected_ids": []
+  },
+  {
+    "id": "voice_all",
+    "input": {
+      "kind": "voice",
+      "transcript": "Discard all the avocados.",
+      "target": {
+        "product_name": "Avocado"
+      },
+      "candidates": [
+        {
+          "_id": "a",
+          "product_name": "Avocado",
+          "_createdDate": "2026-10-01"
+        },
+        {
+          "_id": "b",
+          "product_name": "Avocado",
+          "_createdDate": "2026-10-01"
+        }
+      ]
+    },
+    "expected_match": false,
+    "expected_ids": []
+  },
+  {
+    "id": "voice_question",
+    "input": {
+      "kind": "voice",
+      "transcript": "Should I discard the avocado?",
+      "target": {
+        "product_name": "Avocado"
+      },
+      "candidates": [
+        {
+          "_id": "a",
+          "product_name": "Avocado",
+          "_createdDate": "2026-10-01"
+        }
+      ]
+    },
+    "expected_match": false,
+    "expected_ids": []
+  },
+  {
+    "id": "voice_stale_context",
+    "input": {
+      "kind": "voice",
+      "transcript": "Chicken one avocado which is five days old.",
+      "target": {
+        "product_name": "Avocado"
+      },
+      "candidates": [
+        {
+          "_id": "a",
+          "product_name": "Avocado",
+          "_createdDate": "2026-10-01"
+        }
+      ]
+    },
+    "expected_match": false,
+    "expected_ids": []
+  }
+]

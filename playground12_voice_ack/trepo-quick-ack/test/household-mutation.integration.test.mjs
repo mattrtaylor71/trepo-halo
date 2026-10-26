@@ -1,3 +1,4 @@
+import {installDiscardPlanFixture} from './discard-plan-fakes.mjs';
 import { test, before, after, beforeEach, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import mysql from 'mysql2/promise';
@@ -18,12 +19,14 @@ before(async () => {
   await conn.query(`CREATE TABLE new_users (user_id VARCHAR(36) PRIMARY KEY, owner_id VARCHAR(36), INDEX(owner_id)) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
     INSERT INTO new_users VALUES ('actor','family'),('partner','family'),('foreign','other');
     CREATE TABLE shared_kitchen (_id VARCHAR(36) PRIMARY KEY,owner_id VARCHAR(36),product_name TEXT,action VARCHAR(8),_createdDate DATETIME,_updatedDate DATETIME,brand TEXT,category TEXT,images TEXT,product_expiration DATETIME,job_id TEXT,quantity_value DECIMAL(12,3),quantity_unit VARCHAR(30),remaining_quantity TEXT,fill_percent INT);
+    CREATE TABLE kitchen_item_edits (item_id VARCHAR(36) PRIMARY KEY,revision BIGINT DEFAULT 0,overrides JSON);
     CREATE TABLE shared_discards (_id VARCHAR(36) PRIMARY KEY,_owner VARCHAR(36),_device TEXT,_createdDate DATETIME,_updatedDate DATETIME,product_name TEXT,brand TEXT,category TEXT,images TEXT,action VARCHAR(8),product_expiration DATETIME,job_id TEXT,user_id VARCHAR(36),source_kitchen_id VARCHAR(36),discard_reason TEXT,owner_id VARCHAR(36));`);
   process.env.WRITE_SHARED_ONLY='true';
   const dataModule=process.env.RELIABILITY_DATA_ACCESS || resolve(import.meta.dirname,'../lib/data-access.mjs');
   const mysqlModule=resolve(dirname(dataModule),'mysql.mjs');
   const original=await import(mysqlModule);
   mock.module(mysqlModule,{namedExports:{...original,withDbConnection:async callback=>callback(conn)}});
+  await installDiscardPlanFixture();
   da=await import(dataModule);
 });
 beforeEach(async () => {

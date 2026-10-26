@@ -1,0 +1,72 @@
+{
+  "status": "implemented_tested_not_deployed",
+  "date": "2026-10-26",
+  "approved_by": "Matt Taylor",
+  "model": "gpt-6-astra",
+  "behavior": [
+    "One oldest verified matching inventory entry per discard; recorded bought date before capture date; no last-edited ordering.",
+    "Same shared identity policy for Halo photo discards and QuickAck voice/app discard_item; zero-quantity removal uses the same path.",
+    "Current voice transcript must authorize removal. Model-selected IDs do not bypass semantic validation.",
+    "Uncertain identities, mixed product variants, model errors and no-match results do not authorize a fuzzy fallback.",
+    "Frozen photo-job plan and actor/request-scoped voice journal prevent retries selecting a second duplicate, including after household transfer.",
+    "Membership checks, full snapshot/revision checks and atomic archive/discard writes protect customer changes."
+  ],
+  "validation": {
+    "live_model_cases": {
+      "passed": 28,
+      "total": 28,
+      "median_seconds": 2.87,
+      "max_seconds": 5.13,
+      "input_tokens": 20168,
+      "output_tokens": 1936
+    },
+    "automated_full_run": {
+      "passed": 194,
+      "failed": 0,
+      "skipped": 0
+    },
+    "additional_cross_household_retry_test": {
+      "passed": 1
+    },
+    "local_mysql_checks": 12,
+    "test_db": "Disposable local MySQL 8.4, loopback port 33387; no production writes",
+    "commands": [
+      "RELIABILITY_MYSQL_PORT=33387 node --experimental-test-module-mocks --loader ./shared/thyme-runtime/test/consent-loader.mjs --test playground12_voice_ack/trepo-quick-ack/test/*.test.mjs shared/kitchen-discard/test/*.test.cjs",
+      "node shared/kitchen-discard/test/evaluate-model.cjs --live (synthetic provider evaluation; OPENAI_API_KEY required)"
+    ]
+  },
+  "limits": [
+    "Not deployed. Production behavior remains unchanged until release.",
+    "Explicit bulk and partial-quantity requests are held for review rather than guessed. This change removes one inventory entry, not an inferred fraction of a multipack.",
+    "No customer data was backfilled or restored; no original photo recognition benchmark was performed. Existing photo identification stays in place.",
+    "The separate private Thyme V2 tester uses its existing exact-row user approval and canonical revision-protected mutation route; not changed here.",
+    "Legacy WRITE_SHARED_ONLY=false removal is disabled rather than retaining unsafe fuzzy deletes.",
+    "Model tests are synthetic frozen inventories including the observed incident wording; they are not a claim of perfect accuracy."
+  ],
+  "release": {
+    "method": "Build guarded overlays onto freshly downloaded serving ZIPs with scripts/discard-identity/build-overlay.py. Abort and rebase if touched source hashes drift.",
+    "targets": [
+      "trepo-grocery-backend-dev-AnalyzeDiscardOnUpload-BnUyRpHHwaOx",
+      "trepo-quick-ack-sam-dev",
+      "trepo-quick-ack-async-worker-dev",
+      "QuickAck streaming function (resolve exact function from the live stack before release)"
+    ],
+    "preserve": [
+      "All unrelated ZIP entries, including latest async job-id forwarding, consent adapters, date fixes and voice reliability changes.",
+      "Current environment; DISCARD_MATCH_MODEL defaults to gpt-6-astra. No schema migration."
+    ],
+    "preflight": [
+      "Re-read current configurations/revisions and all touched serving sources.",
+      "Check voice session Dynamo table access supports the discard-actor partition and non-expiring retained request bodies.",
+      "Apply overlays with Lambda RevisionId safeguards, preserving independently changed files.",
+      "Run isolated canaries with synthetic inventory before any customer mutation; compare actual serving API results.",
+      "Keep previous ZIPs and revisions for rollback. Never deploy the full historical checkout."
+    ]
+  },
+  "provenance": {
+    "shared_context": "trepo-company recall returned no relevant discard policy page; no shared memory was written.",
+    "live_source_receipts_directory": "/Users/MattTaylor/Documents/Codex/2026-10-26/discard-matching",
+    "baseline_commit": "1ccf7f7",
+    "customer_evidence": "Private receipts remain outside Git."
+  }
+}
