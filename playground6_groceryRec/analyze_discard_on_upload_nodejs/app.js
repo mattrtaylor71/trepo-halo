@@ -1,3 +1,29 @@
+const { sendAssistantCapture } = require('./assistant-notification.cjs');
+// Halo deep analysis adapter v1; admission defaults off in halo_gate.cjs.
+const { isHaloDeepJob } = require('./halo_gate.cjs');
+const { analyzeHaloPhoto } = require('./halo_deep_analysis.cjs');
+
+async function analyzeAdmittedHalo({ imageBuffer, action, userHint, context, jobId }) {
+  const lambdaRemaining = context?.getRemainingTimeInMillis?.();
+  if (!Number.isFinite(lambdaRemaining)) throw new Error('Halo analysis requires a Lambda time budget');
+  if (lambdaRemaining <= 45000) throw new Error('Insufficient Lambda time for Halo deep analysis and finalization');
+  // Core caps analysis at 180s and reserves 45s from this actual Lambda remainder.
+  const result = await analyzeHaloPhoto({ imageBuffer, action, userHint, remainingMs: lambdaRemaining });
+  if (!result || typeof result !== 'object' ||
+      (action === 'dish' ? !result.dish || !result.nutritionData : !result.groceryItem)) {
+    throw new Error('Halo deep analysis returned no canonical result');
+  }
+  // Evidence publication is required. A failed write must not fall back to legacy guesses.
+  await updateJob(jobId, {
+    halo_deep_analysis: {
+      version: 1, action, evidence: result.evidence || null, debug: result.debug || null,
+      needs_review: result.evidence?.verification === 'uncertain' ||
+        (Array.isArray(result.evidence?.uncertainties) && result.evidence.uncertainties.length > 0),
+    },
+  }, { unlessDone: true });
+  return result;
+}
+
 // Lambda handler for analyzing uploaded discarded grocery images (same flow as grocery, writes to {owner}_discards)
 const AWS = require('aws-sdk');
 const crypto = require('crypto');
@@ -89,8 +115,24 @@ const UNKNOWN_ITEM_NAME = 'Unknown item';
 const UNKNOWN_ITEM_EXPLANATION = 'Item could not be confidently identified from the image.';
 const UNKNOWN_ITEM_CATEGORY = 'prepared_other';
 const UNKNOWN_ITEM_TEXT_PATTERNS = [
+  'unknown',
   'unknown item',
+  'unknown product',
+  'unknown grocery item',
+  'unknown food',
+  'unknown food item',
   'unidentified',
+  'unidentified item',
+  'unidentified product',
+  'unidentified food',
+  'unidentifiable',
+  'unidentifiable item',
+  'unrecognized',
+  'unrecognized item',
+  'not identified',
+  'n/a',
+  'none',
+  'null',
   'too blurry',
   'too blurred',
   'too unclear',
@@ -104,7 +146,6 @@ const UNKNOWN_ITEM_TEXT_PATTERNS = [
   'not clearly display',
   'not clearly identifiable',
   'not enough detail',
-  'exact product',
 ];
 
 function isResizedDerivativeKey(key) {
@@ -187,25 +228,23 @@ function normalizeText(value) {
 }
 
 function containsUnknownPattern(value) {
-  const normalized = normalizeText(value);
-  return normalized
-    ? UNKNOWN_ITEM_TEXT_PATTERNS.some((pattern) => normalized.includes(pattern))
-    : false;
+  const normalized = normalizeText(value).replace(/[\u2018\u2019]/g, "'")
+    .replace(/\s+/g, ' ').replace(/[.!?]+$/, '').trim();
+  // These are whole-field unresolved-name sentinels, never substrings in a
+  // product name or free-form explanation. Ingredient/brand uncertainty is
+  // not the same as an unidentified product.
+  return UNKNOWN_ITEM_TEXT_PATTERNS.includes(normalized) ||
+    /^(?:unknown|unidentified|unidentifiable|unrecognized)(?: (?:grocery|food))?(?: (?:item|product))?$/.test(normalized) ||
+    /^(?:cannot|can't|unable to) (?:identify|recognize)(?: (?:the|this|an?|any))?(?: (?:item|product|food))?$/.test(normalized);
 }
 
 function shouldStandardizeUnknownItem(groceryItem) {
   if (!groceryItem || typeof groceryItem !== 'object') return true;
 
   const productName = cleanText(groceryItem.product_name);
-  const brand = cleanText(groceryItem.brand);
-  const category = cleanText(groceryItem.category);
-  const explanation = cleanText(groceryItem.explanation);
-
-  if (!productName && !brand && !category) {
-    return true;
-  }
-
-  return containsUnknownPattern(productName) || containsUnknownPattern(explanation);
+  // A category/brand does not establish a product identity when the name is
+  // absent. The model schema permits null names, so handle them explicitly.
+  return !productName || containsUnknownPattern(productName);
 }
 
 function applyUnknownItemPlaceholder(groceryItem) {
@@ -712,9 +751,9 @@ async function dualWriteMetricsToShared(conn, ownerId, memberTable, entryId) {
     const upd = SHARED_METRICS_COLS.filter((c) => c !== '_id').map((c) => `\`${c}\`=VALUES(\`${c}\`)`).join(', ');
     await conn.execute(
       `INSERT INTO \`shared_metrics\` (\`owner_id\`, ${cols}) `
-      + `SELECT ?, ${src} FROM \`${memberTable}\` s WHERE s.\`_id\` = ? `
+      + `SELECT ?, ${src} FROM \`${memberTable}\` s WHERE s.\`_id\` = ? AND s.\`_owner\` = ? `
       + `ON DUPLICATE KEY UPDATE \`owner_id\`=VALUES(\`owner_id\`), ${upd}`,
-      [ownerId, entryId],
+      [ownerId, entryId, ownerId],
     );
   } catch (err) {
     try {
@@ -738,7 +777,7 @@ async function appendMetricsSnapshot(owner, pointsDelta = getScanPointsDelta()) 
       const tableName = metricsTableName(memberId);
       await ensureMetricsTable(conn, tableName);
       await ensureMetricsColumns(conn, tableName);
-      const [latestRows] = await conn.query(`SELECT * FROM \`${tableName}\` ORDER BY \`_createdDate\` DESC LIMIT 1`);
+      const [latestRows] = await conn.query(`SELECT * FROM \`${tableName}\` WHERE \`_owner\` = ? ORDER BY \`_createdDate\` DESC LIMIT 1`, [memberId]);
       const latest = latestRows?.[0] || {};
 
       await conn.execute(
@@ -948,7 +987,7 @@ async function uploadGeneratedImageToS3(buffer, userId, deviceId, jobId) {
   };
 }
 
-async function updateJob(jobId, attrs) {
+async function updateJob(jobId, attrs, options = {}) {
   const nextAttrs = {
     ...attrs,
     updated_at: new Date().toISOString(),
@@ -962,12 +1001,20 @@ async function updateJob(jobId, attrs) {
     names[`#${k}`] = k;
     values[`:${k}`] = nextAttrs[k];
   });
+  // Jobs are created by presign; late updates cannot recreate a deleted job.
+  names['#existing_job'] = 'job_id';
+  if (options.unlessDone) {
+    names['#terminal_status'] = 'status';
+    values[':terminal_done'] = 'DONE';
+  }
   const result = await dynamodb.update({
     TableName: JOBS_TABLE,
     Key: { job_id: jobId },
     UpdateExpression: `SET ${updateExpr}`,
     ExpressionAttributeNames: names,
     ExpressionAttributeValues: values,
+    ConditionExpression: 'attribute_exists(#existing_job)' + (options.unlessDone
+      ? ' AND (attribute_not_exists(#terminal_status) OR #terminal_status <> :terminal_done)' : ''),
     ReturnValues: 'ALL_NEW',
   }).promise();
   const updatedJob = result.Attributes || null;
@@ -1009,7 +1056,7 @@ async function invokeKitchenAnalysisGenerator(owner, pointsDelta = 0) {
     await lambda.invoke({
       FunctionName: functionName,
       InvocationType: 'Event',
-      Payload: JSON.stringify({ owner, points_delta: safeInt(pointsDelta, 0) }),
+      Payload: JSON.stringify({ user_id: require('/var/task/ai_consent_guard.cjs').currentActor(), owner, points_delta: safeInt(pointsDelta, 0) }),
     }).promise();
   } catch (error) {
     console.warn('[kitchen-analysis] invoke failed', error.message || error);
@@ -1032,7 +1079,7 @@ function reportAnalysisFailed(kind, stage, jobId, err) {
   } catch (_) { /* never let logging throw */ }
 }
 
-exports.handler = async (event) => {
+exports.handler = async (event, context) => {
   console.log('[handler] Event received:', JSON.stringify(event).substring(0, 500));
 
   const { bucket, key } = extractS3FromEvent(event);
@@ -1058,6 +1105,7 @@ exports.handler = async (event) => {
   }
 
   let jobId = null;
+  let processingStarted = false;
   let provisionalDiscardInserted = false;
   let provisionalDiscardResolved = false;
   let provisionalDiscardOwner = null;
@@ -1070,21 +1118,25 @@ exports.handler = async (event) => {
     const { user_id, device_id } = ids;
     jobId = ids.job_id;
 
-    await updateJob(jobId, {
-      status: 'PROCESSING',
-      discard_status: 'PROCESSING',
-      fast_status: 'PROCESSING',
-      deep_status: 'PROCESSING',
-      t_start_proc: new Date().toISOString(),
-    });
-
     const jobResult = await dynamodb.get({
       TableName: JOBS_TABLE,
       Key: { job_id: jobId },
+      ConsistentRead: true,
     }).promise();
 
-    const job = jobResult.Item || { ...ids, job_id: jobId };
+    const job = jobResult.Item;
+    if (!job) {
+      // Presign stores the job before issuing an upload URL. A missing record
+      // after a strong read must not be recreated by a delayed object event.
+      return {statusCode:200,body:JSON.stringify({ok:true,ignored:true,reason:'job_missing'})};
+    }
     const owner = job.owner;
+    require('/var/task/ai_consent_guard.cjs').actorContext.enterWith(job.ai_consent_actor);
+    if (!await require('/var/task/ai_consent_guard.cjs').allowed(job.ai_consent_actor)) {
+      if (['DONE','FAILED','SUCCESS','COMPLETED'].includes(String(job.status).toUpperCase())) return {statusCode:200,body:JSON.stringify({ok:true,ignored:true,reason:'terminal_job'})};
+      await updateJob(jobId, {status:'FAILED', error_msg:'AI processing is off. Open Trepo > Profile > AI privacy.'}, {unlessDone:true});
+      return {statusCode:200,body:JSON.stringify({ok:false,error:'ai_consent_required',job_id:jobId})};
+    }
     provisionalDiscardOwner = owner || null;
     const action = job.action || 'IN';
     const productExpiration = job.product_expiration || null;
@@ -1103,6 +1155,27 @@ exports.handler = async (event) => {
       return { statusCode: 200, body: JSON.stringify({ ok: true, ignored: true, reason: 'not a discard job' }) };
     }
 
+    // Completed deliveries only recover publication; never repeat image or points work.
+    if (job.status === 'DONE') {
+      if (job.result_publication_status === 'pending') {
+        await publishResult(user_id, device_id, jobId, job.last_product, job.confidence, action);
+        await updateJob(jobId, { result_publication_status: 'published' });
+        await sendAssistantCapture({owner, device:device_id, job:jobId, kind:'discard',
+          name:job.last_product, unrecognized:job.assistant_result === 'unrecognized',
+          removed:job.assistant_result === 'discarded'});
+      }
+      return { statusCode: 200, body: JSON.stringify({ ok: true, job_id: jobId }) };
+    }
+    await updateJob(jobId, {
+      status: 'PROCESSING',
+      discard_status: 'PROCESSING',
+      fast_status: 'PROCESSING',
+      deep_status: 'PROCESSING',
+      t_start_proc: new Date().toISOString(),
+    }, { unlessDone: true });
+
+    processingStarted = true;
+
     // Download image from S3
     const s3Object = await s3.getObject({ Bucket: BUCKET_NAME, Key: key }).promise();
     const imageBuffer = Buffer.from(s3Object.Body);
@@ -1110,6 +1183,16 @@ exports.handler = async (event) => {
     let resizedImageUrl = null;
     let resizedImageKey = null;
 
+    const haloDeep = await isHaloDeepJob({
+      job, jobId, owner, deviceId: device_id, userId: user_id,
+      bucket: BUCKET_NAME, key, dynamodb, env: process.env,
+    });
+    if (haloDeep) await updateJob(jobId, {
+      fast_status: 'SKIPPED', fast_mode: 'halo_deep_only',
+      t_fast_done: new Date().toISOString(),
+    }, { unlessDone: true });
+
+    if (!haloDeep) {
     try {
       console.log('[fast-identify] Starting provisional discard legacy fast scan...');
       const fastStart = Date.now();
@@ -1185,6 +1268,8 @@ exports.handler = async (event) => {
       });
     }
 
+    }
+
     try {
       const resizedUpload = await uploadResizedOriginalImage(imageBuffer, user_id, device_id, jobId);
       resizedImageUrl = resizedUpload.url;
@@ -1197,8 +1282,14 @@ exports.handler = async (event) => {
       console.error('[resized-image] Error uploading resized original image (non-fatal):', resizeUploadError);
     }
 
-    const analyzeStart = Date.now();
     let groceryItem;
+    if (haloDeep) {
+      const haloAnalysis = await analyzeAdmittedHalo({ imageBuffer, action: 'discard', userHint: job.camera_meta?.user_note || null, context, jobId });
+      groceryItem = { ...haloAnalysis.groceryItem,
+        needs_review: haloAnalysis.evidence?.verification === 'uncertain' ||
+          (Array.isArray(haloAnalysis.evidence?.uncertainties) && haloAnalysis.evidence.uncertainties.length > 0) };
+    } else {
+    const analyzeStart = Date.now();
     try {
       groceryItem = await identifyGroceryItem(imageBuffer);
       logAiOp({
@@ -1216,16 +1307,40 @@ exports.handler = async (event) => {
       });
       throw analyzeLlmError;
     }
+    }
+    // Retain the decision inputs before normalization/refinement can overwrite
+    // them. Fast candidate identity already remains on this same job record.
+    const unresolvedIdentity = shouldStandardizeUnknownItem(groceryItem);
+    const identityResolution = {
+      policy_version: 1,
+      status: unresolvedIdentity ? 'unknown' : 'named',
+      reason: !cleanText(groceryItem?.product_name) ? 'missing_product_name'
+        : unresolvedIdentity ? 'unresolved_product_name' : 'named_deep_result',
+      deep_product_name: cleanText(groceryItem?.product_name).slice(0, 500) || null,
+      deep_brand: cleanText(groceryItem?.brand).slice(0, 500) || null,
+      deep_confidence: typeof groceryItem?.confidence === 'number' ? groceryItem.confidence : null,
+      deep_explanation: cleanText(groceryItem?.explanation).slice(0, 4000) || null,
+      refinement_status: 'not_attempted',
+    };
     let storeAvailability = null;
-    if (shouldStandardizeUnknownItem(groceryItem)) {
+    if (unresolvedIdentity) {
       groceryItem = applyUnknownItemPlaceholder(groceryItem);
       console.log('[discard] Standardized unresolved discard item to unknown placeholder.');
     } else {
+    if (!haloDeep) {
       const refineStart = Date.now();
       const refineBeforeName = groceryItem.product_name || '';
       try {
-        const refinedItem = await refineProductTitle(groceryItem);
-        groceryItem.product_name = refinedItem.product_name;
+        const refinedItem = await refineProductTitle({ ...groceryItem });
+        const refinedName = cleanText(refinedItem?.product_name);
+        identityResolution.refined_product_name = refinedName.slice(0, 500) || null;
+        if (shouldStandardizeUnknownItem({ product_name: refinedName })) {
+          groceryItem.product_name = refineBeforeName;
+          identityResolution.refinement_status = 'rejected_unresolved_name';
+        } else {
+          groceryItem.product_name = refinedName;
+          identityResolution.refinement_status = 'accepted';
+        }
         logAiOp({
           service: 'discard', op: 'refine_title', owner_id: owner, model: discardTextModel(),
           latency_ms: Date.now() - refineStart, status: 'success', job_id: jobId,
@@ -1238,6 +1353,8 @@ exports.handler = async (event) => {
           variant: groceryItem.variant || null,
         });
       } catch (titleError) {
+        groceryItem.product_name = refineBeforeName;
+        identityResolution.refinement_status = 'failed_retained_name';
         logAiOp({
           service: 'discard', op: 'refine_title', owner_id: owner, model: discardTextModel(),
           latency_ms: Date.now() - refineStart, status: 'error', job_id: jobId,
@@ -1268,6 +1385,8 @@ exports.handler = async (event) => {
         });
         console.error('[stores] Error (non-fatal):', storeError);
       }
+    }
+
     }
     let targetImageUrl = getStockImageTargetUrl(job);
     targetImageUrl = await uploadTargetImageIfNeeded(targetImageUrl, user_id, jobId);
@@ -1308,7 +1427,7 @@ exports.handler = async (event) => {
         product_image_url: productImageUrl,
         product_image_key: productImageKey,
       });
-    } else {
+    } else if (!haloDeep) {
       try {
         const stockImage = await findStockImage(groceryItem, {
           targetImageUrl,
@@ -1329,7 +1448,7 @@ exports.handler = async (event) => {
       }
     }
 
-    if (!productImageUrl && !isUnknownItem) {
+    if (!haloDeep && !productImageUrl && !isUnknownItem) {
       const iconStart = Date.now();
       try {
         const iconBuffer = await generateProductIcon(groceryItem);
@@ -1373,6 +1492,7 @@ exports.handler = async (event) => {
       product_image_url: productImageUrl,
       product_image_key: productImageKey,
       groceryItem,
+      needs_review: isUnknownItem || groceryItem.needs_review === true,
       storeAvailability: storeAvailability || undefined,
     });
     provisionalDiscardResolved = true;
@@ -1467,8 +1587,8 @@ exports.handler = async (event) => {
       console.error('[feed] Error (non-fatal):', feedError);
     }
 
+    let removedFromKitchen = false;
     if (!isUnknownItem) {
-      let removedFromKitchen = false;
       try {
         const matchResult = matchedKitchenRow?._id
           ? await matchAndRemoveFromKitchen(owner, groceryItem, { preferredId: matchedKitchenRow._id })
@@ -1527,10 +1647,13 @@ exports.handler = async (event) => {
     await updateJob(jobId, {
       status: 'DONE',
       discard_status: 'DONE',
+      assistant_result: isUnknownItem ? 'unrecognized' : removedFromKitchen ? 'discarded' : 'discard_logged',
       deep_status: 'DONE',
       t_done: new Date().toISOString(),
       last_product: groceryItem.product_name || null,
       confidence: groceryItem.confidence || 0,
+      identity_resolution: { ...identityResolution, final_product_name: groceryItem.product_name },
+      result_publication_status: 'pending',
     });
 
     await publishResult(
@@ -1542,10 +1665,14 @@ exports.handler = async (event) => {
       action
     );
 
+    await updateJob(jobId, { result_publication_status: 'published' });
+    await sendAssistantCapture({owner, device:device_id, job:jobId, kind:'discard',
+      name:groceryItem.product_name, unrecognized:isUnknownItem, removed:removedFromKitchen});
+
     return { statusCode: 200, body: JSON.stringify({ ok: true, job_id: jobId }) };
   } catch (error) {
     console.error('[error] Exception:', error);
-    if (jobId) {
+    if (jobId && processingStarted) {
       try {
         if (provisionalDiscardInserted && !provisionalDiscardResolved && provisionalDiscardOwner) {
           await markDiscardRowFailed({
@@ -1559,7 +1686,7 @@ exports.handler = async (event) => {
           discard_status: 'FAILED',
           deep_status: 'FAILED',
           error_msg: error.message || String(error),
-        });
+        }, { unlessDone: true });
       } catch (e2) {
         console.error('[error] Failed to mark job as FAILED:', e2);
       }
@@ -1567,3 +1694,9 @@ exports.handler = async (event) => {
     throw error;
   }
 };
+
+// Isolate each S3 delivery before it resolves a durable actor. A fresh invalid
+// sentinel also prevents AsyncLocalStorage.run from eliding a same-store scope.
+const _photoHandlerBeforeConsentScope = exports.handler;
+exports.handler = (event, context) => require('/var/task/ai_consent_guard.cjs').actorContext.run(
+  {}, () => _photoHandlerBeforeConsentScope(event, context));
