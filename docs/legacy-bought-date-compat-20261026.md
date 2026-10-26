@@ -1,6 +1,6 @@
 # Bought-date compatibility test — October 26, 2026
 
-Status: tested prototype; no customer rollout remains enabled. Requested by Matt: test whether existing app users can receive the corrected bought age without installing the native fix.
+Historical test status: the initial review-account canary was restored after testing. Matt subsequently explicitly authorized production deployment; see [the production rollout](legacy-bought-date-rollout-20261026.md) for the current live state. This document preserves the earlier isolated test and its limits.
 
 ## Result
 

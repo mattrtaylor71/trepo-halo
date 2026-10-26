@@ -21,6 +21,7 @@ import { formatRecipeResponse } from "./lib/recipe-response.mjs";
 
 import { buildAppOutput } from "./lib/app-response.mjs";
 import { dispatchVoiceAssetJobs } from "./lib/voice-asset-dispatcher.mjs";
+import { legacyDateRefreshEvents } from "../../shared/voice-assistant/legacy-date-refresh.mjs";
 import { runDeviceAssistantStreaming, transcribeAudio } from "./lib/device-assistant.mjs";
 import {
   appendSessionMessages,
@@ -497,6 +498,11 @@ async function streamHandler(event, responseStream, context) {
 
   // Post-stream: entity capitalization, app_output, session persistence
   const toolEvents = result?.toolEvents || [];
+  // Brain progress events replace raw tool events. Restore the refresh signal
+  // old app clients need, only after a verified successful bought-date edit.
+  if (requestInput?.responseSurface === "app") {
+    for (const event of legacyDateRefreshEvents(result)) writeLine(responseStream, event);
+  }
   await recordDirectVoice({env:process.env, owner:ownerId, device:deviceId, surface:requestInput.responseSurface,
     operation:getHeader(headers,"x-operation-id") || context?.awsRequestId, transcript, result, events:toolEvents});
   const originalResponseText = applyEntityCapitalization(result?.text || "Okay.", toolEvents);

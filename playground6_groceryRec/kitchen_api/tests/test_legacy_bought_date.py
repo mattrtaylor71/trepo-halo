@@ -5,7 +5,7 @@ import unittest
 from datetime import datetime, timezone
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from legacy_bought_date import project_response
+from legacy_bought_date import project_response, project_saved_corrections
 
 
 class LegacyBoughtDateTests(unittest.TestCase):
@@ -80,6 +80,29 @@ class LegacyBoughtDateTests(unittest.TestCase):
         for body in ['oops', 'null', '[]', '{}', '{"items":null}']:
             response = {**self.response, 'body': body}
             self.assertIs(self.project(response=response), response)
+
+    def test_rollout_selects_only_saved_corrections_from_authorized_items(self):
+        untouched = {'_id': 'ordinary', '_createdDate': self.item['_createdDate'], 'analysis_stage': 'final'}
+        archived = {**self.item, '_id': 'archived'}
+        response = {**self.response, 'body': json.dumps({'items': [self.item, untouched], 'archived_items': [archived]})}
+        for build in ['150', '205']:
+            event = copy.deepcopy(self.event); event['headers']['x-trepo-app-build'] = build
+            result = project_saved_corrections(response, event, now=self.now)
+            payload = json.loads(result['body'])
+            self.assertEqual(payload['items'][0]['days_old'], 6)
+            self.assertEqual(payload['items'][1], untouched)
+            self.assertEqual(payload['archived_items'], [archived])
+        self.assertEqual(json.loads(response['body'])['items'][0], self.item)
+
+    def test_rollout_new_client_capability_and_unknown_dates_unchanged(self):
+        for patch in [{'x-trepo-app-build': '206'}, {'x-trepo-kitchen-age': 'bought-date-v1'}]:
+            event = copy.deepcopy(self.event); event['headers'].update(patch)
+            self.assertIs(project_saved_corrections(self.response, event, now=self.now), self.response)
+        for value in [None, '2026-10-27', '2026-02-30']:
+            response = {**self.response, 'body': json.dumps({'items': [{**self.item, 'acquired_on': value}]})}
+            self.assertIs(project_saved_corrections(response, self.event, now=self.now), response)
+        denied = {**self.response, 'statusCode': 403}
+        self.assertIs(project_saved_corrections(denied, self.event, now=self.now), denied)
 
 
 if __name__ == '__main__':

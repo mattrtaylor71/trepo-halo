@@ -11,6 +11,29 @@ from datetime import date, datetime, time, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 
+def project_saved_corrections(response, event, *, now=None):
+    """Bridge existing iOS builds after the authorized Kitchen GET completes.
+
+    amount_operations.annotate adds acquired_on only when __acquired_on exists
+    in that item's saved overrides. Select from the authorized response, never
+    from caller-supplied IDs or a second, potentially broader database query.
+    Build 205 is the last supported legacy build; the native fix supersedes this.
+    """
+    if response.get('statusCode') != 200:
+        return response
+    try:
+        payload = json.loads(response['body'])
+    except (KeyError, TypeError, ValueError):
+        return response
+    if not isinstance(payload, dict) or not isinstance(payload.get('items'), list):
+        return response
+    corrected = [row['_id'] for row in payload['items']
+                 if isinstance(row, dict) and isinstance(row.get('_id'), str)
+                 and 'acquired_on' in row]
+    return project_response(response, event, corrected_item_ids=corrected,
+                            max_build=205, now=now)
+
+
 def project_response(response, event, *, corrected_item_ids=(), max_build=0, now=None):
     headers = {str(k).lower(): str(v) for k, v in (event.get('headers') or {}).items()}
     method = event.get('httpMethod') or (event.get('requestContext') or {}).get('http', {}).get('method')

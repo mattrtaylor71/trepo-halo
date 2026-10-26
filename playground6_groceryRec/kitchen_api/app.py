@@ -2273,7 +2273,8 @@ def handler(event, context):
             if text_job_id is not None:
                 from text_jobs import route as text_job_route
                 return text_job_route(event, owner, job_id=text_job_id)
-            return _get_kitchen_items(owner, event)
+            from legacy_bought_date import project_saved_corrections
+            return project_saved_corrections(_get_kitchen_items(owner, event), event)
 
         elif http_method == 'POST':
             if not owner:
