@@ -74,12 +74,13 @@ def annotate(conn, rows):
   m=meta.get(row['_id'],{});row['amount_revision']=m.get('revision',0);row['reference_amount']=m.get('reference_amount')
   saved=json.loads(m['overrides']) if isinstance(m.get('overrides'),str) else m.get('overrides',{})
   row['opened_at']=saved.get('__opened_at');row['storage_started_at']=saved.get('__storage_started_at')
+  if '__acquired_on' in saved:row['acquired_on']=saved['__acquired_on']
   row['expiration_provenance']=expiration_provenance(saved,row.get('product_expiration'))
   if isinstance(saved.get('__approved_item_icon'),dict):row['__approved_item_icon']=saved['__approved_item_icon']
  return rows
 
-def validate_fields(fields):
- if not isinstance(fields,dict) or not fields or set(fields)-set(FIELDS):raise Rejected('Unsupported item fields.')
+def validate_fields(fields, *, allow_empty=False):
+ if not isinstance(fields,dict) or (not fields and not allow_empty) or set(fields)-set(FIELDS):raise Rejected('Unsupported item fields.')
  result={}
  for key,v in fields.items():
   kind=FIELDS[key]
@@ -132,9 +133,9 @@ def _save(cur,row,meta,fields,reference=None):
  if lifecycle and history:saved['__shelf_history']=history
  saved.update(fields)
  cur.execute('UPDATE kitchen_item_edits SET overrides=%s, reference_amount=%s WHERE item_id=%s',(dumps(saved),reference if reference is not None else meta['reference_amount'],row['_id']))
- sets=','.join('`'+k+'`=%s' for k in fields)
+ sets=','.join(['`'+k+'`=%s' for k in fields]+['`_updatedDate`=NOW()'])
  vals=[dumps(v) if isinstance(v,list) else v for v in fields.values()]
- cur.execute('UPDATE shared_kitchen SET '+sets+', `_updatedDate`=NOW() WHERE _id=%s',vals+[row['_id']])
+ cur.execute('UPDATE shared_kitchen SET '+sets+' WHERE _id=%s',vals+[row['_id']])
  if lifecycle:
   # Confirming the same date can be new evidence after a storage transition;
   # the row trigger alone cannot see changes confined to the protected sidecar.
@@ -241,7 +242,7 @@ def execute(conn,actor,body,members):
      reference=meta['reference_amount'] or before
      fields=_quantity_fields(left,u,reference)
     else:
-     fields=validate_fields(entry.get('fields'))
+     fields=validate_fields(entry.get('fields'),allow_empty=kind=='edit' and isinstance(entry.get('shelf_dates'),dict) and bool(entry['shelf_dates']))
      reference=meta['reference_amount']
      if 'quantity_value' in fields or 'quantity_unit' in fields:
       left=amount(fields.get('quantity_value',row.get('quantity_value')))

@@ -5,7 +5,7 @@ export async function readSharedHouseholdKitchen(connection, context) {
   const actor = String(context?.userId || context?.tableOwnerId || context?.ownerId || '').trim();
   if (!actor || context?.isFallbackContext) throw new Error('Kitchen membership unavailable.');
   const [rows] = await connection.execute(`
-    SELECT k.*, actor.user_id AS _kitchen_scope_actor,
+    SELECT k.*, JSON_UNQUOTE(JSON_EXTRACT(e.overrides,'$.__acquired_on')) AS acquired_on, actor.user_id AS _kitchen_scope_actor,
            COALESCE(NULLIF(actor.owner_id,''),actor.user_id) AS _kitchen_scope_household
     FROM new_users actor
     LEFT JOIN shared_kitchen k ON k.action = 'IN' AND k.owner_id IN (
@@ -13,6 +13,7 @@ export async function readSharedHouseholdKitchen(connection, context) {
       WHERE member.user_id = actor.user_id
          OR (actor.owner_id IS NOT NULL AND actor.owner_id <> '' AND member.owner_id = actor.owner_id)
     )
+    LEFT JOIN kitchen_item_edits e ON e.item_id=CONVERT(k._id USING utf8mb4) COLLATE utf8mb4_unicode_ci
     WHERE actor.user_id = ?
     ORDER BY COALESCE(k._updatedDate,k._createdDate) DESC,k._id,k.owner_id`, [actor]);
   if (!rows?.length || rows[0]._kitchen_scope_actor !== actor) {

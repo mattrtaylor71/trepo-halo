@@ -38,6 +38,8 @@ export function actionOutcomes(toolEvents = []) {
     // A denied unrequested tool never reached the executor. Do not replace a
     // useful read-only answer with a failure for work the user never requested.
     if (result.suppressed || (result.needs_clarification === true && result.toolResult?.inventory_changed === false)) return [];
+    if (event.toolName==='update_item_details' && Object.hasOwn(event.args || result.args || {},'bought_date') &&
+        ['ambiguous_kitchen_item','invalid_bought_date'].includes(result.details?.type)) return [];
     const body = result.toolResult;
     const base = {...spec,toolName:event.toolName,entities:[],failed:0,unverified:0};
     if (result.toolName && result.toolName !== event.toolName) return [{...base,state:'unverified',unverified:1}];
@@ -58,6 +60,11 @@ export function actionOutcomes(toolEvents = []) {
         if (!item.aisle || data.aisle_key !== event.args?.aisle_key ||
             item.name.toLocaleLowerCase('en-US') !== value(event.args?.item_name).toLocaleLowerCase('en-US')) {base.unverified++;continue;}
       }
+      if (event.toolName==='update_item_details' && Object.hasOwn(event.args || result.args || {},'bought_date')) {
+        const data=row?.item || row;
+        if (!Object.hasOwn(data,'bought_date')) {base.unverified++;continue;}
+        item.boughtDate=data.bought_date;item.dateCorrection=true;item.quantity='';
+      }
       base.entities.push(item);
     }
     // A batch count alone cannot prove which targets changed.
@@ -70,7 +77,7 @@ export function actionOutcomeText(outcomes) {
   const sections=[];
   for (const outcome of outcomes) {
     if (outcome.entities.length) {
-      const lines=outcome.entities.map(e => `${e.name}${e.aisle ? ` → ${e.aisle}` : ''}${e.quantity ? ` (${e.quantity})` : ''}${e.date ? ` · ${e.date}${e.slot ? ' '+e.slot : ''}` : ''}`);
+      const lines=outcome.entities.map(e => `${e.name}${e.aisle ? ` → ${e.aisle}` : ''}${e.dateCorrection ? (e.boughtDate===null ? ' · Bought date cleared' : ` · Bought ${e.boughtDate}`) : ''}${e.quantity ? ` (${e.quantity})` : ''}${e.date ? ` · ${e.date}${e.slot ? ' '+e.slot : ''}` : ''}`);
       sections.push(`${outcome.label}:\n${lines.map(x => '- '+x).join('\n')}`);
     }
     if (outcome.failed) sections.push(outcome.error === 'ambiguous_match' ? 'More than one item matches. Choose the specific item before removing or changing it.' : "Some requested changes couldn't be completed.");

@@ -10,8 +10,10 @@ KEYS = {'opened_on':'__opened_at', 'frozen_on':'__storage_started_at',
 
 def apply(conn, cur, actor, operation, row, values):
     from amount_operations import Rejected, dumps
-    if not enabled_for(conn, actor):raise Rejected('Shelf date corrections are not available.',404)
     if not isinstance(values,dict) or not values or set(values)-set(KEYS):raise Rejected('Invalid shelf dates.')
+    # Bought-date corrections are available to every household. Other lifecycle
+    # date controls retain their existing rollout gate.
+    if set(values)!={'acquired_on'} and not enabled_for(conn, actor):raise Rejected('Shelf date corrections are not available.',404)
     state=materialize(conn,[row])[row['_id']]
     today=datetime.now(timezone.utc).astimezone(ZoneInfo(state['time_zone'])).date()
     clean={}

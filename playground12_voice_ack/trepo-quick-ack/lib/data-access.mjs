@@ -6,6 +6,7 @@ import { withHouseholdKitchenMutation, findHouseholdKitchenRows, updateHousehold
 // (voice dishes/discards/shopping go invisible again — regressions 07-02 / 07-06).
 // The trepo-voice-dualwrite-canary + alarm VoiceDualWriteMiss will catch a revert.
 import crypto from "node:crypto";
+import {hasBoughtDate, householdBoughtDate, boughtDateFields, householdCorrectionRows} from "../../../shared/voice-assistant/bought-date.mjs";
 import { readHouseholdFoodRows, householdSavedRecipes, householdShoppingRows, householdMealPlans } from "./household-food-data.mjs";
 import { readSharedHouseholdKitchen } from "./household-kitchen.mjs";
 import { saveKitchenEdit, renameReference, pickRenameByCreation, createKitchenMutationContext, prepareKitchenEdit } from "./kitchen-edit-client.mjs";
@@ -1494,6 +1495,7 @@ function formatStructuredState(item) {
 
 function mapKitchenRow(row) {
   return {
+    ...boughtDateFields(row),
     id: row._id,
     item_name: row.product_name || row.item_name || "Unknown item",
     brand: row.brand || null,
@@ -4049,14 +4051,23 @@ export async function updateKitchenItemDetails(context, itemReference, updates, 
   const prepared = await prepareKitchenEdit(context, normalizeKitchenReference(itemReference), updates, options,
     () => withDbConnection(async (connection) => {
     let reference = normalizeKitchenReference(itemReference);
+    const shelfDates = hasBoughtDate(updates) ? {acquired_on:await householdBoughtDate(connection, context.ownerId, updates.bought_date)} : {};
     let resolved;
     try {
-      if (updates?.new_name && options.sourceTranscript && options.expectedRevision == null) {
-        const namedRow=reference.item_id ? await findKitchenRowById(connection,resolveTableOwnerId(context),reference.item_id) : null;
+      if ((updates?.new_name || hasBoughtDate(updates)) && options.sourceTranscript && options.expectedRevision == null) {
+        const correctionRows=WRITE_SHARED_ONLY ? await householdCorrectionRows(connection,context) : null;
+        const namedRow=reference.item_id ? (correctionRows ? correctionRows.find(r=>String(r._id)===reference.item_id) : await findKitchenRowById(connection,resolveTableOwnerId(context),reference.item_id)) : null;
         reference=renameReference(reference,updates,options,namedRow);
         if (reference.item_id) resolved=await resolveKitchenRowByReference(connection,context,reference);
         else {
-          const matches=await findKitchenRowsByName(connection,resolveTableOwnerId(context),reference.item_name,101);
+          let matches;
+          if (correctionRows) {
+            matches=correctionRows.filter(r=>normalizeName(r.product_name)===normalizeName(reference.item_name));
+            if (!matches.length) {
+              const ranked=rankKitchenRowMatches(correctionRows,reference.item_name);
+              matches=ranked.filter(m=>m.score>=KITCHEN_FUZZY_THRESHOLD && ranked[0].score-m.score<KITCHEN_FUZZY_AMBIGUITY_DELTA).map(m=>m.row);
+            }
+          } else matches=await findKitchenRowsByName(connection,resolveTableOwnerId(context),reference.item_name,101);
           if (matches.length>100) throw Object.assign(new Error('Please use a more specific item name for this correction.'),{statusCode:409});
           resolved=matches.length===1?matches[0]:pickRenameByCreation(matches,reference.selection_hint);
           if (!resolved && matches.length>1) {
@@ -4070,6 +4081,7 @@ export async function updateKitchenItemDetails(context, itemReference, updates, 
     }
     catch (error) {
       if (error.details?.type === 'ambiguous_kitchen_item') {
+        if (hasBoughtDate(updates)) error.details.bought_date = shelfDates.acquired_on;
         // Snapshot revision and scope for the clarification, not a later guessed target.
         const ids = error.details.candidates.map(c => c.item_id);
         const [candidates] = await connection.execute(`SELECT k.*, COALESCE(e.revision,0) AS amount_revision
@@ -4114,9 +4126,9 @@ export async function updateKitchenItemDetails(context, itemReference, updates, 
       fields.quantity_unit = updates.quantity_unit || ({piece:'count',item:'count'}[state.quantity_unit] || state.quantity_unit) || row.quantity_unit;
       if (!fields.quantity_unit) throw Object.assign(new Error('What unit should I use for that amount?'), {statusCode:400});
     }
-    return {row, fields};
+    return {row, fields, shelfDates};
   }, options));
-  const confirmed = await saveKitchenEdit(context, prepared.row, prepared.fields, options);
+  const confirmed = await saveKitchenEdit(context, prepared.row, prepared.fields, {...options,shelfDates:prepared.shelfDates});
   // Canonical Kitchen owns protected fields, shelf-life and recipe invalidation.
   // Never synthesize the returned item by spreading proposed values over a row.
   return {...mapKitchenRow(confirmed), amount_revision:confirmed.amount_revision,

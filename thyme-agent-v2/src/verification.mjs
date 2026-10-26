@@ -184,11 +184,13 @@ export function verifyChange(action, args, before, after, result) {
         "brand",
         "category",
         "expiration_date",
+        "bought_date",
       ].filter((k) => expected[k] !== undefined);
       verified =
         fields.length > 0 &&
         fields.every((k) => {
           const v = current[map[k] || k];
+          if (k === "bought_date") return Object.hasOwn(current,k) && current[k] === expected[k];
           return k === "is_opened"
             ? Boolean(v) === expected[k]
             : k === "expiration_date"

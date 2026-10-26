@@ -1424,8 +1424,8 @@ async function executeKitchenAwareTool(input, taskState) {
   const remembered=await rememberKitchenTaskResult(taskState,input.toolName,result,`${input.mutationContext.requestId}:clarification:${ordinal}`);
   if (!remembered && result.ok) return {...result,task_context:'unavailable'};
   if (!remembered) return {ok:false,statusCode:409,toolName:input.toolName,
-    error:'I could not retain this correction. Please repeat the full new name and exact item together.',details:{type:'clarification_unavailable'}};
-  if (result.details?.type==='ambiguous_kitchen_item' && taskState.task?.kind==='rename')
+    error:'I could not retain this correction. Please repeat the full change and exact item together.',details:{type:'clarification_unavailable'}};
+  if (result.details?.type==='ambiguous_kitchen_item' && ['rename','bought_date'].includes(taskState.task?.kind))
     return {...result,ok:true,statusCode:200,needs_clarification:true,
       toolResult:{confirmation_question:result.error,inventory_changed:false}};
   return result;

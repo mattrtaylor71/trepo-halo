@@ -1,4 +1,6 @@
 import crypto from 'node:crypto';
+import {hasBoughtDate} from '../../../shared/voice-assistant/bought-date.mjs';
+const validDates = dates => dates && typeof dates==='object' && !Array.isArray(dates) && Object.keys(dates).every(k=>k==='acquired_on' && (dates[k]===null || /^\d{4}-\d{2}-\d{2}$/.test(dates[k])));
 import {readKitchenEditRequest, retainKitchenEditRequest} from './session-store.mjs';
 
 const DEFAULT_API = 'https://7tn3gvwvh7.execute-api.us-east-1.amazonaws.com';
@@ -13,11 +15,11 @@ const UNITS = new Set(["bag", "bottle", "bunch", "can", "clove", "container", "c
 // resolve the actual label again and require an unambiguous target. A pending
 // clarification carries a server-held revision and may use its selected ID.
 export function renameReference(reference, updates, options, resolvedRow) {
-  if (!updates?.new_name || !options?.sourceTranscript || options.expectedRevision != null) return reference;
+  if ((!updates?.new_name && !hasBoughtDate(updates)) || !options?.sourceTranscript || options.expectedRevision != null) return reference;
   const transcript=String(options.sourceTranscript);
   const id=String(reference.item_id || '');
   if (id && transcript.split(/\s+/).some(word=>word.replace(/^["'(]+|["'),.!?]+$/g,'')===id)) return reference;
-  const lower=transcript.toLowerCase(), replacement=String(updates.new_name).toLowerCase();
+  const lower=transcript.toLowerCase(), replacement=String(updates.new_name || '').toLowerCase();
   const lastReplacement=lower.lastIndexOf(replacement);
   const withoutName=lastReplacement<0?lower:lower.slice(0,lastReplacement)+lower.slice(lastReplacement+replacement.length);
   const label=reference.item_name || resolvedRow?.product_name;
@@ -25,7 +27,7 @@ export function renameReference(reference, updates, options, resolvedRow) {
   // selected from the inventory by the model. Pronouns need a pending target.
   const normalized=value=>String(value||'').toLowerCase().replace(/[^\p{L}\p{N}]+/gu,' ').trim();
   if (!label || !(` ${normalized(withoutName)} `).includes(` ${normalized(label)} `))
-    throw rejected('Please repeat the item and its full new name to confirm this correction.');
+    throw rejected(hasBoughtDate(updates) ? 'Please repeat the item and its bought date to confirm this correction.' : 'Please repeat the item and its full new name to confirm this correction.');
   const selector=normalized(withoutName).replace(normalized(label),'');
   const newest=/\b(?:most recent|newest|latest)\b/.test(selector);
   const oldest=/\b(?:oldest|earliest)\b/.test(selector);
@@ -90,7 +92,7 @@ export async function prepareKitchenEdit(context, reference, updates, options, r
     if (!body) {
       const prepared = await resolve();
       body = await retainKitchenEditRequest(scope,
-        kitchenEditBody(mutation, prepared.row, prepared.fields, scope.operationId), env);
+        kitchenEditBody(mutation, prepared.row, prepared.fields, scope.operationId, prepared.shelfDates), env);
     }
   } catch (error) {
     if (error?.statusCode) throw error;
@@ -99,26 +101,27 @@ export async function prepareKitchenEdit(context, reference, updates, options, r
   const entry = body?.items?.[0];
   if (body?.operation_id !== scope.operationId || body?.kind !== 'edit' || body?.items?.length !== 1 ||
       typeof entry?.item_id !== 'string' || !entry.item_id || !Number.isSafeInteger(entry?.revision) ||
-      !entry.fields || !Object.keys(entry.fields).length || Object.keys(entry.fields).some(key=>!EDIT_FIELDS.has(key)))
+      !entry.fields || !validDates(entry.shelf_dates || {}) || (!Object.keys(entry.fields).length && !Object.keys(entry.shelf_dates || {}).length) || Object.keys(entry.fields).some(key=>!EDIT_FIELDS.has(key)))
     throw rejected('Could not confirm the original correction request. Refresh your kitchen.', 503);
   const fields = Object.fromEntries(Object.entries(entry.fields).sort(([a],[b])=>a.localeCompare(b)));
-  mutation.operations.set(JSON.stringify([entry.item_id, fields]), body);
-  return {row:{_id:entry.item_id,amount_revision:entry.revision}, fields};
+  const shelfDates=entry.shelf_dates || {};
+  mutation.operations.set(JSON.stringify([entry.item_id, fields, shelfDates]), body);
+  return {row:{_id:entry.item_id,amount_revision:entry.revision}, fields, shelfDates};
 }
 
-export function kitchenEditBody(mutation, row, fields, explicitOperationId) {
-  if (!fields || !Object.keys(fields).length || Object.keys(fields).some(k => !EDIT_FIELDS.has(k)))
+export function kitchenEditBody(mutation, row, fields, explicitOperationId, shelfDates = {}) {
+  if (!fields || !validDates(shelfDates) || (!Object.keys(fields).length && !Object.keys(shelfDates).length) || Object.keys(fields).some(k => !EDIT_FIELDS.has(k)))
     throw rejected('Unsupported kitchen correction fields.', 400);
   if (!row?._id || !Number.isSafeInteger(Number(row.amount_revision)))
     throw rejected('Refresh this item before changing it.');
   const normalized = {...fields, ...(fields.quantity_unit != null ? {quantity_unit:canonicalKitchenUnit(fields.quantity_unit)} : {})};
   const patch = Object.fromEntries(Object.entries(normalized).sort(([a],[b]) => a.localeCompare(b)));
-  const key = JSON.stringify([row._id, patch]);
+  const key = JSON.stringify([row._id, patch, shelfDates]);
   if (mutation.operations.has(key)) return mutation.operations.get(key);
   // Derive from the request and action position, not the model's tool-call ID or
   // patch contents. A changed retry cannot disguise itself as the same write.
   const operation_id = explicitOperationId || kitchenEditOperationId(mutation, mutation.operations.size);
-  const body = {operation_id, kind:'edit', items:[{item_id:row._id, revision:Number(row.amount_revision), fields:patch}]};
+  const body = {operation_id, kind:'edit', items:[{item_id:row._id, revision:Number(row.amount_revision), fields:patch,...(Object.keys(shelfDates).length ? {shelf_dates:shelfDates} : {})}]};
   mutation.operations.set(key, body);
   return body;
 }
@@ -128,7 +131,7 @@ export async function saveKitchenEdit(context, row, fields, options = {}) {
   if (typeof actor !== 'string' || !/^[a-zA-Z0-9_-]{1,64}$/.test(actor))
     throw rejected('Could not confirm your kitchen account.', 403);
   const mutation = options.mutationContext || createKitchenMutationContext();
-  const body = kitchenEditBody(mutation, row, fields);
+  const body = kitchenEditBody(mutation, row, fields, undefined, options.shelfDates);
   const base = new URL(options.env?.KITCHEN_API_BASE_URL || DEFAULT_API);
   if (base.protocol !== 'https:' || base.username || base.password || base.search || base.hash)
     throw rejected('Kitchen editing is temporarily unavailable.', 503);
@@ -150,6 +153,10 @@ export async function saveKitchenEdit(context, row, fields, options = {}) {
       : key === 'is_opened' ? [true,false,0,1].includes(saved) && Boolean(saved) === requested
       : saved === requested;
     if (!matches) throw rejected('Could not confirm the saved change. Refresh your kitchen.', 409);
+  }
+  for (const [key, requested] of Object.entries(body.items[0].shelf_dates || {})) {
+    if (!Object.hasOwn(entry.item,key) || entry.item[key] !== requested)
+      throw rejected('Could not confirm the saved bought date. Refresh your kitchen.',409);
   }
   return {...entry.item, mutation_outcome:'applied', operation_id:body.operation_id};
 }

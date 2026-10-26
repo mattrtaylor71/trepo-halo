@@ -1,3 +1,4 @@
+import {hasBoughtDate, householdBoughtDate} from "../../shared/voice-assistant/bought-date.mjs";
 import { READ_TOOLS, LEGACY_WRITES, EXTRA_ACTIONS, catalog } from "./capabilities.mjs";
 import { personalWrite, shoppingWrite, discardWrite, categoryWrite, discardFields, operationUUID } from "./app-writes.mjs";
 import { prepareAction, exact, rowID, storeName, pageData } from "./prepare-actions.mjs";
@@ -301,7 +302,7 @@ export class TrepoGateway {
       if (!ids.includes(a.actor))
         throw new Fault("membership", "Your household changed. Refresh your kitchen.", 403);
       const [rows] = await c.execute(
-        `SELECT k.*,COALESCE(e.revision,0) AS amount_revision,e.reference_amount FROM shared_kitchen k LEFT JOIN kitchen_item_edits e ON e.item_id=CONVERT(k._id USING utf8mb4) COLLATE utf8mb4_unicode_ci WHERE k.owner_id IN (${ids.map(() => '?').join(',')}) AND k.action='IN' ORDER BY COALESCE(k._updatedDate,k._createdDate) DESC,k._id,k.owner_id`,
+        `SELECT k.*,JSON_UNQUOTE(JSON_EXTRACT(e.overrides,'$.__acquired_on')) AS acquired_on,COALESCE(e.revision,0) AS amount_revision,e.reference_amount FROM shared_kitchen k LEFT JOIN kitchen_item_edits e ON e.item_id=CONVERT(k._id USING utf8mb4) COLLATE utf8mb4_unicode_ci WHERE k.owner_id IN (${ids.map(() => '?').join(',')}) AND k.action='IN' ORDER BY COALESCE(k._updatedDate,k._createdDate) DESC,k._id,k.owner_id`,
         ids,
       );
       return rows;
@@ -354,6 +355,7 @@ export class TrepoGateway {
     if (!/^(check_in_|update_item_)/.test(name)) return;
     await this.init();
     for (const item of args.items || [args]) {
+      if (hasBoughtDate(item)) item.bought_date = await this.mysql.withDbConnection(c=>householdBoughtDate(c,a.household,item.bought_date),{env:this.env,strict:true});
       if (item.category !== undefined)
         item.category = this.data.normalizeKitchenCategory(
           item.category,
@@ -438,10 +440,11 @@ export class TrepoGateway {
     if(args.remaining_quantity!==undefined && fields.quantity_value===undefined)
       throw new Fault("amount","Specify a numerical amount and its unit.");
     if(fields.quantity_value!==undefined) fields.quantity_unit=fields.quantity_unit||old.quantity_unit;
-    if(!Object.keys(fields).length || !Number.isSafeInteger(old.amount_revision)) throw new Fault("revision","Refresh this kitchen item before changing it.",409);
-    let body={operation_id:operationUUID(a.actor,operationId),kind:"edit",items:[{item_id:args.item_id,revision:old.amount_revision,fields}]};
+    const shelfDates=hasBoughtDate(args)?{acquired_on:args.bought_date}:{};
+    if((!Object.keys(fields).length && !Object.keys(shelfDates).length) || !Number.isSafeInteger(old.amount_revision)) throw new Fault("revision","Refresh this kitchen item before changing it.",409);
+    let body={operation_id:operationUUID(a.actor,operationId),kind:"edit",items:[{item_id:args.item_id,revision:old.amount_revision,fields,...(hasBoughtDate(args)?{shelf_dates:shelfDates}:{})}]};
     if(fields.quantity_value===0) {
-      if(Object.keys(fields).some(k=>!["quantity_value","quantity_unit"].includes(k))) throw new Fault("amount","Empty the item separately from changes to its details.");
+      if(hasBoughtDate(args) || Object.keys(fields).some(k=>!["quantity_value","quantity_unit"].includes(k))) throw new Fault("amount","Empty the item separately from changes to its details.");
       const known=old.quantity_value>0 && old.quantity_unit;
       body={operation_id:body.operation_id,kind:known?"consume":"discard",items:[{item_id:args.item_id,revision:old.amount_revision,
         ...(known?{amount:old.quantity_value,expected_amount:old.quantity_value,unit:old.quantity_unit}:{})}]};

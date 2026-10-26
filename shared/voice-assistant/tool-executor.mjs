@@ -153,6 +153,7 @@ function normalizeKitchenArgs(args) {
       ...(trimString(normalizedArgs.quantity_unit) ? { quantity_unit: normalizedArgs.quantity_unit.trim() } : {}),
       ...(fillPercent != null ? { fill_percent: fillPercent } : {}),
       ...(trimString(normalizedArgs.location) ? { location: normalizedArgs.location.trim() } : {}),
+      ...(Object.hasOwn(normalizedArgs,"bought_date") ? {bought_date:normalizedArgs.bought_date} : {}),
       ...(trimString(normalizedArgs.expiration_date) ? { expiration_date: normalizedArgs.expiration_date.trim() } : {}),
       ...(isOpened != null ? { is_opened: isOpened } : {}),
       ...(trimString(normalizedArgs.brand) ? { brand: normalizedArgs.brand.trim() } : {}),
@@ -216,6 +217,7 @@ function hasKitchenDetailUpdate(args) {
     ||
     hasKitchenQuantityUpdate(args)
     || trimString(args?.location)
+    || Object.hasOwn(args || {}, "bought_date")
     || trimString(args?.expiration_date)
     || trimString(args?.brand)
     || trimString(args?.category)
@@ -268,9 +270,12 @@ export function validateToolCall(toolName, args) {
   if (toolName === "update_item_details") {
     const allowed = new Set(['item_name', 'item_id', 'selection_hint', 'new_name', 'quantity',
       'remaining_quantity', 'quantity_value', 'quantity_unit', 'fill_percent',
-      'expiration_date', 'location', 'is_opened', 'brand', 'category']);
+      'expiration_date', 'bought_date', 'location', 'is_opened', 'brand', 'category']);
     if (Object.keys(normalizedArgs).some(key => !allowed.has(key)))
       return {ok:false, error:"Unsupported kitchen correction field."};
+    if (Object.hasOwn(normalizedArgs,"bought_date") && normalizedArgs.bought_date !== null &&
+        (typeof normalizedArgs.bought_date !== "string" || !normalizedArgs.bought_date.trim() || normalizedArgs.bought_date.length > 100))
+      return {ok:false,error:"Provide the bought date or explicitly clear it."};
     if (normalizedArgs.new_name != null && (typeof normalizedArgs.new_name !== 'string'
         || !normalizedArgs.new_name.trim() || normalizedArgs.new_name.trim().length > 500))
       return {ok:false, error:"Enter a nonempty item name of at most 500 characters."};
@@ -969,6 +974,8 @@ export function formatActionSummary(name, args, toolResult = {}) {
       if (toolResult?.item?.discarded) {
         return `Discarded ${itemName} from your kitchen.`;
       }
+      if (Object.hasOwn(args || {}, "bought_date") && Object.hasOwn(toolResult?.item || {}, "bought_date"))
+        return toolResult.item.bought_date === null ? `Cleared the bought date for ${itemName}.` : `Set ${itemName}’s bought date to ${toolResult.item.bought_date}.`;
       return args?.new_name && toolResult?.item?.item_name
         ? `Renamed it to ${toolResult.item.item_name}.`
         : `Updated details for ${itemName}.`;

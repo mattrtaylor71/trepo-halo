@@ -135,11 +135,11 @@ export function proposalSnapshot(name,args,data) {
 }
 export function readFields(row,resource,{detail=false}={}) {
   const fields=resource==='kitchen'
-    ? ['id','item_name','category','quantity_value','quantity_unit','fill_percent','remaining_quantity','is_opened','storage_location','expiration_date','ingredients','nutrition_summary',
+    ? ['id','item_name','category','quantity_value','quantity_unit','fill_percent','remaining_quantity','is_opened','storage_location','expiration_date','bought_date','ingredients','nutrition_summary',
       ...(detail?['brand','variant','barcode','description','created_at','updated_at','reference_amount','state_label','storage_guidance','explanation','harmful_ingredients','healthier_alternatives','upf','estimated_price','country_guess','store_availability']:[])]
     : resource==='saved_recipes'
       ? ['id','title','ingredients','servings','status','notes','saved_by','saved_by_name','can_edit',...(detail?['instructions','source_url']:[])] : null;
-  return fields ? Object.fromEntries(fields.filter(k=>row[k]!=null).map(k=>[k,row[k]])) : row;
+  return fields ? Object.fromEntries(fields.filter(k=>row[k]!=null || (k==='bought_date' && Object.hasOwn(row,k))).map(k=>[k,row[k]])) : row;
 }
 export function pageData(data,args={},resource=null) {
   const rows=collection(data),query=norm(args.query);

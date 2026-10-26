@@ -738,7 +738,7 @@ export function compactInventory(kitchen, shopping, asOf) {
   const pick = (row, keys) => Object.fromEntries(keys.filter((k) => row[k] !== undefined && row[k] !== null).map((k) => [k, row[k]]));
   const snapshot = {
     asOf, complete: true,
-    kitchen: collection(kitchen).map((row) => pick(row, ["id", "item_name", "category", "quantity_value", "quantity_unit", "fill_percent", "remaining_quantity", "is_opened", "storage_location", "expiration_date", "created_at"])),
+    kitchen: collection(kitchen).map((row) => pick(row, ["id", "item_name", "category", "quantity_value", "quantity_unit", "fill_percent", "remaining_quantity", "is_opened", "storage_location", "expiration_date", "bought_date", "created_at"])),
     shopping: collection(shopping).map((row) => pick(row, ["shopping_id", "household_item_uuid", "item_name", "quantity", "store", "action"])),
   };
   // Never silently truncate a kitchen and call it complete.
