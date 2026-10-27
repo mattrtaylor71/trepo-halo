@@ -1,5 +1,5 @@
 {
-  "status": "implemented_tested_not_deployed",
+  "status": "deployed_verified",
   "date": "2026-10-26",
   "approved_by": "Matt Taylor",
   "model": "gpt-6-astra",
@@ -21,35 +21,85 @@
       "output_tokens": 1936
     },
     "automated_full_run": {
-      "passed": 194,
+      "passed": 201,
       "failed": 0,
       "skipped": 0
     },
-    "additional_cross_household_retry_test": {
-      "passed": 1
-    },
     "local_mysql_checks": 12,
-    "test_db": "Disposable local MySQL 8.4, loopback port 33387; no production writes",
+    "test_db": "Disposable MySQL 8.4 on loopback port 33387 for local tests; four isolated synthetic households for live serving-package and Lambda canaries. No customer records changed.",
     "commands": [
       "RELIABILITY_MYSQL_PORT=33387 node --experimental-test-module-mocks --loader ./shared/thyme-runtime/test/consent-loader.mjs --test playground12_voice_ack/trepo-quick-ack/test/*.test.mjs shared/kitchen-discard/test/*.test.cjs",
       "node shared/kitchen-discard/test/evaluate-model.cjs --live (synthetic provider evaluation; OPENAI_API_KEY required)"
-    ]
+    ],
+    "historical_originals": {
+      "count": 6,
+      "raw_named_identity_matches": 6,
+      "canonical_pipeline_matches": 5,
+      "canonical_pipeline_uncertain_holds": 1,
+      "lookalike_rejections": 6,
+      "products": [
+        "Broccoli florets",
+        "Frozen raspberries",
+        "Green grapes",
+        "Organic black beans",
+        "Chocolate milk",
+        "Whole milk barcode"
+      ],
+      "qualification": "The raspberry recognition remained explicitly uncertain after package review. Canonical pipeline correctly saved no kitchen-removal authorization. Initial raw-name matcher replay omitted that flag; both results retained privately. No accuracy claim beyond these cases."
+    },
+    "live_canaries": {
+      "packages": 4,
+      "live_handlers": 4,
+      "voice_input": "Legacy and streaming JSON transcripts; asynchronous worker received synthetic 24 kHz spoken audio.",
+      "photo_input": "Original historical broccoli JPEG uploaded through live durable presign route under isolated synthetic ownership.",
+      "verified": "Exact original target, remaining duplicate, oil/chips/dressing or soup decoys, saved discard, SQL changes and app-serving API."
+    },
+    "retry_edge_case": "Full streaming retry exposed optional model selection_hint drift. Fixed durable intent to ignore this unused hint, with first-release journal compatibility. Changed item/transcript and household transfer still fail closed.",
+    "live_retry_results": {
+      "legacy": "Original receipt returned; exact remaining inventory unchanged.",
+      "stream": "Same failed first-release operation replayed successfully after optional-hint fix; exact remaining inventory unchanged.",
+      "async": "Completed job replay was skipped; exact remaining inventory unchanged.",
+      "photo": "Packaged matcher preview, commit and repeated commit returned same target; live full photo handler and saved API results verified."
+    },
+    "post_deploy_logs": {
+      "trepo-quick-ack-sam-dev": {
+        "code_hash_verified": true,
+        "state": "Active",
+        "error_markers": 0
+      },
+      "trepo-quick-ack-stream-dev": {
+        "code_hash_verified": true,
+        "state": "Active",
+        "error_markers": 0
+      },
+      "trepo-quick-ack-async-worker-dev": {
+        "code_hash_verified": true,
+        "state": "Active",
+        "error_markers": 0
+      },
+      "trepo-grocery-backend-dev-AnalyzeDiscardOnUpload-BnUyRpHHwaOx": {
+        "code_hash_verified": true,
+        "state": "Active",
+        "error_markers": 0
+      }
+    },
+    "post_deploy_logs_qualification": "Finite verification window after each final deployment, not an ongoing monitoring guarantee.",
+    "cleanup": "Four synthetic profiles and derived SQL fixtures removed transactionally with private before/after receipts. Original media, job logs and validation evidence retained."
   },
   "limits": [
-    "Not deployed. Production behavior remains unchanged until release.",
     "Explicit bulk and partial-quantity requests are held for review rather than guessed. This change removes one inventory entry, not an inferred fraction of a multipack.",
-    "No customer data was backfilled or restored; no original photo recognition benchmark was performed. Existing photo identification stays in place.",
     "The separate private Thyme V2 tester uses its existing exact-row user approval and canonical revision-protected mutation route; not changed here.",
     "Legacy WRITE_SHARED_ONLY=false removal is disabled rather than retaining unsafe fuzzy deletes.",
-    "Model tests are synthetic frozen inventories including the observed incident wording; they are not a claim of perfect accuracy."
+    "Model tests are synthetic frozen inventories including the observed incident wording; they are not a claim of perfect accuracy.",
+    "No customer records were backfilled or restored. Historical media was read-only; original recognition pipeline is unchanged. Verification is API/database-based, not a visual phone inspection."
   ],
   "release": {
     "method": "Build guarded overlays onto freshly downloaded serving ZIPs with scripts/discard-identity/build-overlay.py. Abort and rebase if touched source hashes drift.",
     "targets": [
-      "trepo-grocery-backend-dev-AnalyzeDiscardOnUpload-BnUyRpHHwaOx",
       "trepo-quick-ack-sam-dev",
+      "trepo-quick-ack-stream-dev",
       "trepo-quick-ack-async-worker-dev",
-      "QuickAck streaming function (resolve exact function from the live stack before release)"
+      "trepo-grocery-backend-dev-AnalyzeDiscardOnUpload-BnUyRpHHwaOx"
     ],
     "preserve": [
       "All unrelated ZIP entries, including latest async job-id forwarding, consent adapters, date fixes and voice reliability changes.",
@@ -61,12 +111,54 @@
       "Apply overlays with Lambda RevisionId safeguards, preserving independently changed files.",
       "Run isolated canaries with synthetic inventory before any customer mutation; compare actual serving API results.",
       "Keep previous ZIPs and revisions for rollback. Never deploy the full historical checkout."
+    ],
+    "consent_compatibility": "Legacy synchronous package lacked the shared consent adapter. Bundled the exact current sibling adapter, bound model requests to the verified actor and added only dynamodb:GetItem on trepo-current-user-consents to its role. No environment or schema changes.",
+    "retry_patch": "After the full release, overlay only kitchen-discard-plan.mjs on the three exact deployed voice ZIPs; verify every other byte and Lambda RevisionId before update.",
+    "verified_at_utc": "2026-10-27T02:42:15.553438+00:00",
+    "functions": [
+      {
+        "function": "trepo-quick-ack-sam-dev",
+        "before_sha256": "4MAftyb0mTSWps5bEFwpygzKbuZFiMqLnXyM2h3G7Bc=",
+        "after_sha256": "jAFRvLeDSXx17g/rSi2z6frNF4UOdRF0t0FaeaKTVKE=",
+        "revision_id": "88b6f801-83e4-435f-bb31-b6cab7d576e1",
+        "verified_at": "2026-10-27T02:39:53.537098+00:00",
+        "configuration_unchanged": true,
+        "changed_entry": "playground12_voice_ack/trepo-quick-ack/lib/kitchen-discard-plan.mjs"
+      },
+      {
+        "function": "trepo-quick-ack-stream-dev",
+        "before_sha256": "gv8+N6BKBqf2oHJb+TY3buc0xJM3PRhAisi+IZ2/tMg=",
+        "after_sha256": "uGJuBdP1ON9jighdF8pXOPcV4Mww1RqeQqDRHdSwJDA=",
+        "revision_id": "82d9ccda-9757-4c96-b3f6-1d6e98bbecaa",
+        "verified_at": "2026-10-27T02:40:10.961618+00:00",
+        "configuration_unchanged": true,
+        "changed_entry": "playground12_voice_ack/trepo-quick-ack/lib/kitchen-discard-plan.mjs"
+      },
+      {
+        "function": "trepo-quick-ack-async-worker-dev",
+        "before_sha256": "plTqPqIFjI7uzXUQ57/uYCuRni/UcRClJC/+5yYmp1c=",
+        "after_sha256": "kLUdSebjeyv3pK90K1Q9VXF3Dc/z1F3eY/jnjfd3CkA=",
+        "revision_id": "052a7abb-db68-4e96-ab2b-7aaedc97387d",
+        "verified_at": "2026-10-27T02:40:02.487288+00:00",
+        "configuration_unchanged": true,
+        "changed_entry": "playground12_voice_ack/trepo-quick-ack/lib/kitchen-discard-plan.mjs"
+      },
+      {
+        "function": "trepo-grocery-backend-dev-AnalyzeDiscardOnUpload-BnUyRpHHwaOx",
+        "before_sha256": "riU/CkL52lpr0CyOp5BeAm+XC+LbSQ3GLr/qAPovAQ4=",
+        "after_sha256": "w+YswaUOt7kbBtS6qtA4JWWoRgBYkXdnGhjt+rgTIIo=",
+        "revision_id": "4ff4068d-8525-4aa7-9cb9-e23300d3bf5b",
+        "verified_at": "2026-10-27T02:36:03.745691+00:00",
+        "configuration_unchanged": true
+      }
     ]
   },
   "provenance": {
     "shared_context": "trepo-company recall returned no relevant discard policy page; no shared memory was written.",
     "live_source_receipts_directory": "/Users/MattTaylor/Documents/Codex/2026-10-26/discard-matching",
     "baseline_commit": "1ccf7f7",
-    "customer_evidence": "Private receipts remain outside Git."
+    "customer_evidence": "Private receipts remain outside Git.",
+    "release_evidence_directory": "/Users/MattTaylor/Documents/Codex/2026-10-26/discard-release",
+    "skill": "gstack-land-and-deploy adapted to guarded Lambda overlays; telemetry and shared-memory writes disabled."
   }
 }

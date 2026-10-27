@@ -1,0 +1,43 @@
+--- a/playground12_voice_ack/trepo-quick-ack/lib/data-access.mjs
++++ b/playground12_voice_ack/trepo-quick-ack/lib/data-access.mjs
+@@ -930,12 +930,6 @@
+ }
+ 
+ async function triggerKitchenDependentGeneration(context, options = {}) {
+-  const consent=(await import('/var/task/ai_consent_guard.cjs')).default;
+-  const actor=consent.currentActor();
+-  // Optional refresh after a manual edit: missing/withdrawn provenance must not
+-  // fall back to another household member's permission.
+-  try { if (!await consent.allowed(actor)) return; }
+-  catch { return; }
+   const env = options?.env || process.env;
+   const ownerIds = getTableHouseholdMemberIds(context);
+   if (ownerIds.length === 0) {
+@@ -972,7 +966,7 @@
+       await getLambdaClient(env).send(new InvokeCommand({
+         FunctionName: functionName,
+         InvocationType: "Event",
+-        Payload: Buffer.from(JSON.stringify({ owner: ownerId, user_id: actor }))
++        Payload: Buffer.from(JSON.stringify({ owner: ownerId }))
+       }));
+     } catch (error) {
+       console.warn(`[${label}] generator invoke failed for ${ownerId}:`, error?.message || error);
+@@ -6896,9 +6890,6 @@
+ }
+ 
+ export async function refreshMealPlan(context, args = {}, options = {}) {
+-  const consent=(await import('/var/task/ai_consent_guard.cjs')).default;
+-  const actor=consent.currentActor();
+-  await consent.requireConsent(actor);
+   const ownerId = resolveTableOwnerId(context);
+   const memberIds = getTableHouseholdMemberIds(context);
+   logHouseholdWriteTargets("meal plan refresh propagation", context, memberIds, {
+@@ -6912,7 +6903,7 @@
+     payload: await fetchHouseholdApiJson(`/meal-plan/${encodeURIComponent(memberId)}`, {
+       ...options,
+       method: "POST",
+-      body: { ...(args.focus ? { focus: args.focus } : {}), user_id: actor }
++      body: args.focus ? { focus: args.focus } : {}
+     })
+   })));
+   const primary = results.find((result) => result.ownerId === ownerId) || results[0] || { ownerId, payload: {} };

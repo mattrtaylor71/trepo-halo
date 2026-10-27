@@ -5,8 +5,18 @@ const MODEL = 'gpt-6-astra';
 const normalize = value => String(value ?? '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
 const barcode = value => String(value || '').replace(/\D/g, '').replace(/^0+/, '');
 const unknown = new Set(['unknown', 'unknown item', 'unidentified item', 'food', 'packaged food', 'item', 'dessert', 'beverage', 'dairy tub', 'analyzing']);
-const usable = row => !!normalize(row?.product_name) && !unknown.has(normalize(row.product_name)) && ![true,1,'1','true'].includes(row.needs_review)
+const namedReady = row => !!normalize(row?.product_name) && !unknown.has(normalize(row.product_name))
   && (!row.analysis_stage || row.analysis_stage === 'final') && (!row.analysis_status || row.analysis_status === 'ready');
+// Inventory review flags also cover nutrition/amount gaps. Product names are
+// still matchable; the new capture itself needs affirmative identity evidence.
+const usable = row => namedReady(row) && (! [true,1,'1','true'].includes(row.needs_review) || row.identity_verified === true);
+function photoTarget(analysis) {
+  const evidence=analysis?.evidence;
+  const verified=evidence?.food_present===true && ['barcode_source','visible_label','visual_with_label','visual','contextual_visual','packaging_reference_match'].includes(evidence?.verification);
+  return {...analysis?.groceryItem,
+    needs_review:!verified || !!evidence?.uncertainties?.length,
+    identity_verified:verified};
+}
 const stable = value => JSON.stringify(value, (_, item) => item && typeof item === 'object' && !Array.isArray(item)
   ? Object.fromEntries(Object.entries(item).sort(([a],[b]) => a.localeCompare(b))) : item);
 const fingerprint = row => crypto.createHash('sha256').update(stable(row)).digest('hex');
@@ -53,7 +63,7 @@ function resolveDecision(input, answer) {
   const ids=answer.matching_ids;
   if (!ids.length || new Set(ids).size !== ids.length) return noMatch('invalid_model_ids');
   const rows=ids.map(id=>candidates.find(row=>String(row._id)===id));
-  if (rows.some(row=>!row || !usable(row) || conflict(target,row)) || rows.some(a=>rows.some(b=>conflict(a,b)))) return noMatch('identity_conflict');
+  if (rows.some(row=>!row || !namedReady(row) || conflict(target,row)) || rows.some(a=>rows.some(b=>conflict(a,b)))) return noMatch('identity_conflict');
   const timestamp=row=>{
     const bought=row.acquired_on;
     if (typeof bought==='string' && /^\d{4}-\d{2}-\d{2}$/.test(bought)) return Date.parse(bought+'T00:00:00Z');
@@ -70,7 +80,7 @@ async function matchIdentity(input, {create,env={},timeoutMs=45000}) {
   if (input.kind==='voice' && !String(input.transcript || '').trim()) return noMatch('missing_current_request','not_authorized');
   // Never silently truncate an inventory and thereby turn ambiguity into a match.
   if (!Array.isArray(input.candidates) || input.candidates.length>500) return noMatch('inventory_coverage_limit');
-  const candidates=input.candidates.filter(usable);
+  const candidates=input.candidates.filter(namedReady);
   if (!candidates.length) return noMatch('no_inventory','no_match');
   if (new Set(candidates.map(r=>String(r._id))).size !== candidates.length) return noMatch('duplicate_row_ids');
   if (!Number.isFinite(timeoutMs) || timeoutMs<1000) return noMatch('insufficient_matching_time');
@@ -81,4 +91,4 @@ async function matchIdentity(input, {create,env={},timeoutMs=45000}) {
     return {...resolveDecision({...input,candidates},JSON.parse(text)),model:response.model || env.DISCARD_MATCH_MODEL || MODEL,usage:response.usage || null};
   } catch { return noMatch('matching_unavailable'); }
 }
-module.exports={VERSION,MODEL,SYSTEM,schema,requestBody,matchIdentity,resolveDecision,usable,conflict,fingerprint,noMatch};
+module.exports={VERSION,MODEL,SYSTEM,schema,requestBody,matchIdentity,resolveDecision,usable,photoTarget,conflict,fingerprint,noMatch};

@@ -1,5 +1,7 @@
 import {test,before,beforeEach,mock} from 'node:test';
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
+import consent from '/var/task/ai_consent_guard.cjs';
 let da,state,conn,stores,decision,modelCalls,duringModel;
 const ctx=()=>({userId:'alice',tableOwnerId:'alice',ownerId:'family',householdMemberIds:['foreign'],responseSurface:'halo'});
 const opts=(id='request-1')=>({skipKitchenDependentGeneration:true,sourceTranscript:'Discard the avocado.',mutationContext:{requestId:id}});
@@ -10,11 +12,12 @@ before(async()=>{
  mock.module(mysqlPath,{namedExports:{...mysql,withDbConnection:async callback=>callback(conn)}});
  const storePath=new URL('../lib/session-store.mjs',import.meta.url).href,store=await import(storePath);
  mock.module(storePath,{namedExports:{...store,
-  readKitchenEditRequest:async scope=>{const old=stores.get(scope.household+scope.operationId);if(old && old.hash!==scope.intentHash)throw Error('intent changed');return old?.body || null;},
+  readKitchenEditRequest:async scope=>{const old=stores.get(scope.household+scope.operationId);if(old && old.hash!==scope.intentHash)throw Object.assign(Error('intent changed'),{statusCode:409});return old?.body || null;},
   retainKitchenEditRequest:async(scope,body)=>{const key=scope.household+scope.operationId;if(!stores.has(key))stores.set(key,{hash:scope.intentHash,body:structuredClone(body)});return stores.get(key).body;}
  }});
  // Replace the actual provider SDK, not the product matcher or data-access code.
  mock.module('openai',{defaultExport:class {responses={create:async()=>{
+  assert.equal(consent.actorContext.getStore(),'alice','provider uses the verified actor');
   modelCalls++;assert.equal(state.inTransaction,false,'no provider work under row locks');if(duringModel)await duringModel();
   if(decision instanceof Error)throw decision;return {status:'completed',output_text:JSON.stringify(decision),model:'test-model'};
  }}}});
@@ -81,5 +84,28 @@ test('retry after changing households does not resolve a new target',async()=>{
  const writes=state.writes.length;
  state.family='other-family';
  await assert.rejects(()=>da.discardKitchenItem({...ctx(),ownerId:'other-family'},{item_name:'avocado'},'finished',opts()));
+ assert.equal(modelCalls,1);assert.equal(state.writes.length,writes);
+});
+test('legacy entrypoint replaces an unrelated inherited consent actor',async()=>{
+ await consent.actorContext.run('unrelated-user',()=>da.discardKitchenItem(ctx(),{item_name:'avocado'},'finished',opts('consent-scope')));
+ assert.equal(modelCalls,1);
+ assert.equal(state.rows.find(r=>r._id==='old').action,'OUT');
+ assert.equal(consent.actorContext.getStore(),undefined);
+});
+test('identical retry with changed assistant selection hint replays without another removal',async()=>{
+ await da.discardKitchenItem(ctx(),{item_name:'avocado',selection_hint:'oldest'},'finished',opts());
+ const writes=state.writes.length;
+ const result=await da.discardKitchenItem(ctx(),{item_name:'avocado'},'finished',opts());
+ assert.equal(result.replayed,true);assert.equal(modelCalls,1);assert.equal(state.writes.length,writes);
+});
+test('first-release hinted journal remains replayable; changed item or transcript remains blocked',async()=>{
+ await da.discardKitchenItem(ctx(),{item_name:'avocado'},'finished',opts());
+ const record=[...stores.values()][0];
+ record.hash=crypto.createHash('sha256').update(JSON.stringify({reference:{item_name:'avocado',item_id:null,selection_hint:'oldest'},transcript:'Discard the avocado.'})).digest('hex');
+ const writes=state.writes.length;
+ const result=await da.discardKitchenItem(ctx(),{item_name:'avocado'},'finished',opts());
+ assert.equal(result.replayed,true);
+ await assert.rejects(()=>da.discardKitchenItem(ctx(),{item_name:'avocado oil'},'finished',opts()));
+ await assert.rejects(()=>da.discardKitchenItem(ctx(),{item_name:'avocado'},'finished',{...opts(),sourceTranscript:'Discard the newest avocado.'}));
  assert.equal(modelCalls,1);assert.equal(state.writes.length,writes);
 });

@@ -44,6 +44,7 @@ process.exit(0);
 '''.replace('ENTRY', json.dumps(entry.as_uri())).replace('EXPORT', json.dumps(export))
         env = {'PATH': os.environ.get('PATH', ''), 'PACKAGE_ROOT': str(root),
                'AWS_EC2_METADATA_DISABLED': 'true', 'AWS_REGION': 'us-east-1',
+               'IOT_ENDPOINT': 'startup-check.invalid',
                'NODE_PATH': os.pathsep.join(str(p) for p in root.rglob('node_modules'))}
         result = subprocess.run([node or shutil.which('node') or 'node', '--no-warnings',
                                  '--experimental-loader', str(loader), '--input-type=module',

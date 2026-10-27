@@ -1,0 +1,16 @@
+{
+  "role": "trepo-quick-ack-sam-dev-QuickAckFunctionRole-FAFppS9eS9mp",
+  "policy": "TrepoDiscardIdentityConsentRead20261026",
+  "document": {
+    "Version": "2012-10-17",
+    "Statement": [
+      {
+        "Effect": "Allow",
+        "Action": "dynamodb:GetItem",
+        "Resource": "arn:aws:dynamodb:us-east-1:566667681926:table/trepo-current-user-consents"
+      }
+    ]
+  },
+  "previously_present": false,
+  "verified": true
+}

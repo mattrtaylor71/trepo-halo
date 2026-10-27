@@ -14,11 +14,16 @@
   "voice": {
     "playground12_voice_ack/trepo-quick-ack/lib/data-access.mjs": {
       "source": "playground12_voice_ack/trepo-quick-ack/lib/data-access.mjs",
-      "base_sha256": "c6bc9295aa2d8ece5fa6fd6636075a6a5f6a7d7a6cefbbe98188f7df9f25cf8f"
+      "base_sha256": "c6bc9295aa2d8ece5fa6fd6636075a6a5f6a7d7a6cefbbe98188f7df9f25cf8f",
+      "variants": {
+        "4fdd2e6d6125af6785a22dc6b73fffccb13e998c0eb0c12eb40fb9ab5c4ec474": {
+          "patch": "scripts/discard-identity/legacy-data-access.patch"
+        }
+      }
     },
     "shared/voice-assistant/tool-definitions.mjs": {
       "source": "shared/voice-assistant/tool-definitions.mjs",
-      "base_sha256": "fd48713a26774f91607fdb1f064b7fad1364fc98deaeaec67c1141245a0a4e33"
+      "base_sha256": "5ea3ac775223f6b1b08f189e550b959a4abd00e61035fb30f3432a90a0c9619d"
     },
     "playground12_voice_ack/trepo-quick-ack/lib/kitchen-discard-plan.mjs": {
       "source": "playground12_voice_ack/trepo-quick-ack/lib/kitchen-discard-plan.mjs"

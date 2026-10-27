@@ -39,7 +39,7 @@ const {
   finalizeDiscardRow,
   markDiscardRowFailed,
 } = require('./dist/utils/mysqlDiscardWriter');
-const { matchAndRemoveFromKitchen } = require('./discard_matcher.cjs');
+const { matchAndRemoveFromKitchen, photoTarget } = require('./discard_matcher.cjs');
 const { writeFeedEvent } = require('./dist/utils/mysqlFeedWriter');
 const { getHouseholdMemberIds, stableHouseholdRowId } = require('./dist/utils/householdSync');
 const { identifyItemFastLegacy, identifyItemQuickGlance } = require('./vendor/grocery-identifier/quickIdentify/service');
@@ -1285,9 +1285,7 @@ exports.handler = async (event, context) => {
     let groceryItem;
     if (haloDeep) {
       const haloAnalysis = await analyzeAdmittedHalo({ imageBuffer, action: 'discard', userHint: job.camera_meta?.user_note || null, context, jobId });
-      groceryItem = { ...haloAnalysis.groceryItem,
-        needs_review: haloAnalysis.evidence?.verification === 'uncertain' ||
-          (Array.isArray(haloAnalysis.evidence?.uncertainties) && haloAnalysis.evidence.uncertainties.length > 0) };
+      groceryItem = photoTarget(haloAnalysis);
     } else {
     const analyzeStart = Date.now();
     try {

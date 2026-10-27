@@ -1,6 +1,6 @@
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
-const {matchIdentity,resolveDecision,fingerprint}=require('../identity.cjs');
+const {matchIdentity,resolveDecision,fingerprint,photoTarget}=require('../identity.cjs');
 const row=(id,name,date='2026-10-15T12:00:00Z',extra={})=>({_id:id,owner_id:'alice',action:'IN',product_name:name,_createdDate:date,...extra});
 const decision=(ids,extra={})=>({status:'matched',matching_ids:ids,reason:'same product',scope:'one_entry',selection:'oldest',authorization_quote:null,...extra});
 const resolve=(rows,answer,target={product_name:'Avocado'},extra={})=>resolveDecision({target,candidates:rows,...extra},answer);
@@ -47,4 +47,27 @@ test('snapshot covers quantities, customer edits, ownership and Dates',()=>{
  assert.equal(fingerprint(original),fingerprint(JSON.parse(JSON.stringify(original))));
  for(const patch of [{amount_revision:3},{quantity_value:2},{owner_id:'bob'},{product_name:'Hass avocado'}])
   assert.notEqual(fingerprint(original),fingerprint({...original,...patch}));
+});
+test('verified photo identity survives missing nutrition; final named stock can have a detail review flag',async()=>{
+ const target=photoTarget({groceryItem:{product_name:'Broccoli Florets'},evidence:{food_present:true,verification:'visible_label',uncertainties:['Nutrition panel not visible']}});
+ const answer=await matchIdentity({target,candidates:[row('a','Broccoli Florets',undefined,{needs_review:1,analysis_stage:'final',analysis_status:'ready'})]},
+  {create:async()=>({output_text:JSON.stringify(decision(['a']))})});
+ assert.equal(answer.selected_id,'a');
+ assert.equal(target.needs_review,true,'preserve the existing review flag for other fields');
+});
+test('uncertain photo and unfinished inventory cannot be promoted by review compatibility',async()=>{
+ for(const verification of ['uncertain','brand_label','non_food',undefined]){
+  const target=photoTarget({groceryItem:{product_name:'Broccoli Florets'},evidence:{food_present:verification!=='non_food',verification,uncertainties:[]}});
+  let called=false;const answer=await matchIdentity({target,candidates:[row('a','Broccoli Florets')]},{create:async()=>{called=true;}});
+  assert.equal(answer.matched,false);assert.equal(called,false);
+ }
+ const answer=await matchIdentity({target:{product_name:'Avocado'},candidates:[row('a','Avocado',undefined,{analysis_stage:'preliminary'})]},{create:async()=>{throw Error('must not call');}});
+ assert.equal(answer.matched,false);
+});
+test('app contextual and package reference identities can match despite missing details',async()=>{
+ for(const verification of ['contextual_visual','packaging_reference_match']){
+  const target=photoTarget({groceryItem:{product_name:'Broccoli Florets'},evidence:{food_present:true,verification,uncertainties:['Net quantity not visible']}});
+  const answer=await matchIdentity({target,candidates:[row('a','Broccoli Florets')]},{create:async()=>({output_text:JSON.stringify(decision(['a']))})});
+  assert.equal(answer.selected_id,'a');
+ }
 });

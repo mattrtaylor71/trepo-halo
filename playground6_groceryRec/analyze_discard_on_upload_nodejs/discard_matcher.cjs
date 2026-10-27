@@ -100,4 +100,4 @@ async function matchAndRemoveFromKitchen(owner,item,options) {
   }
   return productionMatcher(owner,item,options);
 }
-module.exports={matchAndRemoveFromKitchen,createPhotoMatcher};
+module.exports={matchAndRemoveFromKitchen,createPhotoMatcher,photoTarget:identity.photoTarget};
