@@ -29,3 +29,15 @@ Six serving packages were patched from fresh captured ZIPs, retaining independen
 Private captures, exact candidate manifests, revision-guarded deployment receipts, live test responses, the reported-item repair receipt and final code/configuration readbacks: `/Users/MattTaylor/Library/Caches/trepo-thyme-celery-20261026/`. These configuration files contain credentials; do not print or commit them. `scripts/prepare_thyme_date_followup_rollout.py` reproduces the scoped package edits from those captures without deploying them.
 
 Company context: `apps/trepo/screens/kitchen-and-capture`. No shared-brain save requested.
+
+## Follow-up: live native journey requested by Matt, 18:19 Pacific
+
+A new focused Release XCUITest passed using the documented review account against the live deployed backend. A uniquely named celery fixture was created through the authenticated Kitchen API. The unchanged App Store build-150 source (`a844cd860344b1eaafd4fc3ecc1f3611f620d436`) was rebuilt for the dedicated Mac Studio simulator; this is not an Apple-distributed binary or a physical-phone test.
+
+The actual app showed zero days before editing. Typing “Hey I bought that Celery date audit af0c368a on sept 28” into current Thyme produced “Bought 2026-09-28” without a year question. An authenticated read confirmed the saved date, unchanged canonical check-in, and 28-day legacy projection. The Kitchen detail showed 28 immediately after closing Thyme, after switching to Cook and back, and after terminating/relaunching the app. Screenshots were exported and visually inspected. Only the exact test item was deleted; the test asserted absence and an independent authenticated read verified cleanup. Other review-account data was preserved.
+
+Run `20261026-181631-f30d2f`: one test, zero failures, 121.105 seconds test time; runner exit 0, evidence and cleanup verified. The initial attempt stopped at test registration before app execution; the new case was registered with explicit live review-account coverage and rerun as a fresh source snapshot. No application source or production code changed during this verification.
+
+Remote result: `/Users/matthewtaylor/Projects/Trepo/app-pipeline/tests/runs/20261026-181631-f30d2f/results/personas-20261026-181634-61332.xcresult`. Native test source and explicit registry remain in the isolated `legacy-bought-date-canary-20261026` checkout and frozen source snapshot. Local screenshot copies: `/Users/MattTaylor/Library/Caches/trepo-thyme-celery-20261026/native-live-evidence/`.
+
+The year-only follow-up result above is a separate live backend test using seeded prior clarification, not a newly generated native-app clarification. The deployed model correctly avoided that clarification in this native journey. No claim of build-205 UI or physical-phone testing is made.
